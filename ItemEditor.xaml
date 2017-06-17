@@ -1,0 +1,78 @@
+﻿<Fluent:RibbonWindow x:Class="Crypture.ItemEditor" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:Fluent="urn:fluent-ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oRootWindow" Title="Item Viewer &amp; Editor" Width="800" Height="400" Closing="oRootWindow_Closing" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d">
+    <Fluent:RibbonWindow.Resources>
+        <local:CheckIfItemIsSelectedConverter x:Key="CheckIfItemIsSelectedConverter" />
+        <local:CheckIfDateIsNotSetConverter x:Key="CheckIfDateIsNotSetConverter" />
+    </Fluent:RibbonWindow.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Fluent:Ribbon x:Name="ribbon" IsAutomaticCollapseEnabled="False" IsQuickAccessToolBarVisible="False">
+            <!--  Tabs  -->
+            <Fluent:RibbonTabItem Header="Home">
+                <Fluent:RibbonGroupBox Header="Protected Item Actions">
+                    <Fluent:Button x:Name="oLoadItemButton" Height="Auto" Margin="10,10,10,0" Click="oLoadItemButton_Click" Header="Decrypt&#160;&amp;&#160;Load" LargeIcon="pack://application:,,,/Crypture;component/Images/Load.png" Size="Large" />
+                    <Fluent:Button x:Name="oSaveItemButton" Height="Auto" Margin="10,10,10,0" Click="oSaveItemButton_Click" Header="Encrypt&#160;&amp;&#160;Save" LargeIcon="pack://application:,,,/Crypture;component/Images/Save.png" Size="Large" />
+                    <Fluent:Button x:Name="oRemoveItemButton" Height="Auto" Margin="10,10,10,0" Click="oRemoveItemButton_Click" Header="Remove Item" Icon="pack://application:,,,/Crypture;component/Images/Remove.png" Size="Middle" />
+                </Fluent:RibbonGroupBox>
+                <Fluent:RibbonGroupBox Header="Sharing Options">
+                    <Fluent:DropDownButton x:Name="oAddCertDropDown" Margin="10,10,10,0" DisplayMemberPath="Name" Header="Share&#160;With..." LargeIcon="pack://application:,,,/Crypture;component/Images/Share.png" Size="Large">
+                        <Fluent:DropDownButton.ItemContainerStyle>
+                            <Style BasedOn="{StaticResource {x:Type Fluent:MenuItem}}" TargetType="Fluent:MenuItem">
+                                <EventSetter Event="Click" Handler="MenuItemWithRadioButtons_Click" />
+                                <Setter Property="IsChecked">
+                                    <Setter.Value>
+                                        <MultiBinding Converter="{StaticResource CheckIfItemIsSelectedConverter}" Mode="OneWay">
+                                            <Binding ElementName="oRootWindow" Path="." />
+                                            <Binding Path="." />
+                                        </MultiBinding>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Fluent:DropDownButton.ItemContainerStyle>
+                    </Fluent:DropDownButton>
+                </Fluent:RibbonGroupBox>
+            </Fluent:RibbonTabItem>
+        </Fluent:Ribbon>
+        <DockPanel Grid.Row="1">
+            <Grid MaxWidth="350" Margin="10" DockPanel.Dock="Left">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Label Grid.Row="0" Grid.Column="0" Content="Item Label: " />
+                <TextBox x:Name="oItemLabel" Grid.Row="0" Grid.Column="1" Width="200" Height="20" Text="{Binding Label}" />
+                <Label Grid.Row="1" Grid.Column="0" Content="Created Date: " />
+                <Label x:Name="oItemCreatedDate" Grid.Row="1" Grid.Column="1" Content="{Binding CreatedDate, Converter='{StaticResource CheckIfDateIsNotSetConverter}', Mode='OneWay'}" ContentStringFormat="yyyy-MM-dd HH:mm:ss" />
+                <Label Grid.Row="2" Grid.Column="0" Content="Modified Date: " />
+                <Label x:Name="oItemModifiedDate" Grid.Row="2" Grid.Column="1" Content="{Binding ModifiedDate, Converter='{StaticResource CheckIfDateIsNotSetConverter}', Mode='OneWay'}" ContentStringFormat="yyyy-MM-dd HH:mm:ss" />
+                <Label Grid.Row="3" Grid.Column="0" Content="Modified By: " />
+                <Label x:Name="oItemModifiedBy" Grid.Row="3" Grid.Column="1" Content="{Binding User.Name}" />
+                <Label Grid.Row="4" Grid.Column="0" Content="Shared With:" />
+                <ListView x:Name="oItemSharedWith" Grid.Row="4" Grid.Column="1" Margin="-1,2,0,0" VerticalAlignment="Top" BorderThickness="0" DisplayMemberPath="Name" IsHitTestVisible="False" />
+            </Grid>
+            <Grid Width="1" Margin="5,0,0,0" VerticalAlignment="Stretch" Background="LightGray" IsEnabled="False" />
+            <DockPanel DockPanel.Dock="Right">
+                <Label Margin="0,5,0,0" HorizontalAlignment="Center" Content="Protected Item Content" DockPanel.Dock="Top" />
+                <Grid Margin="10,5,10,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Image x:Name="oTextLockImage" Grid.Row="0" Grid.Column="0" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Opacity="0.4" Source="pack://application:,,,/Crypture;component/Images/Save.png" Visibility="Collapsed" />
+                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Visible" />
+                </Grid>
+            </DockPanel>
+        </DockPanel>
+    </Grid>
+</Fluent:RibbonWindow>
