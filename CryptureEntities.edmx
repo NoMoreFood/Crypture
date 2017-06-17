@@ -1,0 +1,299 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="3.0" xmlns:edmx="http://schemas.microsoft.com/ado/2009/11/edmx">
+  <!-- EF Runtime content -->
+  <edmx:Runtime>
+    <!-- SSDL content -->
+    <edmx:StorageModels>
+    <Schema Namespace="CryptureModel.Store" Provider="System.Data.SQLite.EF6" ProviderManifestToken="Data Source=&quot;Crypture.db&quot;Cache Size=2000" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
+        <EntityType Name="Cipher">
+          <Key>
+            <PropertyRef Name="ItemId" />
+          </Key>
+          <Property Name="ItemId" Type="integer" Nullable="false" />
+          <Property Name="CipherText" Type="blob" Nullable="false" />
+          <Property Name="CipherVector" Type="blob" Nullable="false" />
+          <Property Name="CipherParams" Type="integer" Nullable="false" />
+        </EntityType>
+        <EntityType Name="Instance">
+          <Key>
+            <PropertyRef Name="InstanceId" />
+          </Key>
+          <Property Name="InstanceId" Type="integer" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ItemId" Type="integer" Nullable="false" />
+          <Property Name="UserId" Type="integer" Nullable="false" />
+          <Property Name="CipherKey" Type="blob" Nullable="false" />
+          <Property Name="CipherParams" Type="integer" Nullable="false" />
+          <Property Name="Signature" Type="blob" Nullable="false" />
+        </EntityType>
+        <EntityType Name="Item">
+          <Key>
+            <PropertyRef Name="ItemId" />
+          </Key>
+          <Property Name="ItemId" Type="integer" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="Label" Type="nvarchar" MaxLength="2147483647" Nullable="false" />
+          <Property Name="ModifiedDate" Type="datetime" Nullable="false" />
+          <Property Name="ModifiedBy" Type="integer" />
+          <Property Name="CreatedDate" Type="datetime" Nullable="false" />
+        </EntityType>
+        <EntityType Name="User">
+          <Key>
+            <PropertyRef Name="UserId" />
+          </Key>
+          <Property Name="UserId" Type="integer" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="Certificate" Type="blob" Nullable="false" />
+          <Property Name="Sid" Type="nvarchar" MaxLength="2147483647" />
+        </EntityType>
+        <Association Name="FK_Cipher_Item">
+          <End Role="Item" Type="Self.Item" Multiplicity="1" />
+          <End Role="Cipher" Type="Self.Cipher" Multiplicity="0..1" />
+          <ReferentialConstraint>
+            <Principal Role="Item">
+              <PropertyRef Name="ItemId" />
+            </Principal>
+            <Dependent Role="Cipher">
+              <PropertyRef Name="ItemId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Instance_User">
+          <End Role="User" Type="Self.User" Multiplicity="1" />
+          <End Role="Instance" Type="Self.Instance" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserId" />
+            </Principal>
+            <Dependent Role="Instance">
+              <PropertyRef Name="UserId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Instance_Item">
+          <End Role="Item" Type="Self.Item" Multiplicity="1" />
+          <End Role="Instance" Type="Self.Instance" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Item">
+              <PropertyRef Name="ItemId" />
+            </Principal>
+            <Dependent Role="Instance">
+              <PropertyRef Name="ItemId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityContainer Name="CryptureModelStoreContainer">
+          <EntitySet Name="Cipher" EntityType="Self.Cipher" store:Type="Tables" />
+          <EntitySet Name="Instance" EntityType="Self.Instance" store:Type="Tables" />
+          <EntitySet Name="Item" EntityType="Self.Item" store:Type="Tables" />
+          <EntitySet Name="User" EntityType="Self.User" store:Type="Tables" />
+          <AssociationSet Name="FK_Cipher_Item" Association="Self.FK_Cipher_Item">
+            <End Role="Item" EntitySet="Item" />
+            <End Role="Cipher" EntitySet="Cipher" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Instance_User" Association="Self.FK_Instance_User">
+            <End Role="User" EntitySet="User" />
+            <End Role="Instance" EntitySet="Instance" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Instance_Item" Association="Self.FK_Instance_Item">
+            <End Role="Item" EntitySet="Item" />
+            <End Role="Instance" EntitySet="Instance" />
+          </AssociationSet>
+        </EntityContainer>
+      </Schema></edmx:StorageModels>
+    <!-- CSDL content -->
+    <edmx:ConceptualModels>
+      <Schema Namespace="CryptureModel" Alias="Self" annotation:UseStrongSpatialTypes="false" xmlns:annotation="http://schemas.microsoft.com/ado/2009/02/edm/annotation" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm">
+        <EntityContainer Name="CryptureEntities" annotation:LazyLoadingEnabled="true">
+          <EntitySet Name="Instances" EntityType="CryptureModel.Instance" />
+          <EntitySet Name="Items" EntityType="CryptureModel.Item" />
+          <EntitySet Name="Users" EntityType="CryptureModel.User" />
+          <AssociationSet Name="FK_Instance_User" Association="CryptureModel.FK_Instance_User">
+            <End Role="User" EntitySet="Users" />
+            <End Role="Instance" EntitySet="Instances" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Instance_Item" Association="CryptureModel.FK_Instance_Item">
+            <End Role="Item" EntitySet="Items" />
+            <End Role="Instance" EntitySet="Instances" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Item_User" Association="CryptureModel.FK_Item_User">
+            <End Role="User" EntitySet="Users" />
+            <End Role="Item" EntitySet="Items" />
+          </AssociationSet>
+          <EntitySet Name="Ciphers" EntityType="CryptureModel.Cipher" />
+          <AssociationSet Name="FK_Cipher_Item" Association="CryptureModel.FK_Cipher_Item">
+            <End Role="Item" EntitySet="Items" />
+            <End Role="Cipher" EntitySet="Ciphers" />
+          </AssociationSet>
+        </EntityContainer>
+        <EntityType Name="Instance">
+          <Key>
+            <PropertyRef Name="InstanceId" />
+          </Key>
+          <Property Name="InstanceId" Type="Int64" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ItemId" Type="Int64" Nullable="false" />
+          <Property Name="UserId" Type="Int64" Nullable="false" />
+          <Property Name="CipherKey" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="CipherParams" Type="Int64" Nullable="false" />
+          <Property Name="Signature" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <NavigationProperty Name="User" Relationship="CryptureModel.FK_Instance_User" FromRole="Instance" ToRole="User" />
+          <NavigationProperty Name="Item" Relationship="CryptureModel.FK_Instance_Item" FromRole="Instance" ToRole="Item" />
+        </EntityType>
+        <EntityType Name="Item">
+          <Key>
+            <PropertyRef Name="ItemId" />
+          </Key>
+          <Property Name="ItemId" Type="Int64" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="Label" Type="String" Nullable="false" MaxLength="2147483647" FixedLength="false" Unicode="true" />
+          <Property Name="ModifiedDate" Type="DateTime" Nullable="false" />
+          <Property Name="ModifiedBy" Type="Int64" />
+          <Property Name="CreatedDate" Type="DateTime" Nullable="false" />
+          <NavigationProperty Name="Instances" Relationship="CryptureModel.FK_Instance_Item" FromRole="Item" ToRole="Instance" />
+          <NavigationProperty Name="User" Relationship="CryptureModel.FK_Item_User" FromRole="Item" ToRole="User" />
+          <NavigationProperty Name="Cipher" Relationship="CryptureModel.FK_Cipher_Item" FromRole="Item" ToRole="Cipher" />
+        </EntityType>
+        <EntityType Name="User">
+          <Key>
+            <PropertyRef Name="UserId" />
+          </Key>
+          <Property Name="UserId" Type="Int64" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="Certificate" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="Sid" Type="String" MaxLength="2147483647" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="Instances" Relationship="CryptureModel.FK_Instance_User" FromRole="User" ToRole="Instance" />
+          <NavigationProperty Name="Items" Relationship="CryptureModel.FK_Item_User" FromRole="User" ToRole="Item" />
+        </EntityType>
+        <Association Name="FK_Instance_User">
+          <End Type="CryptureModel.User" Role="User" Multiplicity="1" >
+            <OnDelete Action="Cascade" />
+          </End>
+          <End Type="CryptureModel.Instance" Role="Instance" Multiplicity="*" >
+          </End>
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserId" />
+            </Principal>
+            <Dependent Role="Instance">
+              <PropertyRef Name="UserId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Instance_Item">
+          <End Type="CryptureModel.Item" Role="Item" Multiplicity="1" >
+            <OnDelete Action="Cascade" />
+          </End>
+          <End Type="CryptureModel.Instance" Role="Instance" Multiplicity="*" >
+          </End>
+          <ReferentialConstraint>
+            <Principal Role="Item">
+              <PropertyRef Name="ItemId" />
+            </Principal>
+            <Dependent Role="Instance">
+              <PropertyRef Name="ItemId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Item_User">
+          <End Type="CryptureModel.User" Role="User" Multiplicity="0..1" />
+          <End Type="CryptureModel.Item" Role="Item" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserId" />
+            </Principal>
+            <Dependent Role="Item">
+              <PropertyRef Name="ModifiedBy" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityType Name="Cipher">
+          <Key>
+            <PropertyRef Name="ItemId" />
+          </Key>
+          <Property Name="ItemId" Type="Int64" Nullable="false" />
+          <Property Name="CipherText" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="CipherVector" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="CipherParams" Type="Int64" Nullable="false" />
+          <NavigationProperty Name="Item" Relationship="CryptureModel.FK_Cipher_Item" FromRole="Cipher" ToRole="Item" />
+        </EntityType>
+        <Association Name="FK_Cipher_Item">
+          <End Type="CryptureModel.Item" Role="Item" Multiplicity="1" >
+            <OnDelete Action="Cascade" />
+          </End>
+          <End Type="CryptureModel.Cipher" Role="Cipher" Multiplicity="0..1" />
+          <ReferentialConstraint>
+            <Principal Role="Item">
+              <PropertyRef Name="ItemId" />
+            </Principal>
+            <Dependent Role="Cipher">
+              <PropertyRef Name="ItemId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        </Schema>
+    </edmx:ConceptualModels>
+    <!-- C-S mapping content -->
+    <edmx:Mappings>
+      <Mapping Space="C-S" xmlns="http://schemas.microsoft.com/ado/2009/11/mapping/cs">
+        <EntityContainerMapping StorageEntityContainer="CryptureModelStoreContainer" CdmEntityContainer="CryptureEntities">
+          <EntitySetMapping Name="Instances">
+            <EntityTypeMapping TypeName="CryptureModel.Instance">
+              <MappingFragment StoreEntitySet="Instance">
+                <ScalarProperty Name="Signature" ColumnName="Signature" />
+                <ScalarProperty Name="CipherParams" ColumnName="CipherParams" />
+                <ScalarProperty Name="CipherKey" ColumnName="CipherKey" />
+                <ScalarProperty Name="UserId" ColumnName="UserId" />
+                <ScalarProperty Name="ItemId" ColumnName="ItemId" />
+                <ScalarProperty Name="InstanceId" ColumnName="InstanceId" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Items">
+            <EntityTypeMapping TypeName="CryptureModel.Item">
+              <MappingFragment StoreEntitySet="Item">
+                <ScalarProperty Name="CreatedDate" ColumnName="CreatedDate" />
+                <ScalarProperty Name="ModifiedBy" ColumnName="ModifiedBy" />
+                <ScalarProperty Name="ModifiedDate" ColumnName="ModifiedDate" />
+                <ScalarProperty Name="Label" ColumnName="Label" />
+                <ScalarProperty Name="ItemId" ColumnName="ItemId" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Users">
+            <EntityTypeMapping TypeName="CryptureModel.User">
+              <MappingFragment StoreEntitySet="User">
+                <ScalarProperty Name="Sid" ColumnName="Sid" />
+                <ScalarProperty Name="Certificate" ColumnName="Certificate" />
+                <ScalarProperty Name="UserId" ColumnName="UserId" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Ciphers">
+            <EntityTypeMapping TypeName="CryptureModel.Cipher">
+              <MappingFragment StoreEntitySet="Cipher">
+                <ScalarProperty Name="CipherParams" ColumnName="CipherParams" />
+                <ScalarProperty Name="CipherVector" ColumnName="CipherVector" />
+                <ScalarProperty Name="CipherText" ColumnName="CipherText" />
+                <ScalarProperty Name="ItemId" ColumnName="ItemId" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+        </EntityContainerMapping>
+      </Mapping>
+    </edmx:Mappings>
+  </edmx:Runtime>
+  <!-- EF Designer content (DO NOT EDIT MANUALLY BELOW HERE) -->
+  <Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
+    <Connection>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="MetadataArtifactProcessing" Value="EmbedInOutputAssembly" />
+      </DesignerInfoPropertySet>
+    </Connection>
+    <Options>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="ValidateOnBuild" Value="true" />
+        <DesignerProperty Name="EnablePluralization" Value="true" />
+        <DesignerProperty Name="IncludeForeignKeysInModel" Value="true" />
+        <DesignerProperty Name="UseLegacyProvider" Value="false" />
+        <DesignerProperty Name="CodeGenerationStrategy" Value="None" />
+      </DesignerInfoPropertySet>
+    </Options>
+    <!-- Diagram content (shape and connector positions) -->
+    <Diagrams></Diagrams>
+  </Designer>
+</edmx:Edmx>
