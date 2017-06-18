@@ -1,4 +1,5 @@
 ﻿using Fluent;
+using Microsoft.Win32;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -24,6 +25,7 @@ namespace Crypture
         public Item ThisItem { get; set; } = new Item();
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
         public ObservableCollection<User> UserListSelected { get; set; } = new ObservableCollection<User>();
+        public byte[] BinaryItemData { get; set; }
 
         public ItemEditor(bool bNewItem = true)
         {
@@ -58,6 +60,7 @@ namespace Crypture
 
                     oItemSharedWith.ItemsSource = UserListSelected;
                     oAddCertDropDown.ItemsSource = UserList;
+                    ThisItem.ItemType = "text";
                 }
 
             // set editing controls
@@ -92,8 +95,12 @@ namespace Crypture
             oLoadItemButton.IsEnabled = !bEnabled;
             oSaveItemButton.IsEnabled = bEnabled;
             oItemData.IsEnabled = bEnabled;
+            oUploadAFile.IsEnabled = bEnabled;
+
+            // control panel display
             oTextLockImage.Visibility = (bEnabled) ? Visibility.Collapsed : Visibility.Visible;
-            oItemData.Visibility = (bEnabled) ? Visibility.Visible : Visibility.Collapsed;
+            oItemData.Visibility = (bEnabled && ThisItem.ItemType.Equals("text")) ? Visibility.Visible : Visibility.Collapsed;
+            oDownloadPanel.Visibility = (bEnabled && !ThisItem.ItemType.Equals("text")) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void oSaveItemButton_Click(object sender, RoutedEventArgs e)
@@ -141,7 +148,8 @@ namespace Crypture
                     using (CryptoStream oCrypto = new CryptoStream(
                         oMemory, oCng.CreateEncryptor(), CryptoStreamMode.Write))
                     {
-                        byte[] oPlainByte = Encoding.Unicode.GetBytes(oItemData.Text);
+                        byte[] oPlainByte = ThisItem.ItemType.Equals("text") ?
+                            Encoding.Unicode.GetBytes(oItemData.Text) : BinaryItemData;
                         oCrypto.Write(oPlainByte, 0, oPlainByte.Length);
                         oCrypto.FlushFinalBlock();
                         ThisItem.Cipher.CipherText = oMemory.ToArray();
@@ -208,13 +216,13 @@ namespace Crypture
                 foreach (X509Certificate2 oStoreUser in oStore.Certificates)
                 {
                     foreach (User oUser in SourceUserList) if (oStoreUser.HasPrivateKey)
-                    {
-                        if (StructuralComparisons.StructuralEqualityComparer.Equals(
-                            oUser.Certificate, oStoreUser.RawData))
                         {
-                            oMyCertCollection.Add(oStoreUser);
+                            if (StructuralComparisons.StructuralEqualityComparer.Equals(
+                                oUser.Certificate, oStoreUser.RawData))
+                            {
+                                oMyCertCollection.Add(oStoreUser);
+                            }
                         }
-                    }
                 }
 
                 // error if no valid local certification might be available local certif
@@ -281,7 +289,18 @@ namespace Crypture
                             {
                                 oCrypto.Write(ThisItem.Cipher.CipherText, 0, ThisItem.Cipher.CipherText.Length);
                                 oCrypto.FlushFinalBlock();
-                                oItemData.Text = Encoding.Unicode.GetString(oMemory.ToArray());
+
+                                // process text item
+                                if (ThisItem.ItemType == "text")
+                                {
+                                    oItemData.Text = Encoding.Unicode.GetString(oMemory.ToArray());
+                                }
+
+                                // text binary item
+                                else
+                                {
+                                    BinaryItemData = oMemory.ToArray();
+                                }
                             }
                         }
                         // change the ui to allow saving again
@@ -335,6 +354,44 @@ namespace Crypture
         {
             // force collection in case the user loaded a large set of text into memory
             GC.Collect();
+        }
+
+        private void oUploadAFile_Click(object sender, RoutedEventArgs e)
+        {
+            OpenFileDialog oOpenDialog = new OpenFileDialog()
+            {
+                Filter = "All Files (*.*)|*.*",
+                CheckFileExists = true
+            };
+            if (oOpenDialog.ShowDialog(this).Value)
+            {
+                ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
+                BinaryItemData = Utilities.Compress(File.ReadAllBytes(oOpenDialog.FileName));
+                SetEditingControls(true);
+            }
+        }
+
+        private void oDownloadPanel_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // generate the filter field to use based on the stored item type
+            string sFilter = "All Files (*.*)|*.*";
+            if (!String.IsNullOrEmpty(ThisItem.ItemType) && ThisItem.ItemType.StartsWith("."))
+            {
+                sFilter = String.Format("{0} Files (*{0})|*{0}|", ThisItem.ItemType) + sFilter;
+            }
+
+            // ask the user where to store the file
+            SaveFileDialog oSaveDialog = new SaveFileDialog()
+            {
+                Filter = sFilter,
+                AddExtension = true,
+                ValidateNames = true
+            };
+            if (!oSaveDialog.ShowDialog(this).Value) return;
+
+            // write data to file
+            File.WriteAllBytes(oSaveDialog.FileName,
+                Utilities.Decompress(BinaryItemData));
         }
     }
 

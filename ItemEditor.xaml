@@ -11,10 +11,11 @@
         <Fluent:Ribbon x:Name="ribbon" IsAutomaticCollapseEnabled="False" IsQuickAccessToolBarVisible="False">
             <!--  Tabs  -->
             <Fluent:RibbonTabItem Header="Home">
-                <Fluent:RibbonGroupBox Header="Protected Item Actions">
+                <Fluent:RibbonGroupBox Header="Item Actions">
                     <Fluent:Button x:Name="oLoadItemButton" Height="Auto" Margin="10,10,10,0" Click="oLoadItemButton_Click" Header="Decrypt&#160;&amp;&#160;Load" LargeIcon="pack://application:,,,/Crypture;component/Images/Load.png" Size="Large" />
                     <Fluent:Button x:Name="oSaveItemButton" Height="Auto" Margin="10,10,10,0" Click="oSaveItemButton_Click" Header="Encrypt&#160;&amp;&#160;Save" LargeIcon="pack://application:,,,/Crypture;component/Images/Save.png" Size="Large" />
                     <Fluent:Button x:Name="oRemoveItemButton" Height="Auto" Margin="10,10,10,0" Click="oRemoveItemButton_Click" Header="Remove Item" Icon="pack://application:,,,/Crypture;component/Images/Remove.png" Size="Middle" />
+                    <Fluent:Button x:Name="oUploadAFile" Height="Auto" Margin="10,10,10,0" Click="oUploadAFile_Click" Header="Upload File..." Icon="pack://application:,,,/Crypture;component/Images/Upload.png" Size="Middle" />
                 </Fluent:RibbonGroupBox>
                 <Fluent:RibbonGroupBox Header="Sharing Options">
                     <Fluent:DropDownButton x:Name="oAddCertDropDown" Margin="10,10,10,0" DisplayMemberPath="Name" Header="Share&#160;With..." LargeIcon="pack://application:,,,/Crypture;component/Images/Share.png" Size="Large">
@@ -70,7 +71,11 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Image x:Name="oTextLockImage" Grid.Row="0" Grid.Column="0" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Opacity="0.4" Source="pack://application:,,,/Crypture;component/Images/Save.png" Visibility="Collapsed" />
-                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Visible" />
+                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Collapsed" />
+                    <StackPanel x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" Orientation="Vertical" Visibility="Visible" VerticalAlignment="Center" MouseDown="oDownloadPanel_MouseDown">
+                        <Image Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Stretch="Uniform" Width="100" Source="pack://application:,,,/Crypture;component/Images/Download.png" />
+                        <Label x:Name="oDownloadTextBox" Content="Click Here To Download" HorizontalAlignment="Center" />
+                    </StackPanel>
                 </Grid>
             </DockPanel>
         </DockPanel>

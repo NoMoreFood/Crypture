@@ -83,6 +83,7 @@
     </Reference>
     <Reference Include="System.DirectoryServices" />
     <Reference Include="System.EnterpriseServices" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Security" />
     <Reference Include="System.Windows.Forms" />
@@ -150,6 +151,7 @@
     <Compile Include="User.cs">
       <DependentUpon>CryptureEntities.tt</DependentUpon>
     </Compile>
+    <Compile Include="Utilities.cs" />
     <Page Include="AboutBox.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -218,15 +220,6 @@
   <ItemGroup>
     <Resource Include="Images\About.png" />
     <Resource Include="Images\Add.png" />
-    <Resource Include="Images\Audio.png" />
-    <Resource Include="Images\Copy.png" />
-    <Resource Include="Images\Folder.png" />
-    <Resource Include="Images\Next.png" />
-    <Resource Include="Images\Play.png" />
-    <Resource Include="Images\Previous.png" />
-    <Resource Include="Images\Question.png" />
-    <Resource Include="Images\Search.png" />
-    <Resource Include="Images\Splash.png" />
   </ItemGroup>
   <ItemGroup>
     <Service Include="{3259AA49-8AA1-44D3-9025-A0B520596A8C}" />
@@ -250,6 +243,8 @@
       <DependentUpon>CryptureEntities.edmx</DependentUpon>
       <LastGenOutput>CryptureEntities.cs</LastGenOutput>
     </Content>
+    <Resource Include="Images\Upload.png" />
+    <Resource Include="Images\Download.png" />
     <None Include="Data\License - Crypture.txt" />
     <None Include="Data\License - ControlzEx.txt" />
     <None Include="Data\License - Fluent Ribbon.txt" />
