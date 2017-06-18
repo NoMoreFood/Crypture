@@ -1,5 +1,7 @@
 # Crypture
-Crypture is a utility for storing sensitive data on Windows using certificates.  It can be used for everything from passwords to sensitive personal information that you aren’t comfortable storing as plaintext on storage device.
+Crypture is a utility for storing sensitive data on Windows using certificates.  It can be used for everything from passwords to sensitive personal information that you aren’t comfortable storing as plaintext on storage device.  
+
+The name Crypture is a play on the words crypt (from the Greek "kryptos" meaning "secret") and scripture (from the Latin "scriptura" meaning "writings").
 ## Prerequisites
 * Microsoft Windows 7 or Later
 * Microsoft .NET Framework 4.6.1 or Later
@@ -22,7 +24,7 @@ Both Crypture and any databases it creates are portable.
 * If sharing data, have any other users repeat these steps on the same database for their certificates.
 ### Creating & Encrypting A New Item
 * Click on the ‘Add New Item’ icon on the ‘Home’ tab.
-    * The Item Viewer dialog will launch.
+    * The Item Viewer & Editor dialog will launch.
 * Populate the ‘Item Label’ field with a topical description of the item.
     * This data is used to distinguish the item from other items; it is not encrypted.
 * Populate the ‘Protected Item’ text block with the data you which to encrypt and store.
@@ -36,5 +38,3 @@ Both Crypture and any databases it creates are portable.
     * You will be prompted to enter a PIN or password if the certificate requires it to utilize the private key.
 ### Other Notes
 * Crypture uses the Windows cryptography subsystem to perform encryption and decryption operations.  If FIPS Compliance is enforced by local or group policy, Crypture will ensure only FIPS Complaint algorithms are used for RSA encryption and decryption.  AES 256-bit algorithms are FIPS compliant. 
-
-
