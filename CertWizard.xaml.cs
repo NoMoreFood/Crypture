@@ -206,8 +206,8 @@ namespace Crypture
             oCertRequestInfo.NotAfter = oValidUntilDatePicker.SelectedDate.Value;
             oCertRequestInfo.HashAlgorithm = oHash;
 
-            // translate the list to a list that the enrollment will understand
-            // key a list of key usages to use
+            // translate the list to a list that the enrollment will understand key a list of key
+            // usages to use
             if (EnhancedKeyUsages.Where(k => k.Selected).Count() > 0)
             {
                 CertEnroll.CObjectIds oKeyUsagesToAdd = new CertEnroll.CObjectIds();
@@ -230,9 +230,28 @@ namespace Crypture
 
             oEnrollRequest.InstallResponse(CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
                 sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, ""); // no password
-                                                                                          // output a base64 encoded PKCS#12 so we can import it back to the .Net security classes
-                                                                                          // var base64encoded = oEnrollRequest.CreatePFX("", // no password, this is for internal consumption
-                                                                                          //   PFXExportOptions.PFXExportChainWithRoot);
+                                                                                          // output a
+                                                                                          // base64
+                                                                                          // encoded
+                                                                                          // PKCS#12
+                                                                                          // so we
+                                                                                          // can
+                                                                                          // import
+                                                                                          // it back
+                                                                                          // to the
+                                                                                          // .Net
+                                                                                          // security
+                                                                                          // classes
+                                                                                          // var
+                                                                                          // base64encoded
+                                                                                          // =
+                                                                                          // oEnrollRequest.CreatePFX("",
+                                                                                          // // no
+                                                                                          // password,
+                                                                                          // this is
+                                                                                          // for
+                                                                                          // internal
+                                                                                          // consumption PFXExportOptions.PFXExportChainWithRoot);
 
             // instantiate the target class with the PKCS#12 data (and the empty password)
             //return new System.Security.Cryptography.X509Certificates.X509Certificate2(

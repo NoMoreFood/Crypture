@@ -21,6 +21,7 @@ namespace Crypture
         }
     
         public long ItemId { get; set; }
+        public string ItemType { get; set; }
         public string Label { get; set; }
         public System.DateTime ModifiedDate { get; set; }
         public Nullable<long> ModifiedBy { get; set; }

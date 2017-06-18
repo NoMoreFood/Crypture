@@ -1,7 +1,6 @@
 ﻿using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Data.Entity;
 using System.Data.SQLite;
 using System.DirectoryServices;
@@ -92,8 +91,8 @@ namespace Crypture
             // initialize xaml form display
             InitializeComponent();
 
-            // if the user has passed a database then load that otherwise
-            // load a temporary database to assembly caching while the splash screen is up
+            // if the user has passed a database then load that otherwise load a temporary database
+            // to assembly caching while the splash screen is up
             string[] sArgs = Environment.GetCommandLineArgs();
             bool bIsTempDatabase = (sArgs.Length <= 1);
             string sTempDatabase = (bIsTempDatabase) ? Path.GetTempFileName() : sArgs[1];
@@ -210,8 +209,8 @@ namespace Crypture
                     continue;
                 }
 
-                // if the user has more than one certificate, then we need to wrap the
-                // structure as a single element in an object array;
+                // if the user has more than one certificate, then we need to wrap the structure as a
+                // single element in an object array;
                 object oAdCertAttribute = oSelected.FetchedAttributes[0];
                 if (oAdCertAttribute is object[])
                 {
@@ -291,8 +290,8 @@ namespace Crypture
             {
                 oItemDataGrid.ItemsSource = oContent.Items.ToList<Item>().OrderBy(i => i.Label);
                 oCertDataGrid.ItemsSource = oContent.Users.ToList<User>().OrderBy(u => u.Name);
-                
-                // if the option to only show my items is enable, then downselect the list to only 
+
+                // if the option to only show my items is enable, then downselect the list to only
                 // include items that have an instance for this currently logged in user
                 if (oHideAccessible.IsChecked.Value)
                 {
