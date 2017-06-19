@@ -28,15 +28,14 @@ namespace Crypture
         {
             using (X509Chain oChain = new X509Chain())
             {
-                oChain.ChainPolicy.RevocationMode = (bDoRevocationCheck) ? X509RevocationMode.Offline : X509RevocationMode.NoCheck;
+                oChain.ChainPolicy.RevocationMode = (bDoRevocationCheck) ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
                 oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
 
                 // build the chain based on the specified policy
                 oChain.Build(oCert);
 
                 // check for self signed
-                if (bAllowSelfSigned && oChain.ChainElements.Count == 1 &&
-                    oChain.ChainStatus[0].Status == X509ChainStatusFlags.UntrustedRoot)
+                if (bAllowSelfSigned && oChain.ChainElements.Count == 1)
                 {
                     return true;
                 }
@@ -426,6 +425,14 @@ namespace Crypture
             AboutBox oAboutBox = new AboutBox();
             oAboutBox.Owner = this;
             oAboutBox.ShowDialog();
+        }
+
+        private void oCompactDatabaseButton_Click(object sender, RoutedEventArgs e)
+        {
+            using (CryptureEntities oContent = new CryptureEntities())
+            {
+                oContent.Database.ExecuteSqlCommand(TransactionalBehavior.DoNotEnsureTransaction, "VACUUM;");
+            }
         }
     }
 }

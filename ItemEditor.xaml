@@ -72,9 +72,9 @@
                     </Grid.ColumnDefinitions>
                     <Image x:Name="oTextLockImage" Grid.Row="0" Grid.Column="0" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Opacity="0.4" Source="pack://application:,,,/Crypture;component/Images/Save.png" Visibility="Collapsed" />
                     <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Collapsed" />
-                    <StackPanel x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" Orientation="Vertical" Visibility="Visible" VerticalAlignment="Center" MouseDown="oDownloadPanel_MouseDown">
-                        <Image Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Stretch="Uniform" Width="100" Source="pack://application:,,,/Crypture;component/Images/Download.png" />
-                        <Label x:Name="oDownloadTextBox" Content="Click Here To Download" HorizontalAlignment="Center" />
+                    <StackPanel x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" MouseDown="oDownloadPanel_MouseDown" Orientation="Vertical" Visibility="Visible">
+                        <Image Width="100" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Source="pack://application:,,,/Crypture;component/Images/Download.png" Stretch="Uniform" />
+                        <Label x:Name="oDownloadTextBox" HorizontalAlignment="Center" Content="Click Here To Download" />
                     </StackPanel>
                 </Grid>
             </DockPanel>
