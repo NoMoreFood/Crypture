@@ -228,37 +228,18 @@ namespace Crypture
             oEnrollRequest.InitializeFromRequest(oCertRequestInfo);
             string sCertRequestString = oEnrollRequest.CreateRequest();
 
-            oEnrollRequest.InstallResponse(CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
-                sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, ""); // no password
-                                                                                          // output a
-                                                                                          // base64
-                                                                                          // encoded
-                                                                                          // PKCS#12
-                                                                                          // so we
-                                                                                          // can
-                                                                                          // import
-                                                                                          // it back
-                                                                                          // to the
-                                                                                          // .Net
-                                                                                          // security
-                                                                                          // classes
-                                                                                          // var
-                                                                                          // base64encoded
-                                                                                          // =
-                                                                                          // oEnrollRequest.CreatePFX("",
-                                                                                          // // no
-                                                                                          // password,
-                                                                                          // this is
-                                                                                          // for
-                                                                                          // internal
-                                                                                          // consumption PFXExportOptions.PFXExportChainWithRoot);
+            // install certificate into selected certificate store
+            if (oCertificateSelfSignedRadio.IsChecked.Value)
+            {
+                oEnrollRequest.InstallResponse(CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
+                    sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, "");
+            }
 
-            // instantiate the target class with the PKCS#12 data (and the empty password)
-            //return new System.Security.Cryptography.X509Certificates.X509Certificate2(
-            //  System.Convert.FromBase64String(base64encoded), "",
-            // mark the private key as exportable (this is usually what you want to do)
-            //System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.Exportable
-            //);
+            // produce request file
+            else
+            {
+                // TODO: Save Dialog
+            }
         }
     }
 }
