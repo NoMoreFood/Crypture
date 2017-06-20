@@ -11,6 +11,7 @@ SET BINDIR=%~dp0..\bin\Release
 
 :: cleanup binary directory
 DEL /F /S /Q "%BINDIR%\*.xml"
+DEL /F /S /Q "%BINDIR%\*.pdb"
 
 :: determine 32-bit program files directory
 IF DEFINED ProgramFiles SET PX86=%ProgramFiles%
