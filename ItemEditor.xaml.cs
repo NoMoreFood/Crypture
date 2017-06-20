@@ -20,8 +20,6 @@ namespace Crypture
 {
     public partial class ItemEditor : RibbonWindow
     {
-        public string CurrentUserSid { get; set; } = WindowsIdentity.GetCurrent().User.Value;
-        public bool IsEditable { get; set; }
         public Item ThisItem { get; set; } = new Item();
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
         public ObservableCollection<User> UserListSelected { get; set; } = new ObservableCollection<User>();
@@ -48,7 +46,7 @@ namespace Crypture
                 {
                     UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
                     UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
-                        u => u.Sid == CurrentUserSid));
+                        u => u.Sid == WindowsIdentity.GetCurrent().User.Value));
                     if (UserListSelected.Count > 0)
                     {
                         ThisItem.ModifiedBy = UserListSelected[0].UserId;
@@ -254,69 +252,64 @@ namespace Crypture
                 // reconnect our instance so we can lookup the cipher
                 oContent.Entry(ThisItem).State = EntityState.Unchanged;
 
-                // try to decode our current data
-                foreach (Instance oInstance in ThisItem.Instances)
-                {
-                    // see if the cert associated with the instance matches the one in the store
-                    if (StructuralComparisons.StructuralEqualityComparer.Equals(
-                        oInstance.User.Certificate, oCert.RawData))
+                // look for the matching instance
+                Instance oInstance = ThisItem.Instances.Where(
+                    i => StructuralComparisons.StructuralEqualityComparer.Equals(
+                    i.User.Certificate, oCert.RawData)).FirstOrDefault();
+
+                try
+                { 
+                    // setup an aes decryptor using the iv and decrypted key
+                    using (Aes oCng = Aes.Create())
                     {
-                        // setup an aes decryptor using the iv and decrypted key
-                        using (Aes oCng = Aes.Create())
+                        // setup the aes key using the decrypted rsa data
+                        if (Environment.OSVersion.Version.CompareTo(new Version(6, 2)) >= 0)
                         {
-                            // setup the aes key using the decrypted rsa data
-                            if (Environment.OSVersion.Version.CompareTo(new Version(6, 2)) >= 0)
+                            using (RSA oRSA = oCert.GetRSAPrivateKey())
                             {
-                                using (RSA oRSA = oCert.GetRSAPrivateKey())
-                                {
-                                    oCng.Key = oRSA.Decrypt(oInstance.CipherKey, RSAEncryptionPadding.Pkcs1);
-                                    oCng.IV = ThisItem.Cipher.CipherVector;
-                                }
-                            }
-                            else
-                            {
-                                using (RSACryptoServiceProvider oRSA = oCert.PrivateKey as RSACryptoServiceProvider)
-                                {
-                                    oCng.Key = oRSA.Decrypt(oInstance.CipherKey, false);
-                                    oCng.IV = ThisItem.Cipher.CipherVector;
-                                }
-                            }
-
-                            // attempt to decode the data
-                            using (MemoryStream oMemory = new MemoryStream())
-                            using (CryptoStream oCrypto = new CryptoStream(
-                                oMemory, oCng.CreateDecryptor(), CryptoStreamMode.Write))
-                            {
-                                oCrypto.Write(ThisItem.Cipher.CipherText, 0, ThisItem.Cipher.CipherText.Length);
-                                oCrypto.FlushFinalBlock();
-
-                                // process text item
-                                if (ThisItem.ItemType == "text")
-                                {
-                                    oItemData.Text = Encoding.Unicode.GetString(oMemory.ToArray());
-                                }
-
-                                // text binary item
-                                else
-                                {
-                                    BinaryItemData = oMemory.ToArray();
-                                }
+                                oCng.Key = oRSA.Decrypt(oInstance.CipherKey, RSAEncryptionPadding.Pkcs1);
+                                oCng.IV = ThisItem.Cipher.CipherVector;
                             }
                         }
-                        // change the ui to allow saving again
-                        SetEditingControls(true);
-                    }
-                }
-            }
-        }
+                        else
+                        {
+                            using (RSACryptoServiceProvider oRSA = oCert.PrivateKey as RSACryptoServiceProvider)
+                            {
+                                oCng.Key = oRSA.Decrypt(oInstance.CipherKey, false);
+                                oCng.IV = ThisItem.Cipher.CipherVector;
+                            }
+                        }
 
-        private void oRemoveCertButton_Click(object sender, RoutedEventArgs e)
-        {
-            using (CryptureEntities oContent = new CryptureEntities())
-            {
-                for (int iSelected = oItemSharedWith.SelectedItems.Count - 1; iSelected >= 0; iSelected--)
+                        // attempt to decode the data
+                        using (MemoryStream oMemory = new MemoryStream())
+                        using (CryptoStream oCrypto = new CryptoStream(
+                            oMemory, oCng.CreateDecryptor(), CryptoStreamMode.Write))
+                        {
+                            oCrypto.Write(ThisItem.Cipher.CipherText, 0, ThisItem.Cipher.CipherText.Length);
+                            oCrypto.FlushFinalBlock();
+
+                            // process text item
+                            if (ThisItem.ItemType == "text")
+                            {
+                                oItemData.Text = Encoding.Unicode.GetString(oMemory.ToArray());
+                            }
+
+                            // text binary item
+                            else
+                            {
+                                BinaryItemData = oMemory.ToArray();
+                            }
+                        }
+                    }
+                    // change the ui to allow saving again
+                    SetEditingControls(true);
+                }
+                catch (Exception eError)
                 {
-                    UserList.Remove((User)oItemSharedWith.SelectedItems[iSelected]);
+                    MessageBox.Show(this,
+                        "An error occurred during item decryption: " +
+                        Environment.NewLine + Environment.NewLine + eError.Message,
+                        "Error During Item Decryption", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -392,34 +385,6 @@ namespace Crypture
             // write data to file
             File.WriteAllBytes(oSaveDialog.FileName,
                 Utilities.Decompress(BinaryItemData));
-        }
-    }
-
-    public class CheckIfItemIsSelectedConverter : IMultiValueConverter
-    {
-        public object Convert(object[] values, Type targetType, object parameter, System.Globalization.CultureInfo culture)
-        {
-            ItemEditor oViewer = (ItemEditor)values[0];
-            User oUser = (User)values[1];
-            return oViewer.UserListSelected.Contains(oUser);
-        }
-
-        public object[] ConvertBack(object value, Type[] targetTypes, object parameter, System.Globalization.CultureInfo culture)
-        {
-            return null;
-        }
-    }
-
-    public class CheckIfDateIsNotSetConverter : IValueConverter
-    {
-        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
-        {
-            return ((DateTime)value == DateTime.MinValue) ? "- Not Yet Set -" : value;
-        }
-
-        public object ConvertBack(object value, Type targetTypes, object parameter, System.Globalization.CultureInfo culture)
-        {
-            return null;
         }
     }
 }

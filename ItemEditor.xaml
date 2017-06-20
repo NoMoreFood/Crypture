@@ -25,7 +25,7 @@
                                 <Setter Property="IsChecked">
                                     <Setter.Value>
                                         <MultiBinding Converter="{StaticResource CheckIfItemIsSelectedConverter}" Mode="OneWay">
-                                            <Binding ElementName="oRootWindow" Path="." />
+                                            <Binding ElementName="oRootWindow" Path="UserListSelected" />
                                             <Binding Path="." />
                                         </MultiBinding>
                                     </Setter.Value>
