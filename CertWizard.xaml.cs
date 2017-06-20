@@ -1,10 +1,12 @@
-﻿using System;
+﻿using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -176,8 +178,13 @@ namespace Crypture
             oProviderInfo.InitializeFromName(SelectedProvider);
 
             // create DN for subject and issuer
-            CertEnroll.CX500DistinguishedName oDistinguishedName = new CertEnroll.CX500DistinguishedName();
-            oDistinguishedName.Encode("CN=" + oSubjectTextBox.Text,
+            CertEnroll.CX500DistinguishedName oSubjectDistinguishedName = new CertEnroll.CX500DistinguishedName();
+            oSubjectDistinguishedName.Encode("CN=" + oSubjectTextBox.Text,
+                CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
+
+            // create CN for subject and issuer
+            CertEnroll.CX500DistinguishedName oIssuerDistinguishedName = new CertEnroll.CX500DistinguishedName();
+            oIssuerDistinguishedName.Encode("CN=" + oIssuerTextBox.Text,
                 CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
 
             // create a new private key for the certificate
@@ -185,12 +192,15 @@ namespace Crypture
             {
                 ProviderName = (string)oProviderComboBox.SelectedValue,
                 Algorithm = oProviderInfo.CspAlgorithms.ItemByName[
-                (string)oSignatureComboBox.SelectedValue].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone),
+                oSignatureComboBox.SelectedValue.ToString()].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone),
                 MachineContext = false,
                 Length = Convert.ToInt32(oKeyLengthTextBox.Text),
                 KeyProtection = (oPasswordProtectCheckbox.IsChecked.Value) ?
                 CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG,
-                ExportPolicy = CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG | CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG
+                ExportPolicy = (oKeyExportableCheckbox.IsChecked.Value) ?
+                    (CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
+                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) : 
+                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE
             };
             oPrivateKey.Create();
 
@@ -200,8 +210,8 @@ namespace Crypture
             // create a certificate request with the requested info
             CertEnroll.CX509CertificateRequestCertificate oCertRequestInfo = new CertEnroll.CX509CertificateRequestCertificate();
             oCertRequestInfo.InitializeFromPrivateKey(CertEnroll.X509CertificateEnrollmentContext.ContextUser, oPrivateKey, "");
-            oCertRequestInfo.Subject = oDistinguishedName;
-            oCertRequestInfo.Issuer = oDistinguishedName;
+            oCertRequestInfo.Subject = oSubjectDistinguishedName;
+            oCertRequestInfo.Issuer = oIssuerDistinguishedName;
             oCertRequestInfo.NotBefore = oValidFromDatePicker.SelectedDate.Value;
             oCertRequestInfo.NotAfter = oValidUntilDatePicker.SelectedDate.Value;
             oCertRequestInfo.HashAlgorithm = oHash;
@@ -226,11 +236,12 @@ namespace Crypture
             oCertRequestInfo.Encode();
             CertEnroll.CX509Enrollment oEnrollRequest = new CertEnroll.CX509Enrollment();
             oEnrollRequest.InitializeFromRequest(oCertRequestInfo);
-            string sCertRequestString = oEnrollRequest.CreateRequest();
+            
 
             // install certificate into selected certificate store
             if (oCertificateSelfSignedRadio.IsChecked.Value)
             {
+                string sCertRequestString = oEnrollRequest.CreateRequest();
                 oEnrollRequest.InstallResponse(CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
                     sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, "");
             }
@@ -238,7 +249,19 @@ namespace Crypture
             // produce request file
             else
             {
-                // TODO: Save Dialog
+                // ask the user where to store the file
+                SaveFileDialog oSaveDialog = new SaveFileDialog()
+                {
+                    Filter = "Certificate Request (*.csr)|*.csr|All Files (*.*)|*.*",
+                    AddExtension = true,
+                    ValidateNames = true
+                };
+                if (!oSaveDialog.ShowDialog(this).Value) return;
+
+                // write the file
+                string sCertRequestString = oEnrollRequest.CreateRequest(CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER);
+                System.IO.File.WriteAllText(oSaveDialog.FileName, 
+                    sCertRequestString, Encoding.ASCII);
             }
         }
     }
