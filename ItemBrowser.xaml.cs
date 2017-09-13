@@ -7,6 +7,7 @@ using System.DirectoryServices;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Windows;
@@ -81,6 +82,9 @@ namespace Crypture
             return true;
         }
 
+        [DllImport("kernel32", CharSet = CharSet.Auto, SetLastError = true)]
+        static extern IntPtr LoadLibrary(string lpFileName);
+
         public ItemBrowser()
         {
             // display splash screen and set to automatically close after constructor returns
@@ -105,6 +109,21 @@ namespace Crypture
                 SQLiteConnection.ClearAllPools();
                 File.Delete(sTempDatabase);
             }
+
+            // load in cleaner library
+            string sBaseDirectory = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+            string sArchSetting = (Environment.Is64BitProcess) ? "x64" : "x86";
+            string sLibPath = Path.Combine(new string[] { sBaseDirectory, sArchSetting, "Crypture-WrapperEnabler.dll" });
+            if (File.Exists(sLibPath))
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                LoadLibrary(sLibPath);
+            }
+
+            // show certificate generator based on settings file
+            oCertificateToolsGroupBox.Visibility = (Properties.Settings.Default.ShowCertificateTools) ?
+                Visibility.Visible : Visibility.Collapsed;
         }
 
         private void oRemoveItemUser_Click(object sender, RoutedEventArgs e)
@@ -249,6 +268,11 @@ namespace Crypture
                 oItemDataGrid.Visibility = Visibility.Hidden;
                 oCertDataGrid.Visibility = Visibility.Visible;
             }
+            if (oAdvancedTab.IsSelected)
+            {
+                oItemDataGrid.Visibility = Visibility.Hidden;
+                oCertDataGrid.Visibility = Visibility.Hidden;
+            }
         }
 
         private void oViewCertButton_Click(object sender, RoutedEventArgs e)
@@ -274,6 +298,7 @@ namespace Crypture
             Item oItem = (Item)oItemDataGrid.SelectedItem;
             ItemEditor oViewer = new ItemEditor(oItem);
             oViewer.ShowDialog();
+            oRefreshItemButton_Click();
         }
 
         private void oAddItemButton_Click(object sender, RoutedEventArgs e)
@@ -340,6 +365,7 @@ namespace Crypture
                 oProtectedItemActionRibbonGroupBox.IsEnabled = true;
                 oProtectedItemScopeRibbonGroupBox.IsEnabled = true;
                 oCertificatesTab.IsEnabled = true;
+                oAdvancedTab.IsEnabled = true;
             }
             catch (Exception eError)
             {
@@ -394,7 +420,7 @@ namespace Crypture
 
             // check if currently owned
             string sCurrentOwnership = "";
-            if (oUser != null)
+            if (oUser != null && oUser.Sid != null)
             {
                 DirectoryEntry oEntry = new DirectoryEntry("LDAP://<SID=" + oUser.Sid + ">");
                 if (oEntry != null && oEntry.Properties["UserPrincipalName"].Value != null)

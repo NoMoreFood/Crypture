@@ -1,12 +1,4 @@
-﻿<Window x:Class="Crypture.CertWizard"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:local="clr-namespace:Crypture"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        x:Name="oWizardWindow" Title="Certificate Generation Wizard"
-        Width="525" Height="375" MinWidth="525" MinHeight="375"
-        RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d">
+﻿<Window x:Class="Crypture.CertWizard" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oWizardWindow" Title="Certificate Generation Wizard" Width="525" Height="375" MinWidth="525" MinHeight="375" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d">
     <DockPanel>
         <TabControl Margin="2,2,2,2">
             <TabItem Header="General">
@@ -119,7 +111,7 @@
                     <Label Grid.Row="0" Grid.Column="0" Content="Certificate Store: " />
                     <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
                         <RadioButton x:Name="oCertificateStoreUserRadio" VerticalAlignment="Center" Content="User" GroupName="CertStore" IsChecked="True" />
-                        <RadioButton Margin="20,0,0,0" VerticalAlignment="Center" Content="Computer" GroupName="CertStore" />
+                        <RadioButton x:Name="oCertificateStoreMachineRadio" Margin="20,0,0,0" VerticalAlignment="Center" Content="Computer" GroupName="CertStore" />
                     </StackPanel>
                     <Label Grid.Row="1" Grid.Column="0" Content="Show Legacy Providers: " />
                     <CheckBox x:Name="oShowLegacyCheckbox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" VerticalContentAlignment="Bottom" Checked="oProviderType_Checked" Unchecked="oProviderType_Checked" />
