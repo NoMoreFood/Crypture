@@ -338,7 +338,7 @@ namespace Crypture
                 // ask the user where to store the file
                 SaveFileDialog oSaveDialog = new SaveFileDialog()
                 {
-                    Filter = "Crypture Database File (*.db)|*.db|All Files (*.*)|*.*",
+                    Filter = "Crypture Database File (*.cryptdb)|*.cryptdb|All Files (*.*)|*.*",
                     AddExtension = true,
                     ValidateNames = true
                 };
