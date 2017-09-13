@@ -12,6 +12,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Interop;
@@ -43,23 +44,28 @@ namespace Crypture
 
             // add in our keys by default
             if (bNewItem) using (CryptureEntities oContent = new CryptureEntities())
+            {
+                string sCurrentUser = WindowsIdentity.GetCurrent().User.Value;
+                UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
+                UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
+                    u => u.Sid.Equals(sCurrentUser)));
+                if (UserListSelected.Count > 0)
                 {
-                    UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
-                    UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
-                        u => u.Sid == WindowsIdentity.GetCurrent().User.Value));
-                    if (UserListSelected.Count > 0)
-                    {
-                        ThisItem.ModifiedBy = UserListSelected[0].UserId;
-                    }
-
-                    // initialize the date values to something reasonable
-                    ThisItem.CreatedDate = DateTime.MinValue;
-                    ThisItem.ModifiedDate = DateTime.MinValue;
-
-                    oItemSharedWith.ItemsSource = UserListSelected;
-                    oAddCertDropDown.ItemsSource = UserList;
-                    ThisItem.ItemType = "text";
+                    ThisItem.ModifiedBy = UserListSelected[0].UserId;
                 }
+
+                // initialize the date values to something reasonable
+                ThisItem.CreatedDate = DateTime.MinValue;
+                ThisItem.ModifiedDate = DateTime.MinValue;
+
+                oItemSharedWith.ItemsSource = UserListSelected;
+                oAddCertDropDown.ItemsSource = UserList;
+                ThisItem.ItemType = "text";
+            }
+
+            // show certificate generator based on settings file
+            oUploadAFile.Visibility = (Properties.Settings.Default.ShowItemFileUpload) ?
+                Visibility.Visible : Visibility.Collapsed;
 
             // set editing controls
             SetEditingControls(bNewItem);
@@ -103,6 +109,19 @@ namespace Crypture
 
         private void oSaveItemButton_Click(object sender, RoutedEventArgs e)
         {
+            // perform data validation if in text mode and option is set
+            if (ThisItem.ItemType.Equals("text") && 
+                !String.IsNullOrWhiteSpace(Properties.Settings.Default.ItemTextExpressionFilter))
+            {
+                if (!Regex.Match(oItemData.Text, Properties.Settings.Default.ItemTextExpressionFilter).Success)
+                {
+                    // note to the user that the data was invalid
+                    MessageBox.Show(this, "The item text provided does not satifsy the content filter.",
+                        "Invalid Item Text", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }           
+
             // update the entity using the local copy we have
             using (CryptureEntities oContent = new CryptureEntities())
             {
@@ -141,7 +160,7 @@ namespace Crypture
                     // create new cipher object and associate it with this id
                     ThisItem.Cipher = new Cipher();
                     ThisItem.Cipher.Item = ThisItem;
-
+                    
                     using (MemoryStream oMemory = new MemoryStream())
                     using (CryptoStream oCrypto = new CryptoStream(
                         oMemory, oCng.CreateEncryptor(), CryptoStreamMode.Write))

@@ -23,12 +23,15 @@ CREATE TABLE [Instance] (
 );
 
 CREATE TABLE [Item] (
-[ItemId] integer  PRIMARY KEY AUTOINCREMENT NOT NULL,
-[ItemType]	nvarchar NOT NULL DEFAULT 'text',
-[Label] nvarchar  NOT NULL,
-[ModifiedDate] datetime DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
-[ModifiedBy] integer NULL,
-[CreatedDate] datetime DEFAULT 'CURRENT_TIMESTAMP' NOT NULL
+	[ItemId] integer  PRIMARY KEY AUTOINCREMENT NOT NULL,
+	[ItemType]	nvarchar NOT NULL DEFAULT 'text',
+	[Label] nvarchar  NOT NULL,
+	[ModifiedDate] datetime DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	[ModifiedBy] integer NULL,
+	[CreatedDate] datetime DEFAULT 'CURRENT_TIMESTAMP' NOT NULL
+,
+    FOREIGN KEY ([ModifiedBy])
+        REFERENCES [User]([UserId]) ON DELETE SET NULL
 );
 
 CREATE TABLE [User] (

@@ -6,6 +6,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -124,6 +125,11 @@ namespace Crypture
             oKeyUsageCombobox.Items.SortDescriptions.Add(new SortDescription("Name", ListSortDirection.Ascending));
             oEnhancedKeyUsageCombobox.Items.SortDescriptions.Add(new SortDescription("Name", ListSortDirection.Ascending));
             oProviderType_Checked(null, null);
+
+            // disable machine store option if user is not an admin
+            oCertificateStoreMachineRadio.IsEnabled = 
+                new WindowsPrincipal(WindowsIdentity.GetCurrent())
+                    .IsInRole(WindowsBuiltInRole.Administrator);
         }
 
         private void oProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -193,16 +199,29 @@ namespace Crypture
                 ProviderName = (string)oProviderComboBox.SelectedValue,
                 Algorithm = oProviderInfo.CspAlgorithms.ItemByName[
                 oSignatureComboBox.SelectedValue.ToString()].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone),
-                MachineContext = false,
+                MachineContext = oCertificateStoreMachineRadio.IsChecked.Value,
                 Length = Convert.ToInt32(oKeyLengthTextBox.Text),
                 KeyProtection = (oPasswordProtectCheckbox.IsChecked.Value) ?
                 CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG,
                 ExportPolicy = (oKeyExportableCheckbox.IsChecked.Value) ?
                     (CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
-                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) : 
+                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) :
                     CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE
             };
-            oPrivateKey.Create();
+            try
+            {
+                oPrivateKey.Create();
+            }
+            catch (Exception eError)
+            {
+                // note to the user the creation failed
+                MessageBox.Show(this, "Certificate private key could not be constructed. This is often " +
+                    "due to an invalid set of parameters being selected that is not supported by the " + 
+                    "cryptographic provider.  The specific error message returned is below: " +
+                    Environment.NewLine + Environment.NewLine + eError.Message,
+                    "Creation Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
 
             // set the signature mechanism for the certificate
             CertEnroll.CObjectId oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
@@ -263,6 +282,10 @@ namespace Crypture
                 System.IO.File.WriteAllText(oSaveDialog.FileName, 
                     sCertRequestString, Encoding.ASCII);
             }
+
+            // note to the user the create was successful
+            MessageBox.Show(this, "Certificate successfully created.", 
+                "Creation Successful", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 }

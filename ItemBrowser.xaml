@@ -41,7 +41,7 @@
                 </Fluent:RibbonGroupBox>
             </Fluent:RibbonTabItem>
             <Fluent:RibbonTabItem x:Name="oAdvancedTab" Header="Advanced" IsEnabled="False">
-                <Fluent:RibbonGroupBox Width="100" HorizontalContentAlignment="Center" Header="Certificate Tools">
+                <Fluent:RibbonGroupBox x:Name="oCertificateToolsGroupBox" Width="100" HorizontalContentAlignment="Center" Header="Certificate Tools">
                     <Fluent:Button x:Name="oGenerateCertButton" Height="Auto" Margin="10,10,10,0" Click="oGenerateCertButton_Click" Header="Generator" LargeIcon="pack://application:,,,/Crypture;component/Images/Certificate.png" Size="Large" />
                 </Fluent:RibbonGroupBox>
                 <Fluent:RibbonGroupBox Width="100" HorizontalContentAlignment="Center" Header="Database Tools">
@@ -52,7 +52,7 @@
         <DataGrid x:Name="oItemDataGrid" Grid.Row="1" Width="Auto" AutoGenerateColumns="False" DockPanel.Dock="Top" HeadersVisibility="Column" IsReadOnly="True" MouseDoubleClick="oViewItemButton_Click" SelectionMode="Single">
             <DataGrid.Columns>
                 <DataGridTextColumn Width="*" Binding="{Binding Label}" Header="Item Label" IsReadOnly="True" SortDirection="Ascending" SortMemberPath="Label" />
-                <DataGridTextColumn Width="Auto" MinWidth="175" Binding="{Binding User.Name}" Header="Modified By" IsReadOnly="True" />
+                <DataGridTextColumn Width="Auto" MinWidth="200" Binding="{Binding User.Name}" Header="Modified By" IsReadOnly="True" />
                 <DataGridTextColumn Width="Auto" MinWidth="125" Binding="{Binding ModifiedDate, StringFormat='yyyy-MM-dd HH:mm:ss'}" Header="Modified Date" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>
