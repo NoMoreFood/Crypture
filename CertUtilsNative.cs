@@ -22,14 +22,15 @@ namespace Crypture
             internal uint Algid;
         }
 
-        internal delegate bool CryptEnumCallback(CRYPT_OID_INFO oInfo, object pvParam);
+        internal delegate bool CryptEnumCallback(IntPtr pInfo, ref OidCollection pvParam);
 
         [DllImport("crypt32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, object pvParam, CryptEnumCallback oFunc);
+        internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
 
-        internal static bool GetExtendedKeyUsagesCallback(CRYPT_OID_INFO oInfo, object pvParam)
+        internal static bool GetExtendedKeyUsagesCallback(IntPtr pInfo, ref OidCollection pvParam)
         {
+            CRYPT_OID_INFO oInfo = (CRYPT_OID_INFO) Marshal.PtrToStructure(pInfo, typeof(CRYPT_OID_INFO));
             OidCollection ExtendedKeyUsages = (OidCollection)pvParam;
             ExtendedKeyUsages.Add(new Oid(oInfo.pszOID, oInfo.pwszName));
             return true;
@@ -38,7 +39,7 @@ namespace Crypture
         public static OidCollection GetExtendedKeyUsages()
         {
             OidCollection ExtendedKeyUsages = new OidCollection();
-            CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, (object)ExtendedKeyUsages, GetExtendedKeyUsagesCallback);
+            CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, ref ExtendedKeyUsages, GetExtendedKeyUsagesCallback);
             return ExtendedKeyUsages;
         }
     }
