@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
@@ -194,22 +195,20 @@ namespace Crypture
                 CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
 
             // create a new private key for the certificate
-            CertEnroll.CX509PrivateKey oPrivateKey = new CertEnroll.CX509PrivateKey()
-            {
-                ProviderName = (string)oProviderComboBox.SelectedValue,
-                Algorithm = oProviderInfo.CspAlgorithms.ItemByName[
-                oSignatureComboBox.SelectedValue.ToString()].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone),
-                MachineContext = oCertificateStoreMachineRadio.IsChecked.Value,
-                Length = Convert.ToInt32(oKeyLengthTextBox.Text),
-                KeyProtection = (oPasswordProtectCheckbox.IsChecked.Value) ?
-                CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG,
-                ExportPolicy = (oKeyExportableCheckbox.IsChecked.Value) ?
-                    (CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
-                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) :
-                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE
-            };
+            CertEnroll.IX509PrivateKey oPrivateKey = (CertEnroll.IX509PrivateKey)Activator.CreateInstance(Type.GetTypeFromProgID("X509Enrollment.CX509PrivateKey"));
             try
             {
+                oPrivateKey.ProviderName = (string)oProviderComboBox.SelectedValue;
+                oPrivateKey.Algorithm = oProviderInfo.CspAlgorithms.ItemByName[
+                oSignatureComboBox.SelectedValue.ToString()].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
+                oPrivateKey.MachineContext = oCertificateStoreMachineRadio.IsChecked.Value;
+                oPrivateKey.Length = Convert.ToInt32(oKeyLengthTextBox.Text);
+                oPrivateKey.KeyProtection = (oPasswordProtectCheckbox.IsChecked.Value) ?
+                CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG;
+                oPrivateKey.ExportPolicy = (oKeyExportableCheckbox.IsChecked.Value) ?
+                    (CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
+                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) :
+                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE;
                 oPrivateKey.Create();
             }
             catch (Exception eError)

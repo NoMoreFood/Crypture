@@ -405,7 +405,7 @@ namespace Crypture
             // ask the user where to store the file
             OpenFileDialog oSaveDialog = new OpenFileDialog()
             {
-                Filter = "Crypture Database File (*.db)|*.db|All Files (*.*)|*.*",
+                Filter = "Crypture Database File (*.cryptdb)|*.cryptdb|All Files (*.*)|*.*",
                 CheckFileExists = true
             };
             if (!oSaveDialog.ShowDialog(this).Value) return;
