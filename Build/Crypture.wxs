@@ -19,6 +19,8 @@
 		<Feature Id="ProductFeature" Title="Crypture" Level="1" TypicalDefault="install">
 			<ComponentGroupRef Id="CryptureComponents" />
 		</Feature>
+		<Icon Id="ProductIcon" SourceFile="..\..\Safe.ico"/>
+		<Property Id="ARPPRODUCTICON" Value="ProductIcon" />
 		<Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 		<UIRef Id="WixUI_InstallDir" />
 		<UI>
