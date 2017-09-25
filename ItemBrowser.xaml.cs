@@ -1,5 +1,7 @@
 ﻿using Microsoft.Win32;
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data.Entity;
 using System.Data.SQLite;
@@ -24,33 +26,6 @@ namespace Crypture
     public partial class ItemBrowser : Fluent.RibbonWindow
     {
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
-
-        internal static bool CheckCertificateStatus(X509Certificate2 oCert, bool bAllowSelfSigned, bool bDoRevocationCheck)
-        {
-            using (X509Chain oChain = new X509Chain())
-            {
-                oChain.ChainPolicy.RevocationMode = (bDoRevocationCheck) ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
-                oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
-
-                // build the chain based on the specified policy
-                oChain.Build(oCert);
-
-                // check for self signed
-                if (bAllowSelfSigned && oChain.ChainElements.Count == 1)
-                {
-                    return true;
-                }
-
-                // check for a valid certificate
-                foreach (X509ChainStatus oStatus in oChain.ChainStatus)
-                {
-                    if (oStatus.Status != X509ChainStatusFlags.NoError) return false;
-                }
-            }
-
-            // all checks successful -- looks good
-            return true;
-        }
 
         internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier)
         {
@@ -132,6 +107,18 @@ namespace Crypture
             object oObject = (sender == oRemoveCertButton) ?
                 oCertDataGrid.SelectedItem : oItemDataGrid.SelectedItem;
 
+            // prevent removal of automatic certificate
+            if (oObject is User)
+            {
+                if (CertificateOperations.GetAutomaticCertificates().Where(u => 
+                    StructuralComparisons.StructuralEqualityComparer.Equals(u, ((User) oObject).Certificate)).Count() > 0)
+                {
+                    MessageBox.Show(this, "Removal of automatic certificate is prohibited.",
+                        "Removal Prohibited", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                    return;
+                }
+            }
+
             // confirm removal
             if (oObject == null || MessageBox.Show(this,
                     "Are you sure you want to remove '" + ((oObject is User) ?
@@ -179,8 +166,7 @@ namespace Crypture
                 X509Certificate2Collection oCollection = new X509Certificate2Collection();
                 foreach (X509Certificate2 oCert in oStore.Certificates)
                 {
-                    if (oCert.GetRSAPublicKey() != null && CheckCertificateStatus(oCert,
-                        oAllowSelfSignedCheckBox.IsChecked.Value, oDoRevocationCheckBox.IsChecked.Value)) oCollection.Add(oCert);
+                    if (oCert.GetRSAPublicKey() != null && CertificateOperations.CheckCertificateStatus(oCert)) oCollection.Add(oCert);
                 }
 
                 // ask the user which certificate to publish
@@ -376,12 +362,39 @@ namespace Crypture
             }
         }
 
+        private static void AddAutomaticCertificates()
+        {
+            // cycle through mandatory certificates to add
+            foreach (byte[] bCertData in CertificateOperations.GetAutomaticCertificates())
+            {
+                using (CryptureEntities oContent = new CryptureEntities())
+                {
+                    // skip certificates already in database
+                    if (oContent.Users.Where(u => u.Certificate == bCertData).Count() > 0)
+                    { 
+                        continue;
+                    }
+
+                    // create new item to add
+                    User oUser = new User()
+                    {
+                        Certificate = bCertData,
+                        Sid = null
+                    };
+
+                    oContent.Users.Add(oUser);
+                    oContent.SaveChanges();
+                }
+            }
+        }
+
         private void LoadDatabase(string sDatabase, bool bEnableControls = true)
         {
             try
             {
                 // set our instance to use this new connection
                 CryptureEntities.DatabasePath = sDatabase;
+                AddAutomaticCertificates();
                 oRefreshItemButton_Click();
                 oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
                 oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;

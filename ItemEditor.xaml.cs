@@ -43,24 +43,24 @@ namespace Crypture
 
             // add in our keys by default
             if (bNewItem) using (CryptureEntities oContent = new CryptureEntities())
-            {
-                string sCurrentUser = WindowsIdentity.GetCurrent().User.Value;
-                UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
-                UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
-                    u => u.Sid.Equals(sCurrentUser)));
-                if (UserListSelected.Count > 0)
                 {
-                    ThisItem.ModifiedBy = UserListSelected[0].UserId;
+                    string sCurrentUser = WindowsIdentity.GetCurrent().User.Value;
+                    UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
+                    UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
+                        u => u.Sid.Equals(sCurrentUser)));
+                    if (UserListSelected.Count > 0)
+                    {
+                        ThisItem.ModifiedBy = UserListSelected[0].UserId;
+                    }
+
+                    // initialize the date values to something reasonable
+                    ThisItem.CreatedDate = DateTime.MinValue;
+                    ThisItem.ModifiedDate = DateTime.MinValue;
+
+                    oItemSharedWith.ItemsSource = UserListSelected;
+                    oAddCertDropDown.ItemsSource = UserList;
+                    ThisItem.ItemType = "text";
                 }
-
-                // initialize the date values to something reasonable
-                ThisItem.CreatedDate = DateTime.MinValue;
-                ThisItem.ModifiedDate = DateTime.MinValue;
-
-                oItemSharedWith.ItemsSource = UserListSelected;
-                oAddCertDropDown.ItemsSource = UserList;
-                ThisItem.ItemType = "text";
-            }
 
             // show certificate generator based on settings file
             oUploadAFile.Visibility = (Properties.Settings.Default.ShowItemFileUpload) ?
@@ -109,7 +109,7 @@ namespace Crypture
         private void oSaveItemButton_Click(object sender, RoutedEventArgs e)
         {
             // perform data validation if in text mode and option is set
-            if (ThisItem.ItemType.Equals("text") && 
+            if (ThisItem.ItemType.Equals("text") &&
                 !String.IsNullOrWhiteSpace(Properties.Settings.Default.ItemTextExpressionFilter))
             {
                 if (!Regex.Match(oItemData.Text, Properties.Settings.Default.ItemTextExpressionFilter).Success)
@@ -119,7 +119,7 @@ namespace Crypture
                         "Invalid Item Text", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-            }           
+            }
 
             // update the entity using the local copy we have
             using (CryptureEntities oContent = new CryptureEntities())
@@ -132,9 +132,9 @@ namespace Crypture
                 {
                     using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
                     {
-                        if (oCert.Verify() == false && MessageBox.Show(this,
+                        if (CertificateOperations.CheckCertificateStatus(oCert) == false &&
+                            MessageBox.Show(this,
                             "The certificate for '" + oUser.Name + "' cannot be verified. " +
-                            ((oUser.IsSelfSigned) ? "This certificate appears to be self-signed. " : "") +
                             "Should this certificate be removed from the list?",
                             "Cannot Verify Certificate",
                             MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
@@ -153,13 +153,13 @@ namespace Crypture
                         "Empty Certificates List", MessageBoxButton.OK, MessageBoxImage.Question);
                     return;
                 }
-
+     
                 using (Aes oCng = Aes.Create())
                 {
                     // create new cipher object and associate it with this id
                     ThisItem.Cipher = new Cipher();
                     ThisItem.Cipher.Item = ThisItem;
-                    
+
                     using (MemoryStream oMemory = new MemoryStream())
                     using (CryptoStream oCrypto = new CryptoStream(
                         oMemory, oCng.CreateEncryptor(), CryptoStreamMode.Write))
@@ -255,6 +255,16 @@ namespace Crypture
                     "Select Certificate", "Select Certificate To Decode", X509SelectionFlag.SingleSelection,
                     new WindowInteropHelper(this).Handle);
                 if (oCollection.Count == 0) return null;
+
+                // verify the selected cert is not revoked
+                if (CertificateOperations.CheckCertificateStatus(oCollection[0]) == false)
+                {
+                    // alert user and return
+                    MessageBox.Show(this, "The selected certificate cannot be verified.",
+                        "Cannot Verify Certificate", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                    return null;
+                }
+
                 return oCollection[0];
             }
         }
@@ -276,7 +286,7 @@ namespace Crypture
                     i.User.Certificate, oCert.RawData)).FirstOrDefault();
 
                 try
-                { 
+                {
                     // setup an aes decryptor using the iv and decrypted key
                     using (Aes oCng = Aes.Create())
                     {

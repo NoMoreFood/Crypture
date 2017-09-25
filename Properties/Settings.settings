@@ -2,17 +2,24 @@
 <SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="Crypture.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
-    <Setting Name="ItemTextExpressionFilter" Type="System.String" Scope="Application">
-      <Value Profile="(Default)">^abc$</Value>
-    </Setting>
     <Setting Name="ShowItemFileUpload" Type="System.Boolean" Scope="Application">
       <Value Profile="(Default)">True</Value>
     </Setting>
     <Setting Name="ShowCertificateTools" Type="System.Boolean" Scope="Application">
       <Value Profile="(Default)">True</Value>
     </Setting>
-    <Setting Name="AutomaticallyAddedCertificatesList" Type="System.String" Scope="Application">
+    <Setting Name="AutomaticallyAddedCertificatesList" Type="System.Collections.Specialized.StringCollection" Scope="Application">
+      <Value Profile="(Default)">&lt;?xml version="1.0" encoding="utf-16"?&gt;
+&lt;ArrayOfString xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" /&gt;</Value>
+    </Setting>
+    <Setting Name="ItemTextExpressionFilter" Type="System.String" Scope="Application">
       <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="AllowSelfSignedCertificates" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="PerformCertificateRevocationCheck" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
     </Setting>
   </Settings>
 </SettingsFile>

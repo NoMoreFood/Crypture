@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.IO.Compression;
+using System.Windows.Controls;
 using System.Windows.Data;
 
 namespace Crypture
@@ -34,8 +35,6 @@ namespace Crypture
     {
         public object Convert(object[] values, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            //ObservableCollection<object> oList = (ObservableCollection<object>)values[0];
-            //  return oList.Contains(values[1]);
             return ((dynamic)values[0]).Contains((dynamic)values[1]);
         }
 
