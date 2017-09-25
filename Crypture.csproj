@@ -122,6 +122,7 @@
     <Compile Include="AboutBox.xaml.cs">
       <DependentUpon>AboutBox.xaml</DependentUpon>
     </Compile>
+    <Compile Include="CertificateOperations.cs" />
     <Compile Include="CryptureEntities.Context.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
@@ -137,7 +138,7 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>CryptureEntities.edmx</DependentUpon>
     </Compile>
-    <Compile Include="CertUtilsNative.cs" />
+    <Compile Include="CertificateNative.cs" />
     <Compile Include="CertWizard.xaml.cs">
       <DependentUpon>CertWizard.xaml</DependentUpon>
     </Compile>
@@ -216,7 +217,9 @@
     <None Include="CryptureEntities.edmx.diagram">
       <DependentUpon>CryptureEntities.edmx</DependentUpon>
     </None>
-    <None Include="packages.config" />
+    <None Include="packages.config">
+      <SubType>Designer</SubType>
+    </None>
     <None Include="Properties\app.manifest" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>

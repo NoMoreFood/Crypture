@@ -25,15 +25,6 @@ namespace Crypture.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("^abc$")]
-        public string ItemTextExpressionFilter {
-            get {
-                return ((string)(this["ItemTextExpressionFilter"]));
-            }
-        }
-        
-        [global::System.Configuration.ApplicationScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("True")]
         public bool ShowItemFileUpload {
             get {
@@ -52,10 +43,44 @@ namespace Crypture.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string AutomaticallyAddedCertificatesList {
+        [global::System.Configuration.DefaultSettingValueAttribute("<?xml version=\"1.0\" encoding=\"utf-16\"?>\r\n<ArrayOfString xmlns:xsi=\"http://www.w3." +
+            "org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" />")]
+        public global::System.Collections.Specialized.StringCollection AutomaticallyAddedCertificatesList {
             get {
-                return ((string)(this["AutomaticallyAddedCertificatesList"]));
+                return ((global::System.Collections.Specialized.StringCollection)(this["AutomaticallyAddedCertificatesList"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ItemTextExpressionFilter {
+            get {
+                return ((string)(this["ItemTextExpressionFilter"]));
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool AllowSelfSignedCertificates {
+            get {
+                return ((bool)(this["AllowSelfSignedCertificates"]));
+            }
+            set {
+                this["AllowSelfSignedCertificates"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool PerformCertificateRevocationCheck {
+            get {
+                return ((bool)(this["PerformCertificateRevocationCheck"]));
+            }
+            set {
+                this["PerformCertificateRevocationCheck"] = value;
             }
         }
     }
