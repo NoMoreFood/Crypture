@@ -10,7 +10,7 @@ set LIBURL=https://github.com/NoMoreFood/Crypture
 SET BASEDIR=%~dp0.
 SET BINDIR=%~dp0..\bin\Release
 SET OUTDIR=%~dp0..\Binaries
-SET VERSION=1.0.1.4
+SET VERSION=1.0.1.5
 
 :: cleanup binary directory
 DEL /F /S /Q "%BINDIR%\*.xml"

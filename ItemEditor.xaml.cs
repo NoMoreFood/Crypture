@@ -154,7 +154,7 @@ namespace Crypture
                     return;
                 }
      
-                using (Aes oCng = Aes.Create())
+                using (Aes oCng = AesCng.Create())
                 {
                     // create new cipher object and associate it with this id
                     ThisItem.Cipher = new Cipher();
@@ -189,17 +189,17 @@ namespace Crypture
                         byte[] oCipherByte = null;
                         using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
                         {
-                            if (Environment.OSVersion.Version.CompareTo(new Version(6, 2)) >= 0)
+                            // always attempt to use next generation classes first before 
+                            // resorting to using legacy crytographic classes
+                            try
                             {
-                                // For Windows 8 And Later
                                 using (RSA oRSA = oCert.GetRSAPublicKey())
                                 {
                                     oCipherByte = oRSA.Encrypt(oCng.Key, RSAEncryptionPadding.Pkcs1);
                                 }
                             }
-                            else
+                            catch (CryptographicException)
                             {
-                                // For Windows 7 And Earlier
                                 using (RSACryptoServiceProvider oRSA = oCert.PublicKey.Key as RSACryptoServiceProvider)
                                 {
                                     oCipherByte = oRSA.Encrypt(oCng.Key, false);
@@ -288,10 +288,11 @@ namespace Crypture
                 try
                 {
                     // setup an aes decryptor using the iv and decrypted key
-                    using (Aes oCng = Aes.Create())
+                    using (Aes oCng = AesCng.Create())
                     {
-                        // setup the aes key using the decrypted rsa data
-                        if (Environment.OSVersion.Version.CompareTo(new Version(6, 2)) >= 0)
+                        // always attempt to use next generation classes first before 
+                        // resorting to using legacy crytographic classes
+                        try
                         {
                             using (RSA oRSA = oCert.GetRSAPrivateKey())
                             {
@@ -299,7 +300,7 @@ namespace Crypture
                                 oCng.IV = ThisItem.Cipher.CipherVector;
                             }
                         }
-                        else
+                        catch (CryptographicException)
                         {
                             using (RSACryptoServiceProvider oRSA = oCert.PrivateKey as RSACryptoServiceProvider)
                             {
