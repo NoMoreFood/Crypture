@@ -16,6 +16,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Tulpep.ActiveDirectoryObjectPicker;
 
 namespace Crypture
@@ -75,7 +76,7 @@ namespace Crypture
             bool bIsTempDatabase = (sArgs.Length <= 1);
             string sTempDatabase = (bIsTempDatabase) ? Path.GetTempFileName() : sArgs[1];
 
-            // force an entity lookup to force all dependant assemblies to load
+            // force an entity lookup to force all dependent assemblies to load
             LoadDatabase(sTempDatabase, !bIsTempDatabase);
 
             // cleanup temporarily database
@@ -405,10 +406,15 @@ namespace Crypture
             {
                 if (bEnableControls)
                 {
-                    MessageBox.Show(this,
-                        "An error occurred during database loading: " +
+                    // this method can be called during the startup routine so launch at a 
+                    // lower disbatcher priority to make sure that the window is available
+                    Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => 
+                    {
+                        MessageBox.Show(this, "An error occurred during database loading: " +
                         Environment.NewLine + Environment.NewLine + eError.Message,
-                        "Error During Database Creation", MessageBoxButton.OK, MessageBoxImage.Error);
+                        "Error During Database Creation", MessageBoxButton.OK, MessageBoxImage.Error,
+                        MessageBoxResult.OK);
+                    }));
                 }
             }
         }
@@ -471,6 +477,22 @@ namespace Crypture
             using (CryptureEntities oContent = new CryptureEntities())
             {
                 oContent.Database.ExecuteSqlCommand(TransactionalBehavior.DoNotEnsureTransaction, "VACUUM;");
+            }
+
+            MessageBox.Show(this, "Compact operation complete.",
+                "Operation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void oItemBrowser_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(Properties.Settings.Default.StartupMessageText))
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate ()
+                {
+                    MessageBox.Show(this, Properties.Settings.Default.StartupMessageText,
+                        "Welcome To Crypture", MessageBoxButton.OK,
+                        MessageBoxImage.Information, MessageBoxResult.OK);
+                }));
             }
         }
     }

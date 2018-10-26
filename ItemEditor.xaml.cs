@@ -300,8 +300,11 @@ namespace Crypture
                                 oCng.IV = ThisItem.Cipher.CipherVector;
                             }
                         }
-                        catch (CryptographicException)
+                        catch (CryptographicException eCryptoOperation)
                         {
+                            // exit if user opted to cancel
+                            if ((uint) eCryptoOperation.HResult == 0x8010006E) return;
+
                             using (RSACryptoServiceProvider oRSA = oCert.PrivateKey as RSACryptoServiceProvider)
                             {
                                 oCng.Key = oRSA.Decrypt(oInstance.CipherKey, false);
