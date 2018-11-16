@@ -58,7 +58,7 @@ namespace Crypture
             return true;
         }
 
-        [DllImport("kernel32", CharSet = CharSet.Auto, SetLastError = true)]
+        [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern IntPtr LoadLibrary(string lpFileName);
 
         public ItemBrowser()
