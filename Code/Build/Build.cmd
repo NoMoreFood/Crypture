@@ -9,7 +9,7 @@ set LIBURL=https://github.com/NoMoreFood/Crypture
 :: setup environment variables based on location of this script
 SET BASEDIR=%~dp0.
 SET BINDIR=%~dp0..\bin\Release
-SET OUTDIR=%~dp0..\Binaries
+SET OUTDIR=%~dp0..\..\Binaries
 SET VERSION=1.0.1.7
 
 :: cleanup binary directory
