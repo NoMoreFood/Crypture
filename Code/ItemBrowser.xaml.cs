@@ -453,7 +453,7 @@ namespace Crypture
 
                 // create the new database and run the file
                 DatabaseOperations.CreateDatabase(oSaveDialog.FileName, sExecutionText);
-                LoadDatabase(oSaveDialog.FileName);
+                if (LoadDatabase(oSaveDialog.FileName)) oAddItemButton_Click(sender, e);
             });
         }
 
@@ -478,7 +478,7 @@ namespace Crypture
             }
         }
 
-        private void LoadDatabase(string sDatabase, bool bEnableControls = true)
+        private bool LoadDatabase(string sDatabase, bool bEnableControls = true)
         {
             string sPreviousConnection = CryptureEntities.ConnectionString;
             string sPreviousPath = sDatabasePath;
@@ -506,6 +506,7 @@ namespace Crypture
                 oSearchTextBox.IsEnabled = bEnableControls;
                 oDatabaseStatus.Text = sDatabase;
                 Title = "Crypture - " + Path.GetFileName(sDatabase);
+                return true;
             }
             catch (Exception eError)
             {
@@ -519,6 +520,7 @@ namespace Crypture
                         Environment.NewLine + Environment.NewLine + eError.GetBaseException().Message,
                         "Error During Vault Loading", MessageBoxButton.OK, MessageBoxImage.Error);
                 }));
+                return false;
             }
         }
 

@@ -12,9 +12,9 @@ including the `x86` and `x64` folders. The ZIP includes the signed executable an
 architectures; no installer or 7-Zip utility is needed. Application preferences are stored in your Windows user
 profile.
 
-1. Choose **Home → New** and select a location for your Vault.
-2. Choose **Add New Item**, enter an **Item Label** and the content to protect, then select a protection mode below.
-   Labels are visible without decryption, so keep secrets in the protected content.
+1. Choose **Home → New** and select a location for your Vault. The new-item dialog opens automatically.
+2. Enter an **Item Label** and the content to protect, then select a protection mode below. Use **Add New Item**
+   for additional items. Labels are visible without decryption, so keep secrets in the protected content.
 3. Choose **Encrypt & Save**. To open an item, double-click it and choose **Decrypt & Load**. Certificate private
    keys may require a PIN or password.
 
