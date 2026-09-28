@@ -10,6 +10,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using CertEnroll = CERTENROLLLib;
@@ -46,51 +47,27 @@ namespace Crypture
         public ObservableCollection<EkuOption> KeyUsages { get; } = new ObservableCollection<EkuOption>();
         public ObservableCollection<EkuOption> EnhancedKeyUsages { get; } = new ObservableCollection<EkuOption>();
 
-        public CertWizard()
+        private const string DefaultProviderName = "Microsoft Software Key Storage Provider";
+        private static readonly object ProviderCacheLock = new object();
+        private static Task<ProviderDetails> DefaultProviderCache;
+        private static Task<Dictionary<string, ProviderDetails>> AvailableProviderCache;
+        private readonly Func<bool, Task<ProviderDetails>> GetDefaultProvider;
+        private readonly Func<bool, Task<Dictionary<string, ProviderDetails>>> GetAvailableProviders;
+        private bool bUpdatingProviders;
+        private bool bLoadingProviders;
+        private bool bStarted;
+        private bool bClosed;
+
+        public CertWizard() : this(GetDefaultProviderAsync, GetAvailableProvidersAsync)
         {
+        }
+
+        internal CertWizard(Func<bool, Task<ProviderDetails>> oGetDefaultProvider,
+            Func<bool, Task<Dictionary<string, ProviderDetails>>> oGetAvailableProviders)
+        {
+            GetDefaultProvider = oGetDefaultProvider;
+            GetAvailableProviders = oGetAvailableProviders;
             InitializeComponent();
-
-            // create a list of all csp providers
-            CertEnroll.CCspInformations CspInformations = new CertEnroll.CCspInformations();
-            CspInformations.AddAvailableCsps();
-
-            // enumerate each provider
-            foreach (CertEnroll.ICspInformation oCsp in CspInformations)
-            {
-                // create a structure for display purposes
-                ProviderDetails oOpt = new ProviderDetails();
-                oOpt.IsHardware = oCsp.IsSmartCard || oCsp.IsHardwareDevice;
-                oOpt.IsLegacy = oCsp.LegacyCsp;
-                ProviderOptions.Add(oCsp.Name, oOpt);
-
-                // populate display structure with algorithmn information
-                foreach (CertEnroll.ICspAlgorithm oAlg in oCsp.CspAlgorithms)
-                {
-                    // special case: eliminate generic ecdsa that does not work
-                    if (oAlg.Name.Equals("ECDSA")) continue;
-
-                    // hash algorithms
-                    if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_HASH_INTERFACE)
-                    {
-                        if (oOpt.HashAlgorithmns.Contains(oAlg.Name)) continue;
-                        oOpt.HashAlgorithmns.Add(oAlg.Name);
-                    }
-
-                    // signature algorithms
-                    else if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_SIGNATURE_INTERFACE ||
-                        oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_ASYMMETRIC_ENCRYPTION_INTERFACE)
-                    {
-                        if (oOpt.SignatureAlgorithmns.Contains(oAlg.Name)) continue;
-                        oOpt.SignatureAlgorithmns.Add(oAlg.Name);
-                        oOpt.SignatureMinLengths.Add(oAlg.Name, oAlg.MinLength);
-                        oOpt.SignatureMaxLengths.Add(oAlg.Name, oAlg.MaxLength);
-                    }
-                }
-
-                // sort so rsa is near the top
-                oOpt.SignatureAlgorithmns = oOpt.SignatureAlgorithmns.
-                    OrderBy(x => x.Contains("_")).ThenBy(x => x).ToList();
-            }
 
             // set default values
             oValidFromDatePicker.SelectedDate = DateTime.Now;
@@ -118,6 +95,7 @@ namespace Crypture
                 EkuOption oOpt = new EkuOption();
                 oOpt.Name = Regex.Replace(sKeyUsage, "(\\B[A-Z])", " $1");
                 oOpt.Oid = sKeyUsage;
+                oOpt.Selected = sKeyUsage == nameof(X509KeyUsageFlags.KeyEncipherment);
                 KeyUsages.Add(oOpt);
             }
 
@@ -128,27 +106,236 @@ namespace Crypture
             oProviderType_Checked(null, null);
 
             // disable machine store option if user is not an admin
-            oCertificateStoreMachineRadio.IsEnabled = 
-                new WindowsPrincipal(WindowsIdentity.GetCurrent())
+            using (WindowsIdentity oIdentity = WindowsIdentity.GetCurrent())
+                oCertificateStoreMachineRadio.IsEnabled = new WindowsPrincipal(oIdentity)
                     .IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        private static Task<ProviderDetails> GetDefaultProviderAsync(bool bRefresh)
+        {
+            lock (ProviderCacheLock)
+            {
+                if (DefaultProviderCache == null || DefaultProviderCache.IsFaulted ||
+                    (bRefresh && DefaultProviderCache.IsCompleted))
+                    DefaultProviderCache = Task.Run(() =>
+                    {
+                        CertEnroll.CCspInformation oCsp = new CertEnroll.CCspInformation();
+                        try
+                        {
+                            oCsp.InitializeFromName(DefaultProviderName);
+                            return ReadProviderDetails(oCsp);
+                        }
+                        finally
+                        {
+                            Marshal.FinalReleaseComObject(oCsp);
+                        }
+                    });
+                return DefaultProviderCache;
+            }
+        }
+
+        private static Task<Dictionary<string, ProviderDetails>> GetAvailableProvidersAsync(bool bRefresh)
+        {
+            lock (ProviderCacheLock)
+            {
+                if (AvailableProviderCache == null || AvailableProviderCache.IsFaulted ||
+                    (bRefresh && AvailableProviderCache.IsCompleted))
+                    AvailableProviderCache = Task.Run(() =>
+                    {
+                        // create a list of all csp providers
+                        CertEnroll.CCspInformations CspInformations = new CertEnroll.CCspInformations();
+                        try
+                        {
+                            CspInformations.AddAvailableCsps();
+                            var oProviders = new Dictionary<string, ProviderDetails>();
+
+                            // enumerate each provider
+                            for (int nIndex = 0; nIndex < CspInformations.Count; nIndex++)
+                            {
+                                CertEnroll.ICspInformation oCsp = CspInformations[nIndex];
+                                try
+                                {
+                                    oProviders.Add(oCsp.Name, ReadProviderDetails(oCsp));
+                                }
+                                finally
+                                {
+                                    Marshal.FinalReleaseComObject(oCsp);
+                                }
+                            }
+                            return oProviders;
+                        }
+                        finally
+                        {
+                            Marshal.FinalReleaseComObject(CspInformations);
+                        }
+                    });
+                return AvailableProviderCache;
+            }
+        }
+
+        private static ProviderDetails ReadProviderDetails(CertEnroll.ICspInformation oCsp)
+        {
+            // create a structure for display purposes
+            ProviderDetails oOpt = new ProviderDetails();
+            oOpt.IsHardware = oCsp.IsSmartCard || oCsp.IsHardwareDevice;
+            oOpt.IsLegacy = oCsp.LegacyCsp;
+            CertEnroll.ICspAlgorithms oAlgorithms = oCsp.CspAlgorithms;
+            try
+            {
+                // populate display structure with algorithmn information
+                for (int nIndex = 0; nIndex < oAlgorithms.Count; nIndex++)
+                {
+                    CertEnroll.ICspAlgorithm oAlg = oAlgorithms[nIndex];
+                    try
+                    {
+                        // special case: eliminate generic ecdsa that does not work
+                        if (oAlg.Name.Equals("ECDSA")) continue;
+                        if (oAlg.Name.StartsWith("ECDH", StringComparison.Ordinal) &&
+                            oAlg.Name != "ECDH_P256" && oAlg.Name != "ECDH_P384" && oAlg.Name != "ECDH_P521") continue;
+
+                        // hash algorithms
+                        if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_HASH_INTERFACE)
+                        {
+                            if (oOpt.HashAlgorithmns.Contains(oAlg.Name)) continue;
+                            oOpt.HashAlgorithmns.Add(oAlg.Name);
+                        }
+
+                        // signature algorithms
+                        else if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_SIGNATURE_INTERFACE ||
+                            oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_ASYMMETRIC_ENCRYPTION_INTERFACE ||
+                            (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_SECRET_AGREEMENT_INTERFACE &&
+                                oAlg.Name.StartsWith("ECDH", StringComparison.Ordinal)))
+                        {
+                            if (oOpt.SignatureAlgorithmns.Contains(oAlg.Name)) continue;
+                            oOpt.SignatureAlgorithmns.Add(oAlg.Name);
+                            oOpt.SignatureMinLengths.Add(oAlg.Name, oAlg.MinLength);
+                            oOpt.SignatureMaxLengths.Add(oAlg.Name, oAlg.MaxLength);
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FinalReleaseComObject(oAlg);
+                    }
+                }
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(oAlgorithms);
+            }
+
+            // sort so rsa is near the top
+            oOpt.SignatureAlgorithmns = oOpt.SignatureAlgorithmns.
+                OrderBy(x => x.Contains("_")).ThenBy(x => x).ToList();
+            return oOpt;
+        }
+
+        private async void oWizardWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (bStarted) return;
+            bStarted = true;
+            await LoadProvidersAsync(false);
+        }
+
+        private void oWizardWindow_Closed(object sender, EventArgs e)
+        {
+            bClosed = true;
+        }
+
+        private async void oRefreshProvidersButton_Click(object sender, RoutedEventArgs e)
+        {
+            await LoadProvidersAsync(true);
+        }
+
+        private async Task LoadProvidersAsync(bool bRefresh)
+        {
+            if (bLoadingProviders || bClosed) return;
+            bLoadingProviders = true;
+            oRefreshProvidersButton.IsEnabled = false;
+            oProviderStatus.Text = "Loading default provider...";
+            oProviderStatus.ToolTip = null;
+            try
+            {
+                ProviderDetails oDefault = await GetDefaultProvider(bRefresh);
+                if (bClosed) return;
+                if (bRefresh) ProviderOptions.Clear();
+                ProviderOptions[DefaultProviderName] = oDefault;
+                oProviderType_Checked(null, null);
+                oProviderStatus.Text = "Loading other providers; you can use the selected provider now.";
+
+                Dictionary<string, ProviderDetails> oProviders = await GetAvailableProviders(bRefresh);
+                if (bClosed) return;
+                foreach (var oProvider in oProviders)
+                {
+                    if (oProvider.Key != DefaultProviderName) ProviderOptions[oProvider.Key] = oProvider.Value;
+                }
+                oProviderType_Checked(null, null);
+                oProviderStatus.Text = oProviderComboBox.SelectedItem == null
+                    ? "No providers match the current filters." : "Ready.";
+            }
+            catch (Exception oError)
+            {
+                if (bClosed) return;
+                oProviderStatus.Text = ProviderOptions.Count == 0
+                    ? "Could not load providers. Refresh to retry."
+                    : "Additional providers could not be loaded. Refresh to retry.";
+                oProviderStatus.ToolTip = oError.GetBaseException().Message;
+            }
+            finally
+            {
+                bLoadingProviders = false;
+                if (!bClosed) oRefreshProvidersButton.IsEnabled = true;
+            }
         }
 
         private void oProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (SelectedProvider == null) return;
-            oSignatureComboBox.ItemsSource = ProviderOptions[SelectedProvider].SignatureAlgorithmns;
-            oHashComboBox.ItemsSource = ProviderOptions[SelectedProvider].HashAlgorithmns;
-            oSignatureComboBox_SelectionChanged(null, null);
+            if (bUpdatingProviders || oSignatureComboBox == null || oHashComboBox == null ||
+                oGenerateButton == null) return;
+            oGenerateButton.IsEnabled = false;
+            SelectedProvider = oProviderComboBox.SelectedItem as string;
+            ProviderDetails oProvider;
+            if (SelectedProvider == null || !ProviderOptions.TryGetValue(SelectedProvider, out oProvider))
+            {
+                oSignatureComboBox.ItemsSource = null;
+                oHashComboBox.ItemsSource = null;
+                return;
+            }
+            oSignatureComboBox.ItemsSource = oProvider.SignatureAlgorithmns;
+            oHashComboBox.ItemsSource = oProvider.HashAlgorithmns;
+            oSignatureComboBox.SelectedItem = oProvider.SignatureAlgorithmns.Contains("RSA")
+                ? "RSA" : oProvider.SignatureAlgorithmns.FirstOrDefault();
+            oHashComboBox.SelectedItem = oProvider.HashAlgorithmns.Contains("SHA256")
+                ? "SHA256" : oProvider.HashAlgorithmns.FirstOrDefault();
+            oGenerateButton.IsEnabled = oSignatureComboBox.SelectedItem != null && oHashComboBox.SelectedItem != null;
         }
 
         private void oProviderType_Checked(object sender, RoutedEventArgs e)
         {
-            if (oSoftwareCheckbox == null || oHardwareCheckbox == null || oShowLegacyCheckbox == null) return;
+            if (oSoftwareCheckbox == null || oHardwareCheckbox == null || oShowLegacyCheckbox == null ||
+                oGenerateButton == null) return;
 
-            oProviderComboBox.ItemsSource = ProviderOptions.Where(p =>
-                ((oShowLegacyCheckbox.IsChecked.Value) ? true : !p.Value.IsLegacy) &&
-                (p.Value.IsHardware && oHardwareCheckbox.IsChecked.Value ||
-                !p.Value.IsHardware && oSoftwareCheckbox.IsChecked.Value)).Select(p => p.Key);
+            string sPrevious = SelectedProvider;
+            string[] oNames = ProviderOptions.Where(p =>
+                (oShowLegacyCheckbox.IsChecked == true || !p.Value.IsLegacy) &&
+                (p.Value.IsHardware && oHardwareCheckbox.IsChecked == true ||
+                !p.Value.IsHardware && oSoftwareCheckbox.IsChecked == true)).Select(p => p.Key).ToArray();
+            bUpdatingProviders = true;
+            try
+            {
+                oProviderComboBox.ItemsSource = oNames;
+                oProviderComboBox.SelectedItem = oNames.Contains(sPrevious) ? sPrevious
+                    : oNames.Contains(DefaultProviderName) ? DefaultProviderName : oNames.FirstOrDefault();
+            }
+            finally
+            {
+                bUpdatingProviders = false;
+            }
+            string sSelected = oProviderComboBox.SelectedItem as string;
+            if (sSelected != SelectedProvider || sSelected == null ||
+                oSignatureComboBox.ItemsSource != ProviderOptions[sSelected].SignatureAlgorithmns)
+                oProviderComboBox_SelectionChanged(null, null);
+            if (bStarted && !bLoadingProviders && oProviderStatus.ToolTip == null)
+                oProviderStatus.Text = sSelected == null ? "No providers match the current filters." : "Ready.";
         }
 
         private void oSignatureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -159,7 +346,17 @@ namespace Crypture
             oKeyLengthTextBox.Text = "";
 
             // sanity check
-            if (SelectedSignature == null) return;
+            SelectedSignature = oSignatureComboBox.SelectedItem as string;
+            if (SelectedProvider == null || SelectedSignature == null ||
+                !ProviderOptions[SelectedProvider].SignatureMinLengths.ContainsKey(SelectedSignature)) return;
+
+            bool bAgreement = SelectedSignature.StartsWith("ECDH", StringComparison.Ordinal);
+            bool bSigning = SelectedSignature.StartsWith("ECDSA", StringComparison.Ordinal);
+            foreach (EkuOption oUsage in KeyUsages)
+                oUsage.Selected = oUsage.Oid == (bAgreement ? nameof(X509KeyUsageFlags.KeyAgreement)
+                    : bSigning ? nameof(X509KeyUsageFlags.DigitalSignature)
+                    : nameof(X509KeyUsageFlags.KeyEncipherment));
+            oKeyUsageCombobox.Items.Refresh();
 
             // get potential key lengths
             int MinLength = ProviderOptions[SelectedProvider].SignatureMinLengths[SelectedSignature];
@@ -176,115 +373,176 @@ namespace Crypture
                     "Minimum Length: {0}, Maximum Length: {1}",
                     MinLength.ToString(), MaxLength.ToString());
                 oKeyLengthTextBox.IsEnabled = true;
+                oKeyLengthTextBox.Text = Math.Max(MinLength, Math.Min(MaxLength, 2048)).ToString();
             }
         }
 
         private void oGenerateButton_Click(object sender, RoutedEventArgs e)
         {
-            CertEnroll.CCspInformation oProviderInfo = new CertEnroll.CCspInformation();
-            oProviderInfo.InitializeFromName(SelectedProvider);
-
-            // create DN for subject and issuer
-            CertEnroll.CX500DistinguishedName oSubjectDistinguishedName = new CertEnroll.CX500DistinguishedName();
-            oSubjectDistinguishedName.Encode("CN=" + oSubjectTextBox.Text,
-                CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
-
-            // create CN for subject and issuer
-            CertEnroll.CX500DistinguishedName oIssuerDistinguishedName = new CertEnroll.CX500DistinguishedName();
-            oIssuerDistinguishedName.Encode("CN=" + oIssuerTextBox.Text,
-                CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
-
-            // create a new private key for the certificate
-            CertEnroll.IX509PrivateKey oPrivateKey = (CertEnroll.IX509PrivateKey)Activator.CreateInstance(Type.GetTypeFromProgID("X509Enrollment.CX509PrivateKey"));
-            try
+            Utilities.TryOperation(this, () =>
             {
-                oPrivateKey.ProviderName = (string)oProviderComboBox.SelectedValue;
-                oPrivateKey.Algorithm = oProviderInfo.CspAlgorithms.ItemByName[
-                oSignatureComboBox.SelectedValue.ToString()].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
-                oPrivateKey.MachineContext = oCertificateStoreMachineRadio.IsChecked.Value;
-                oPrivateKey.Length = Convert.ToInt32(oKeyLengthTextBox.Text);
-                oPrivateKey.KeyProtection = (oPasswordProtectCheckbox.IsChecked.Value) ?
-                CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG;
-                oPrivateKey.ExportPolicy = (oKeyExportableCheckbox.IsChecked.Value) ?
-                    (CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
-                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG) :
-                    CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE;
-                oPrivateKey.Create();
-            }
-            catch (Exception eError)
-            {
-                // note to the user the creation failed
-                MessageBox.Show(this, "Certificate private key could not be constructed. This is often " +
-                    "due to an invalid set of parameters being selected that is not supported by the " + 
-                    "cryptographic provider.  The specific error message returned is below: " +
-                    Environment.NewLine + Environment.NewLine + eError.Message,
-                    "Creation Failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
+                ProviderDetails oProvider;
+                int nKeyLength;
+                SelectedHash = oHashComboBox.SelectedItem as string;
+                bool bSelfSigned = oCertificateSelfSignedRadio.IsChecked == true;
+                if (SelectedProvider == null || !ProviderOptions.TryGetValue(SelectedProvider, out oProvider) ||
+                    SelectedSignature == null || !oProvider.SignatureAlgorithmns.Contains(SelectedSignature) ||
+                    SelectedHash == null || !oProvider.HashAlgorithmns.Contains(SelectedHash) ||
+                    !Int32.TryParse(oKeyLengthTextBox.Text, out nKeyLength) ||
+                    nKeyLength < oProvider.SignatureMinLengths[SelectedSignature] ||
+                    nKeyLength > oProvider.SignatureMaxLengths[SelectedSignature] ||
+                    (SelectedSignature == "RSA" && nKeyLength < 2048) ||
+                    String.IsNullOrWhiteSpace(oSubjectTextBox.Text) ||
+                    (bSelfSigned && (!oValidFromDatePicker.SelectedDate.HasValue ||
+                        !oValidUntilDatePicker.SelectedDate.HasValue ||
+                        oValidUntilDatePicker.SelectedDate <= oValidFromDatePicker.SelectedDate)))
+                    throw new InvalidOperationException("Select a provider, algorithms, a supported key length, " +
+                        "a subject name, and a valid date range. RSA keys must be at least 2048 bits.");
 
-            // set the signature mechanism for the certificate
-            CertEnroll.CObjectId oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
+                if (bSelfSigned && !String.IsNullOrWhiteSpace(oIssuerTextBox.Text) &&
+                    !String.Equals(oSubjectTextBox.Text.Trim(), oIssuerTextBox.Text.Trim(), StringComparison.Ordinal))
+                    throw new InvalidOperationException("For a self-signed certificate, " +
+                        "leave the issuer blank or use the subject name.");
 
-            // create a certificate request with the requested info
-            CertEnroll.CX509CertificateRequestCertificate oCertRequestInfo = new CertEnroll.CX509CertificateRequestCertificate();
-            oCertRequestInfo.InitializeFromPrivateKey(CertEnroll.X509CertificateEnrollmentContext.ContextUser, oPrivateKey, "");
-            oCertRequestInfo.Subject = oSubjectDistinguishedName;
-            oCertRequestInfo.Issuer = oIssuerDistinguishedName;
-            oCertRequestInfo.NotBefore = oValidFromDatePicker.SelectedDate.Value;
-            oCertRequestInfo.NotAfter = oValidUntilDatePicker.SelectedDate.Value;
-            oCertRequestInfo.HashAlgorithm = oHash;
-
-            // translate the list to a list that the enrollment will understand key a list of key
-            // usages to use
-            if (EnhancedKeyUsages.Where(k => k.Selected).Count() > 0)
-            {
-                CertEnroll.CObjectIds oKeyUsagesToAdd = new CertEnroll.CObjectIds();
-                foreach (EkuOption oKeyUsage in EnhancedKeyUsages.Where(k => k.Selected))
+                string sRequestPath = null;
+                if (!bSelfSigned)
                 {
-                    CertEnroll.CObjectId oOID = new CertEnroll.CObjectId();
-                    oOID.InitializeFromValue(oKeyUsage.Oid);
-                    oKeyUsagesToAdd.Add(oOID);
+                    // ask the user where to store the file
+                    SaveFileDialog oSaveDialog = new SaveFileDialog
+                    {
+                        Filter = "Certificate Request (*.csr)|*.csr|All Files (*.*)|*.*",
+                        DefaultExt = ".csr", AddExtension = true, ValidateNames = true
+                    };
+                    if (oSaveDialog.ShowDialog(this) != true) return;
+                    sRequestPath = oSaveDialog.FileName;
                 }
-                CertEnroll.CX509ExtensionEnhancedKeyUsage oKeyUsageList = new CertEnroll.CX509ExtensionEnhancedKeyUsage();
-                oKeyUsageList.InitializeEncode(oKeyUsagesToAdd);
-                oCertRequestInfo.X509Extensions.Add((CertEnroll.CX509Extension)oKeyUsageList);
-            }
 
-            // create an enrollment request
-            oCertRequestInfo.Encode();
-            CertEnroll.CX509Enrollment oEnrollRequest = new CertEnroll.CX509Enrollment();
-            oEnrollRequest.InitializeFromRequest(oCertRequestInfo);
-            
+                CertEnroll.CCspInformation oProviderInfo = new CertEnroll.CCspInformation();
+                oProviderInfo.InitializeFromName(SelectedProvider);
 
-            // install certificate into selected certificate store
-            if (oCertificateSelfSignedRadio.IsChecked.Value)
-            {
-                string sCertRequestString = oEnrollRequest.CreateRequest();
-                oEnrollRequest.InstallResponse(CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
-                    sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, "");
-            }
+                // create DN for subject and issuer
+                CertEnroll.CX500DistinguishedName oSubjectDistinguishedName = new CertEnroll.CX500DistinguishedName();
+                oSubjectDistinguishedName.Encode("CN=\"" + oSubjectTextBox.Text.Trim().Replace("\"", "\"\"") + "\"",
+                    CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
 
-            // produce request file
-            else
-            {
-                // ask the user where to store the file
-                SaveFileDialog oSaveDialog = new SaveFileDialog()
+                // create a new private key for the certificate
+                CertEnroll.IX509PrivateKey oPrivateKey = new CertEnroll.CX509PrivateKey();
+                bool bCreated = false;
+                bool bSaved = false;
+                try
                 {
-                    Filter = "Certificate Request (*.csr)|*.csr|All Files (*.*)|*.*",
-                    AddExtension = true,
-                    ValidateNames = true
-                };
-                if (!oSaveDialog.ShowDialog(this).Value) return;
+                    oPrivateKey.ProviderName = SelectedProvider;
+                    oPrivateKey.Algorithm = oProviderInfo.CspAlgorithms.ItemByName[SelectedSignature].GetAlgorithmOid(
+                        0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
+                    oPrivateKey.MachineContext = oCertificateStoreMachineRadio.IsChecked == true;
+                    oPrivateKey.Length = nKeyLength;
+                    if (SelectedSignature == "RSA")
+                    {
+                        oPrivateKey.KeySpec = CertEnroll.X509KeySpec.XCN_AT_KEYEXCHANGE;
+                        oPrivateKey.KeyUsage = CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_DECRYPT_FLAG |
+                            CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_SIGNING_FLAG;
+                    }
+                    else if (SelectedSignature.StartsWith("ECDH", StringComparison.Ordinal))
+                    {
+                        oPrivateKey.KeyUsage = CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_KEY_AGREEMENT_FLAG |
+                            CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_SIGNING_FLAG;
+                    }
+                    oPrivateKey.KeyProtection = oPasswordProtectCheckbox.IsChecked == true
+                        ? CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG
+                        : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG;
+                    oPrivateKey.ExportPolicy = oKeyExportableCheckbox.IsChecked == true
+                        ? CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
+                            CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG
+                        : CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE;
+                    oPrivateKey.Create();
+                    bCreated = true;
 
-                // write the file
-                string sCertRequestString = oEnrollRequest.CreateRequest(CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER);
-                System.IO.File.WriteAllText(oSaveDialog.FileName, 
-                    sCertRequestString, Encoding.ASCII);
-            }
+                    // set the signature mechanism for the certificate
+                    CertEnroll.CObjectId oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(
+                        0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
+                    CertEnroll.X509CertificateEnrollmentContext oContext = oPrivateKey.MachineContext
+                        ? CertEnroll.X509CertificateEnrollmentContext.ContextMachine
+                        : CertEnroll.X509CertificateEnrollmentContext.ContextUser;
 
-            // note to the user the create was successful
-            MessageBox.Show(this, "Certificate successfully created.", 
-                "Creation Successful", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // create a certificate request with the requested info
+                    CertEnroll.IX509CertificateRequestPkcs10 oCertRequestInfo;
+                    if (bSelfSigned)
+                    {
+                        var oCertificate = new CertEnroll.CX509CertificateRequestCertificate();
+                        oCertificate.InitializeFromPrivateKey(oContext, oPrivateKey, "");
+                        oCertificate.Issuer = oSubjectDistinguishedName;
+                        oCertificate.NotBefore = oValidFromDatePicker.SelectedDate.Value;
+                        oCertificate.NotAfter = oValidUntilDatePicker.SelectedDate.Value;
+                        oCertRequestInfo = oCertificate;
+                    }
+                    else
+                    {
+                        oCertRequestInfo = new CertEnroll.CX509CertificateRequestPkcs10();
+                        oCertRequestInfo.InitializeFromPrivateKey(oContext, oPrivateKey, "");
+                    }
+                    oCertRequestInfo.Subject = oSubjectDistinguishedName;
+                    oCertRequestInfo.HashAlgorithm = oHash;
+
+                    X509KeyUsageFlags oUsage = X509KeyUsageFlags.None;
+                    foreach (EkuOption oOption in KeyUsages.Where(k => k.Selected))
+                        oUsage |= (X509KeyUsageFlags)Enum.Parse(typeof(X509KeyUsageFlags), oOption.Oid);
+                    if (oUsage != X509KeyUsageFlags.None)
+                    {
+                        CertEnroll.CX509ExtensionKeyUsage oKeyUsage = new CertEnroll.CX509ExtensionKeyUsage();
+                        oKeyUsage.InitializeEncode((CertEnroll.X509KeyUsageFlags)oUsage);
+                        oCertRequestInfo.X509Extensions.Add((CertEnroll.CX509Extension)oKeyUsage);
+                    }
+
+                    // translate the list to a list that the enrollment will understand key a list of key
+                    // usages to use
+                    if (EnhancedKeyUsages.Any(k => k.Selected))
+                    {
+                        CertEnroll.CObjectIds oKeyUsagesToAdd = new CertEnroll.CObjectIds();
+                        foreach (EkuOption oKeyUsage in EnhancedKeyUsages.Where(k => k.Selected))
+                        {
+                            CertEnroll.CObjectId oOID = new CertEnroll.CObjectId();
+                            oOID.InitializeFromValue(oKeyUsage.Oid);
+                            oKeyUsagesToAdd.Add(oOID);
+                        }
+                        var oKeyUsageList = new CertEnroll.CX509ExtensionEnhancedKeyUsage();
+                        oKeyUsageList.InitializeEncode(oKeyUsagesToAdd);
+                        oCertRequestInfo.X509Extensions.Add((CertEnroll.CX509Extension)oKeyUsageList);
+                    }
+
+                    // create an enrollment request
+                    oCertRequestInfo.Encode();
+                    CertEnroll.CX509Enrollment oEnrollRequest = new CertEnroll.CX509Enrollment();
+                    oEnrollRequest.InitializeFromRequest(oCertRequestInfo);
+
+                    // install certificate into selected certificate store
+                    if (bSelfSigned)
+                    {
+                        string sCertRequestString = oEnrollRequest.CreateRequest();
+                        oEnrollRequest.InstallResponse(
+                            CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
+                            sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, "");
+                    }
+                    // produce request file
+                    else
+                    {
+                        string sCertRequestString = oEnrollRequest.CreateRequest(
+                            CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER);
+                        System.IO.File.WriteAllText(sRequestPath, sCertRequestString, Encoding.ASCII);
+                    }
+                    bSaved = true;
+                }
+                finally
+                {
+                    if (bCreated && !bSaved) oPrivateKey.Delete();
+                    else if (bCreated) oPrivateKey.Close();
+                    Marshal.FinalReleaseComObject(oPrivateKey);
+                }
+
+                // note to the user the create was successful
+                MessageBox.Show(this, bSelfSigned ? "Certificate successfully created."
+                    : "Certificate request saved. The private key remains in the selected Windows key store.",
+                    "Creation Successful", MessageBoxButton.OK, MessageBoxImage.Information);
+            });
         }
     }
 }

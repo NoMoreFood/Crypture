@@ -12,11 +12,23 @@ namespace Crypture.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "15.8.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "17.2.0.0")]
     internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase {
         
         private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
         
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("System")]
+        public string ThemeMode {
+            get {
+                return ((string)(this["ThemeMode"]));
+            }
+            set {
+                this["ThemeMode"] = value;
+            }
+        }
+
         public static Settings Default {
             get {
                 return defaultInstance;
@@ -38,16 +50,6 @@ namespace Crypture.Properties {
         public bool ShowCertificateTools {
             get {
                 return ((bool)(this["ShowCertificateTools"]));
-            }
-        }
-        
-        [global::System.Configuration.ApplicationScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("<?xml version=\"1.0\" encoding=\"utf-16\"?>\r\n<ArrayOfString xmlns:xsi=\"http://www.w3." +
-            "org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" />")]
-        public global::System.Collections.Specialized.StringCollection AutomaticallyAddedCertificatesList {
-            get {
-                return ((global::System.Collections.Specialized.StringCollection)(this["AutomaticallyAddedCertificatesList"]));
             }
         }
         
@@ -90,6 +92,16 @@ namespace Crypture.Properties {
         public string StartupMessageText {
             get {
                 return ((string)(this["StartupMessageText"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("<?xml version=\"1.0\" encoding=\"utf-16\"?>\r\n<ArrayOfString xmlns:xsd=\"http://www.w3." +
+            "org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" />")]
+        public global::System.Collections.Specialized.StringCollection AutomaticallyAddedCertificatesList {
+            get {
+                return ((global::System.Collections.Specialized.StringCollection)(this["AutomaticallyAddedCertificatesList"]));
             }
         }
     }

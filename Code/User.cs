@@ -11,8 +11,6 @@ namespace Crypture
 {
     using System;
     using System.Collections.Generic;
-    using System.Security.Cryptography.X509Certificates;
-    using System.Security.Principal;
 
     public partial class User
     {
@@ -23,50 +21,6 @@ namespace Crypture
             this.Items = new HashSet<Item>();
         }
     
-        public string Name
-        {
-            get
-            {
-                using (X509Certificate2 oCert = new X509Certificate2(Certificate))
-                {
-                    return oCert.GetNameInfo(X509NameType.SimpleName, false);
-                }                    
-            }
-        }
-
-        public bool IsSelfSigned
-        {
-            get
-            {
-                using (X509Certificate2 oCert = new X509Certificate2(Certificate))
-                {
-                    using (X509Chain oChain = new X509Chain())
-                    {
-                        // build the chain based on the specified policy
-                        oChain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                        oChain.Build(oCert);
-
-                        // check for self signed
-                        if (oChain.ChainElements.Count == 1 &&
-                            oChain.ChainStatus[0].Status == X509ChainStatusFlags.UntrustedRoot)
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
-            }
-        }
-
-        public bool IsOwnedByCurrentUser
-        {
-            get
-            {
-                return WindowsIdentity.GetCurrent().User.Value.Equals(Sid);
-            }
-        }
-
         public long UserId { get; set; }
         public byte[] Certificate { get; set; }
         public string Sid { get; set; }

@@ -1,4 +1,5 @@
 ﻿using System;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
@@ -27,6 +28,22 @@ namespace Crypture
         [DllImport("crypt32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
+
+        [DllImport("crypt32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CryptVerifyCertificateSignatureEx(IntPtr hProvider, uint nEncoding,
+            uint nSubjectType, IntPtr pSubject, uint nIssuerType, IntPtr pIssuer, uint nFlags, IntPtr pExtra);
+
+        [DllImport("crypt32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CryptAcquireCertificatePrivateKey(IntPtr pCertificate, uint nFlags,
+            IntPtr pParameters, out SafeNCryptKeyHandle pKey, out uint nKeySpec,
+            [MarshalAs(UnmanagedType.Bool)] out bool bCallerFrees);
+
+        [DllImport("crypt32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CertGetCertificateContextProperty(IntPtr pCertificate, uint nProperty,
+            IntPtr pData, ref uint nSize);
 
         internal static bool GetExtendedKeyUsagesCallback(IntPtr pInfo, ref OidCollection pvParam)
         {

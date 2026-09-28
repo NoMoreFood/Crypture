@@ -1,19 +1,21 @@
 ﻿using Fluent;
 using Microsoft.Win32;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Data.Entity;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Security.Principal;
+using System.Threading.Tasks;
+using Tulpep.ActiveDirectoryObjectPicker;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 
 namespace Crypture
@@ -24,12 +26,24 @@ namespace Crypture
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
         public ObservableCollection<User> UserListSelected { get; set; } = new ObservableCollection<User>();
         public byte[] BinaryItemData { get; set; }
+        private bool bLoading = true;
+        private bool bHasChanges;
+        private bool bCompleted;
+        private bool bBusy;
+        private readonly bool bDomainJoined = PrincipalProtection.IsDomainJoined;
+        private readonly ObservableCollection<ProtectionPrincipal> PrincipalList =
+            new ObservableCollection<ProtectionPrincipal>();
+        private string sStoredLabel;
+        private string sStoredItemType;
+        private long? nStoredModifiedBy;
 
         public ItemEditor(bool bNewItem = true)
         {
             ThisItem.Label = "My New Item";
+            ThisItem.ItemType = "text";
             DataContext = ThisItem;
             InitializeComponent();
+            Utilities.EnableClipboardTimeout(oItemData);
 
             // setup sorting for the drop down list of certs
             oItemSharedWith.Items.IsLiveSorting = true;
@@ -42,181 +56,167 @@ namespace Crypture
                 new SortDescription(oAddCertDropDown.DisplayMemberPath, ListSortDirection.Ascending));
 
             // add in our keys by default
-            if (bNewItem) using (CryptureEntities oContent = new CryptureEntities())
-                {
-                    string sCurrentUser = WindowsIdentity.GetCurrent().User.Value;
-                    UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
-                    UserListSelected = new ObservableCollection<User>(oContent.Users.Where(
-                        u => u.Sid.Equals(sCurrentUser)));
-                    if (UserListSelected.Count > 0)
-                    {
-                        ThisItem.ModifiedBy = UserListSelected[0].UserId;
-                    }
-
-                    // initialize the date values to something reasonable
-                    ThisItem.CreatedDate = DateTime.MinValue;
-                    ThisItem.ModifiedDate = DateTime.MinValue;
-
-                    oItemSharedWith.ItemsSource = UserListSelected;
-                    oAddCertDropDown.ItemsSource = UserList;
-                    ThisItem.ItemType = "text";
-                }
+            if (bNewItem) LoadUsers(true);
+            oPrincipalList.ItemsSource = PrincipalList;
+            oDomainScope.IsEnabled = bDomainJoined;
+            oPrincipalScope.SelectedIndex = !bDomainJoined || String.Equals(Environment.UserDomainName,
+                Environment.MachineName, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            if (bNewItem)
+            {
+                PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
+                oProtectionMode.SelectedIndex = CertificateOperations.GetAutomaticCertificates().Count == 0 ? 0 : 1;
+            }
 
             // show certificate generator based on settings file
-            oUploadAFile.Visibility = (Properties.Settings.Default.ShowItemFileUpload) ?
-                Visibility.Visible : Visibility.Collapsed;
+            oUploadAFile.Visibility = Properties.Settings.Default.ShowItemFileUpload
+                ? Visibility.Visible : Visibility.Collapsed;
 
             // set editing controls
             SetEditingControls(bNewItem);
+            bLoading = false;
         }
 
         public ItemEditor(Item oItem) : this(false)
         {
+            ThisItem = DatabaseOperations.LoadItem(oItem.ItemId);
+            sStoredLabel = ThisItem.Label;
+            sStoredItemType = ThisItem.ItemType;
+            nStoredModifiedBy = ThisItem.ModifiedBy;
+            DataContext = ThisItem;
+            LoadUsers(false);
+            LoadProtection();
+            SetEditingControls(false);
+        }
+
+        private void LoadUsers(bool bNewItem)
+        {
             using (CryptureEntities oContent = new CryptureEntities())
-            {
-                // attach the passed item to the database context
-                ThisItem = oItem;
-                oContent.Entry(ThisItem).State = EntityState.Unchanged;
-                oContent.Entry(ThisItem).Reload();
-
-                // force visual refresh
-                DataContext = ThisItem;
-
-                // populate the full user list and the selected user list
-                UserList = new ObservableCollection<User>(oContent.Users.ToList<User>());
-                UserListSelected = new ObservableCollection<User>(
-                    ThisItem.Instances.Select(i => i.User).Distinct());
-                oItemSharedWith.ItemsSource = UserListSelected;
-                oAddCertDropDown.ItemsSource = UserList;
-            }
+                UserList = new ObservableCollection<User>(oContent.Users.ToList());
+            HashSet<string> oPrivateCertificates = CertificateOperations.GetPrivateCertificateData();
+            List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
+            UserListSelected = new ObservableCollection<User>(UserList.Where(u => bNewItem
+                ? oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)) ||
+                    oAutomatic.Any(c => c.SequenceEqual(u.Certificate))
+                : ThisItem.Instances.Any(i => i.UserId == u.UserId)));
+            oItemSharedWith.ItemsSource = UserListSelected;
+            oAddCertDropDown.ItemsSource = UserList;
+            if (bNewItem) ThisItem.ModifiedBy = UserListSelected.FirstOrDefault(u =>
+                oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))?.UserId;
         }
 
         public void SetEditingControls(bool bEnabled)
         {
             // toggle what controls are available based on whether item item is decoded
             oAddCertDropDown.IsEnabled = bEnabled;
+            oProtectionMode.IsEnabled = bEnabled;
+            oPrincipalScope.IsEnabled = bEnabled;
+            oPrincipalControls.IsEnabled = bEnabled && bDomainJoined;
+            oPrincipalMatch.IsEnabled = bEnabled && bDomainJoined;
             oLoadItemButton.IsEnabled = !bEnabled;
             oSaveItemButton.IsEnabled = bEnabled;
             oItemData.IsEnabled = bEnabled;
+            oItemLabel.IsReadOnly = !bEnabled;
             oUploadAFile.IsEnabled = bEnabled;
+            oGeneratePasswordButton.IsEnabled = bEnabled && ThisItem.ItemType == "text";
+            oRemoveItemButton.IsEnabled = ThisItem.ItemId != 0;
+            oLockItemButton.IsEnabled = bEnabled && ThisItem.ItemId != 0;
 
             // control panel display
-            oTextLockImage.Visibility = (bEnabled) ? Visibility.Collapsed : Visibility.Visible;
-            oItemData.Visibility = (bEnabled && ThisItem.ItemType.Equals("text")) ? Visibility.Visible : Visibility.Collapsed;
-            oDownloadPanel.Visibility = (bEnabled && !ThisItem.ItemType.Equals("text")) ? Visibility.Visible : Visibility.Collapsed;
+            oTextLockImage.Visibility = bEnabled ? Visibility.Collapsed : Visibility.Visible;
+            oItemData.Visibility = bEnabled && ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
+            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType != "text"
+                ? Visibility.Visible : Visibility.Collapsed;
+            oItemStatus.Text = !bEnabled ? "Locked - decrypt to view or edit this item."
+                : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == 0
+                ? "Legacy encryption - save this item to add tamper detection." : "Unlocked - content is visible.";
+            UpdateProtectionControls();
         }
 
-        private void oSaveItemButton_Click(object sender, RoutedEventArgs e)
+        private async void oSaveItemButton_Click(object sender, RoutedEventArgs e)
         {
-            // perform data validation if in text mode and option is set
-            if (ThisItem.ItemType.Equals("text") &&
-                !String.IsNullOrWhiteSpace(Properties.Settings.Default.ItemTextExpressionFilter))
+            if (bBusy) return;
+            bool bSaved = false;
+            SetBusy(true, "Encrypting and saving...");
+            try
             {
-                if (!Regex.Match(oItemData.Text, Properties.Settings.Default.ItemTextExpressionFilter).Success)
+                bSaved = await Utilities.TryOperationAsync(this, async () =>
                 {
-                    // note to the user that the data was invalid
-                    MessageBox.Show(this, "The item text provided does not satifsy the content filter.",
-                        "Invalid Item Text", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-            }
+                    if (String.IsNullOrWhiteSpace(ThisItem.Label))
+                        throw new InvalidOperationException("Enter an item label before saving.");
 
-            // update the entity using the local copy we have
-            using (CryptureEntities oContent = new CryptureEntities())
-            {
-                oContent.Entry(ThisItem).State = (ThisItem.CreatedDate == DateTime.MinValue)
-                    ? EntityState.Added : EntityState.Modified;
+                    // perform data validation if in text mode and option is set
+                    if (ThisItem.ItemType == "text" &&
+                        !String.IsNullOrWhiteSpace(Properties.Settings.Default.ItemTextExpressionFilter) &&
+                        !Regex.IsMatch(oItemData.Text, Properties.Settings.Default.ItemTextExpressionFilter,
+                            RegexOptions.None, TimeSpan.FromSeconds(2)))
+                        throw new InvalidOperationException(
+                            "The item text provided does not satisfy the content filter.");
 
-                // verify the selected users
-                foreach (User oUser in UserListSelected.ToArray())
-                {
-                    using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
+                    string sDescriptor = null;
+                    if (oProtectionMode.SelectedIndex == 0)
                     {
-                        if (CertificateOperations.CheckCertificateStatus(oCert) == false &&
-                            MessageBox.Show(this,
-                            "The certificate for '" + oUser.Name + "' cannot be verified. " +
-                            "Should this certificate be removed from the list?",
-                            "Cannot Verify Certificate",
-                            MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                        if (CertificateOperations.GetAutomaticCertificates().Count != 0)
+                            throw new InvalidOperationException("Required recipient certificates are configured. " +
+                                "Use certificate protection or ask the administrator to update that configuration.");
+                        if (oPrincipalScope.SelectedIndex == 0 && !String.IsNullOrWhiteSpace(oPrincipalName.Text))
+                            throw new InvalidOperationException("Add the entered account to the recipient list, " +
+                                "or clear the account field before saving.");
+                        sDescriptor = oPrincipalScope.SelectedIndex == 1 ? PrincipalProtection.LocalUserDescriptor
+                            : oPrincipalScope.SelectedIndex == 2 ? PrincipalProtection.LocalMachineDescriptor
+                            : PrincipalProtection.CreateDescriptor(PrincipalList, oPrincipalMatch.SelectedIndex == 1);
+                    }
+                    else
+                    {
+                        foreach (byte[] oRequired in CertificateOperations.GetAutomaticCertificates())
                         {
-                            // remove from list and force refresh
-                            UserListSelected.Remove(oUser);
-                            oAddCertDropDown.Items.Refresh();
+                            User oUser = UserList.FirstOrDefault(u => u.Certificate.SequenceEqual(oRequired));
+                            if (oUser == null)
+                                throw new InvalidOperationException(
+                                    "A required certificate is missing. Reopen the Vault.");
+                            if (!UserListSelected.Contains(oUser)) UserListSelected.Add(oUser);
                         }
-                    }
-                }
 
-                // error if there are no selected users
-                if (UserListSelected.Count == 0)
-                {
-                    MessageBox.Show(this, "This certificate share list is empty and cannot be saved.",
-                        "Empty Certificates List", MessageBoxButton.OK, MessageBoxImage.Question);
-                    return;
-                }
-     
-                using (Aes oCng = AesCng.Create())
-                {
-                    // create new cipher object and associate it with this id
-                    ThisItem.Cipher = new Cipher();
-                    ThisItem.Cipher.Item = ThisItem;
-
-                    using (MemoryStream oMemory = new MemoryStream())
-                    using (CryptoStream oCrypto = new CryptoStream(
-                        oMemory, oCng.CreateEncryptor(), CryptoStreamMode.Write))
-                    {
-                        byte[] oPlainByte = ThisItem.ItemType.Equals("text") ?
-                            Encoding.Unicode.GetBytes(oItemData.Text) : BinaryItemData;
-                        oCrypto.Write(oPlainByte, 0, oPlainByte.Length);
-                        oCrypto.FlushFinalBlock();
-                        ThisItem.Cipher.CipherText = oMemory.ToArray();
-                    }
-
-                    ThisItem.Cipher.CipherVector = oCng.IV;
-                    ThisItem.CreatedDate = DateTime.Now;
-                    ThisItem.ModifiedDate = DateTime.Now;
-
-                    // clear out any existing instances
-                    oContent.Instances.RemoveRange(ThisItem.Instances);
-
-                    // encode each instance
-                    foreach (User oUser in UserListSelected)
-                    {
-                        Instance oInstance = new Instance();
-                        oInstance.Signature = new byte[] { };
-                        oInstance.UserId = oUser.UserId;
-                        oInstance.ItemId = ThisItem.ItemId;
-
-                        byte[] oCipherByte = null;
-                        using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
+                        // verify the selected users
+                        foreach (User oUser in UserListSelected)
                         {
-                            // always attempt to use next generation classes first before 
-                            // resorting to using legacy crytographic classes
-                            try
+                            using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
                             {
-                                using (RSA oRSA = oCert.GetRSAPublicKey())
-                                {
-                                    oCipherByte = oRSA.Encrypt(oCng.Key, RSAEncryptionPadding.Pkcs1);
-                                }
-                            }
-                            catch (CryptographicException)
-                            {
-                                using (RSACryptoServiceProvider oRSA = oCert.PublicKey.Key as RSACryptoServiceProvider)
-                                {
-                                    oCipherByte = oRSA.Encrypt(oCng.Key, false);
-                                }
+                                CertificateKeyProtection.ValidateForEncryption(oCert);
+                                if (!CertificateOperations.CheckCertificateStatus(oCert))
+                                    throw new InvalidOperationException("The certificate for '" + oUser.Name +
+                                        "' is not valid for encryption. Review the sharing list " +
+                                        "and certificate settings.");
                             }
                         }
 
-                        oInstance.CipherKey = oCipherByte;
-                        ThisItem.Instances.Add(oInstance);
+                        // error if there are no selected users
+                        if (UserListSelected.Count == 0)
+                            throw new InvalidOperationException("Select at least one recipient using Share With.");
                     }
-                }
-
-                // commit changes to database
-                oContent.SaveChanges();
+                    List<User> oRecipients = UserListSelected.ToList();
+                    byte[] oPlainText = ThisItem.ItemType == "text"
+                        ? Encoding.Unicode.GetBytes(oItemData.Text) : BinaryItemData;
+                    try
+                    {
+                        // commit changes to database
+                        await Task.Run(() => DatabaseOperations.SaveItem(
+                            ThisItem, oPlainText, oRecipients, sDescriptor));
+                    }
+                    finally
+                    {
+                        if (ThisItem.ItemType == "text" && oPlainText != null)
+                            Array.Clear(oPlainText, 0, oPlainText.Length);
+                    }
+                });
             }
+            finally
+            {
+                SetBusy(false);
+            }
+            if (!bSaved) return;
 
             // close and return to calling dialog
+            bCompleted = true;
             Close();
         }
 
@@ -226,197 +226,388 @@ namespace Crypture
             using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
             {
                 oStore.Open(OpenFlags.ReadOnly);
-
-                // collate the database certificates to those locally available
-                X509Certificate2Collection oMyCertCollection = new X509Certificate2Collection();
-                foreach (X509Certificate2 oStoreUser in oStore.Certificates)
+                X509Certificate2Collection oStoreCertificates = oStore.Certificates;
+                try
                 {
-                    foreach (User oUser in SourceUserList) if (oStoreUser.HasPrivateKey)
-                        {
-                            if (StructuralComparisons.StructuralEqualityComparer.Equals(
-                                oUser.Certificate, oStoreUser.RawData))
-                            {
-                                oMyCertCollection.Add(oStoreUser);
-                            }
-                        }
-                }
+                    // collate the database certificates to those locally available
+                    X509Certificate2Collection oMyCertCollection = new X509Certificate2Collection();
+                    foreach (X509Certificate2 oStoreUser in oStoreCertificates)
+                    {
+                        if (oStoreUser.HasPrivateKey && SourceUserList.Any(u =>
+                            u.Certificate.SequenceEqual(oStoreUser.RawData))) oMyCertCollection.Add(oStoreUser);
+                    }
 
-                // error if no valid local certification might be available local certif
-                if (oMyCertCollection.Count == 0)
+                    // error if no valid local certification might be available local certif
+                    if (oMyCertCollection.Count == 0)
+                        throw new InvalidOperationException("No matching private key " +
+                            "was found in your personal certificate store.");
+
+                    // allow the certificate
+                    X509Certificate2Collection oCollection = X509Certificate2UI.SelectFromCollection(oMyCertCollection,
+                        "Select Certificate", "Select Certificate To Decode", X509SelectionFlag.SingleSelection,
+                        new WindowInteropHelper(this).Handle);
+                    return oCollection.Count == 0 ? null : new X509Certificate2(oCollection[0]);
+                }
+                finally
                 {
-                    MessageBox.Show(this,
-                        "Could not find any certificates to decode this item.",
-                        "Not Shared With You");
-                    return null;
+                    foreach (X509Certificate2 oStoreUser in oStoreCertificates) oStoreUser.Dispose();
                 }
-
-                // allow the certificate
-                X509Certificate2Collection oCollection = X509Certificate2UI.SelectFromCollection(oMyCertCollection,
-                    "Select Certificate", "Select Certificate To Decode", X509SelectionFlag.SingleSelection,
-                    new WindowInteropHelper(this).Handle);
-                if (oCollection.Count == 0) return null;
-
-                // verify the selected cert is not revoked
-                if (CertificateOperations.CheckCertificateStatus(oCollection[0]) == false)
-                {
-                    // alert user and return
-                    MessageBox.Show(this, "The selected certificate cannot be verified.",
-                        "Cannot Verify Certificate", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                    return null;
-                }
-
-                return oCollection[0];
             }
         }
 
-        private void oLoadItemButton_Click(object sender, RoutedEventArgs e)
+        private async void oLoadItemButton_Click(object sender, RoutedEventArgs e)
         {
-            // select all the certs associated with this user
-            X509Certificate2 oCert = GetUserKey(UserListSelected.Where<User>(u => u.IsOwnedByCurrentUser));
-            if (oCert == null) return;
-
-            using (CryptureEntities oContent = new CryptureEntities())
+            if (bBusy) return;
+            SetBusy(true, "Checking access and decrypting...");
+            try
             {
-                // reconnect our instance so we can lookup the cipher
-                oContent.Entry(ThisItem).State = EntityState.Unchanged;
-
-                // look for the matching instance
-                Instance oInstance = ThisItem.Instances.Where(
-                    i => StructuralComparisons.StructuralEqualityComparer.Equals(
-                    i.User.Certificate, oCert.RawData)).FirstOrDefault();
-
-                try
+                await Utilities.TryOperationAsync(this, async () =>
                 {
-                    // setup an aes decryptor using the iv and decrypted key
-                    using (Aes oCng = AesCng.Create())
+                    byte[] oPlainText;
+                    long? nModifier = null;
+                    if (ThisItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat)
+                        oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem));
+                    else
                     {
-                        // always attempt to use next generation classes first before 
-                        // resorting to using legacy crytographic classes
-                        try
+                        // select all the certs associated with this user
+                        using (X509Certificate2 oCert = GetUserKey(UserListSelected))
                         {
-                            using (RSA oRSA = oCert.GetRSAPrivateKey())
+                            if (oCert == null) return;
+                            Instance oInstance = ThisItem.Instances.FirstOrDefault(
+                                i => i.User.Certificate.SequenceEqual(oCert.RawData));
+                            try
                             {
-                                oCng.Key = oRSA.Decrypt(oInstance.CipherKey, RSAEncryptionPadding.Pkcs1);
-                                oCng.IV = ThisItem.Cipher.CipherVector;
+                                oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem, oInstance, oCert));
                             }
-                        }
-                        catch (CryptographicException eCryptoOperation)
-                        {
-                            // exit if user opted to cancel
-                            if ((uint) eCryptoOperation.HResult == 0x8010006E) return;
-
-                            using (RSACryptoServiceProvider oRSA = oCert.PrivateKey as RSACryptoServiceProvider)
+                            catch (CryptographicException oError) when ((uint)oError.HResult == 0x8010006E ||
+                                (uint)oError.HResult == 0x80090036 || (uint)oError.HResult == 0x800704C7)
                             {
-                                oCng.Key = oRSA.Decrypt(oInstance.CipherKey, false);
-                                oCng.IV = ThisItem.Cipher.CipherVector;
+                                return;
                             }
-                        }
-
-                        // attempt to decode the data
-                        using (MemoryStream oMemory = new MemoryStream())
-                        using (CryptoStream oCrypto = new CryptoStream(
-                            oMemory, oCng.CreateDecryptor(), CryptoStreamMode.Write))
-                        {
-                            oCrypto.Write(ThisItem.Cipher.CipherText, 0, ThisItem.Cipher.CipherText.Length);
-                            oCrypto.FlushFinalBlock();
-
-                            // process text item
-                            if (ThisItem.ItemType == "text")
-                            {
-                                oItemData.Text = Encoding.Unicode.GetString(oMemory.ToArray());
-                            }
-
-                            // text binary item
-                            else
-                            {
-                                BinaryItemData = oMemory.ToArray();
-                            }
+                            nModifier = oInstance.UserId;
                         }
                     }
-                    // change the ui to allow saving again
-                    SetEditingControls(true);
-                }
-                catch (Exception eError)
-                {
-                    MessageBox.Show(this,
-                        "An error occurred during item decryption: " +
-                        Environment.NewLine + Environment.NewLine + eError.Message,
-                        "Error During Item Decryption", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                    bLoading = true;
+                    try
+                    {
+                        // process text item
+                        if (ThisItem.ItemType == "text") oItemData.Text = Encoding.Unicode.GetString(oPlainText);
+                        // text binary item
+                        else BinaryItemData = oPlainText;
+                        ThisItem.ModifiedBy = nModifier;
+                        SetEditingControls(true);
+                    }
+                    finally
+                    {
+                        if (ThisItem.ItemType == "text") Array.Clear(oPlainText, 0, oPlainText.Length);
+                        bLoading = false;
+                    }
+                });
             }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private void SetBusy(bool bEnabled, string sStatus = null)
+        {
+            bBusy = bEnabled;
+            ribbon.IsEnabled = !bEnabled;
+            oEditorPanels.IsEnabled = !bEnabled;
+            Cursor = bEnabled ? Cursors.Wait : null;
+            if (bEnabled) oItemStatus.Text = sStatus;
+            else SetEditingControls(oSaveItemButton.IsEnabled);
+        }
+
+        private void LoadProtection()
+        {
+            bool bWasLoading = bLoading;
+            bLoading = true;
+            try
+            {
+                bool bPrincipals = ThisItem.Cipher?.CipherParams == ItemCryptography.PrincipalFormat;
+                oProtectionMode.SelectedIndex = bPrincipals ? 0 : 1;
+                PrincipalList.Clear();
+                if (!bPrincipals) return;
+                string sDescriptor = ThisItem.Cipher.ProtectionDescriptor;
+                bool bRequireAll;
+                foreach (ProtectionPrincipal oPrincipal in PrincipalProtection.ParseDescriptor(
+                    sDescriptor, out bRequireAll)) PrincipalList.Add(oPrincipal);
+                oPrincipalScope.SelectedIndex = sDescriptor == PrincipalProtection.LocalUserDescriptor ? 1
+                    : sDescriptor == PrincipalProtection.LocalMachineDescriptor ? 2 : 0;
+                oPrincipalMatch.SelectedIndex = bRequireAll ? 1 : 0;
+            }
+            finally
+            {
+                bLoading = bWasLoading;
+                UpdateProtectionControls();
+            }
+        }
+
+        private void UpdateProtectionControls()
+        {
+            if (oPrincipalPanel == null || oPrincipalHint == null || oCertificatePanel == null) return;
+            bool bPrincipals = oProtectionMode.SelectedIndex == 0;
+            bool bLocal = oPrincipalScope.SelectedIndex != 0;
+            bool bRequiredCertificates = CertificateOperations.GetAutomaticCertificates().Count != 0;
+            oRequiredCertificateNotice.Visibility = bRequiredCertificates ? Visibility.Visible : Visibility.Collapsed;
+            oPrincipalPanel.Visibility = bPrincipals ? Visibility.Visible : Visibility.Collapsed;
+            oCertificatePanel.Visibility = bPrincipals ? Visibility.Collapsed : Visibility.Visible;
+            oCertificateSharingGroup.Visibility = bPrincipals ? Visibility.Collapsed : Visibility.Visible;
+            oPrincipalTargets.Visibility = bLocal ? Visibility.Collapsed : Visibility.Visible;
+            oDomainNotice.Visibility = bDomainJoined ? Visibility.Collapsed : Visibility.Visible;
+            oPrincipalHint.Text = oPrincipalScope.SelectedIndex == 2
+                ? "Every user on the computer used to encrypt this item can decrypt it " +
+                    "if they can read the Vault. This grants access to all local users, " +
+                    "not a selected group. Copying it to another computer does not grant access."
+                : bLocal ? "Only the Windows profile used to encrypt this item can decrypt it. " +
+                    "Copying the Vault does not transfer access."
+                : "Domain users and security groups require Active Directory key distribution. " +
+                    "Local accounts and groups are not supported in this scope. " +
+                    "Include yourself or a recovery group if you need access after saving.";
+        }
+
+        private void oProtectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateProtectionControls();
+            if (!bLoading && oSaveItemButton != null && oSaveItemButton.IsEnabled) bHasChanges = true;
+        }
+
+        private async void oAddPrincipal_Click(object sender, RoutedEventArgs e)
+        {
+            if (bBusy) return;
+            string sAccount = oPrincipalName.Text;
+            SetBusy(true, "Resolving Windows account...");
+            try
+            {
+                await Utilities.TryOperationAsync(this, async () =>
+                {
+                    AddPrincipal(await Task.Run(() => ProtectionPrincipal.Resolve(sAccount)));
+                    oPrincipalName.Clear();
+                });
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private void AddPrincipal(ProtectionPrincipal oPrincipal)
+        {
+            if (PrincipalList.Any(p => p.Sid == oPrincipal.Sid)) return;
+            if (PrincipalList.Count >= PrincipalProtection.MaxPrincipals)
+                throw new InvalidOperationException("An item can have up to 100 Windows principals.");
+            PrincipalList.Add(oPrincipal);
+            bHasChanges = true;
+        }
+
+        private void oAddCurrentPrincipal_Click(object sender, RoutedEventArgs e)
+        {
+            Utilities.TryOperation(this, () =>
+                AddPrincipal(new ProtectionPrincipal(CertificateOperations.CurrentUserSid)));
+        }
+
+        private void oRemovePrincipal_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(oPrincipalList.SelectedItem is ProtectionPrincipal oPrincipal)) return;
+            PrincipalList.Remove(oPrincipal);
+            bHasChanges = true;
+        }
+
+        private void oBrowsePrincipals_Click(object sender, RoutedEventArgs e)
+        {
+            Utilities.TryOperation(this, () =>
+            {
+                using (DirectoryObjectPickerDialog oPicker = new DirectoryObjectPickerDialog
+                {
+                    DefaultObjectTypes = ObjectTypes.Users | ObjectTypes.Groups,
+                    AllowedObjectTypes = ObjectTypes.Users | ObjectTypes.Groups | ObjectTypes.Computers |
+                        ObjectTypes.ServiceAccounts | ObjectTypes.WellKnownPrincipals | ObjectTypes.BuiltInGroups,
+                    DefaultLocations = Locations.JoinedDomain,
+                    AllowedLocations = Locations.JoinedDomain | Locations.EnterpriseDomain |
+                        Locations.GlobalCatalog | Locations.ExternalDomain,
+                    MultiSelect = true
+                })
+                {
+                    oPicker.AttributesToFetch.Add("objectSid");
+                    if (oPicker.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+                    foreach (DirectoryObject oObject in oPicker.SelectedObjects)
+                    {
+                        if (!(oObject.FetchedAttributes[0] is byte[] oSid))
+                            throw new InvalidOperationException(
+                                "The selected object has no Windows security identifier.");
+                        AddPrincipal(new ProtectionPrincipal(new SecurityIdentifier(oSid, 0).Value));
+                    }
+                }
+            });
         }
 
         private void MenuItemWithRadioButtons_Click(object sender, RoutedEventArgs e)
         {
             Fluent.MenuItem oMenu = (Fluent.MenuItem)sender;
             User oUser = (User)oMenu.DataContext;
+            if (CertificateOperations.GetAutomaticCertificates().Any(c => c.SequenceEqual(oUser.Certificate)))
+            {
+                if (!UserListSelected.Contains(oUser))
+                {
+                    UserListSelected.Add(oUser);
+                    bHasChanges = true;
+                }
+                oMenu.IsChecked = true;
+                return;
+            }
             bool bIsInList = UserListSelected.Contains(oUser);
-
             if (bIsInList) UserListSelected.Remove(oUser);
             else UserListSelected.Add(oUser);
-
             oMenu.IsChecked = !bIsInList;
+            bHasChanges = true;
         }
 
         private void oRemoveItemButton_Click(object sender, RoutedEventArgs e)
         {
             // confirm removal
-            if (MessageBox.Show(this,
-                    "Are you sure you want to remove this item?",
-                    "Removal Confirmation", MessageBoxButton.YesNo,
-                    MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            if (ThisItem.ItemId == 0 || MessageBox.Show(this,
+                "Are you sure you want to remove this item?", "Removal Confirmation", MessageBoxButton.YesNo,
+                MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
 
-            using (CryptureEntities oContent = new CryptureEntities())
+            if (!Utilities.TryOperation(this, () =>
             {
-                oContent.Entry(ThisItem).State = EntityState.Unchanged;
-                oContent.Items.Remove(ThisItem);
-                oContent.SaveChanges();
-                Close();
-            }
+                using (CryptureEntities oContent = new CryptureEntities())
+                {
+                    Item oStored = oContent.Items.Find(ThisItem.ItemId);
+                    if (oStored != null) oContent.Items.Remove(oStored);
+                    oContent.SaveChanges();
+                }
+            })) return;
+            bCompleted = true;
+            Close();
+        }
+
+        private bool ConfirmDiscard()
+        {
+            return !bHasChanges || MessageBox.Show(this, "Discard your unsaved changes?", "Unsaved Changes",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+        }
+
+        private void ClearPlainText()
+        {
+            bLoading = true;
+            oItemData.Clear();
+            if (BinaryItemData != null) Array.Clear(BinaryItemData, 0, BinaryItemData.Length);
+            BinaryItemData = null;
+            bLoading = false;
         }
 
         private void oRootWindow_Closing(object sender, CancelEventArgs e)
         {
-            // force collection in case the user loaded a large set of text into memory
-            GC.Collect();
+            if (bBusy || !bCompleted && !ConfirmDiscard())
+            {
+                e.Cancel = true;
+                return;
+            }
+            ClearPlainText();
+        }
+
+        private void oLockItemButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!ConfirmDiscard()) return;
+            ClearPlainText();
+            bLoading = true;
+            ThisItem.Label = sStoredLabel;
+            ThisItem.ItemType = sStoredItemType;
+            ThisItem.ModifiedBy = nStoredModifiedBy;
+            DataContext = null;
+            DataContext = ThisItem;
+            UserListSelected = new ObservableCollection<User>(UserList.Where(u =>
+                ThisItem.Instances.Any(i => i.UserId == u.UserId)));
+            oItemSharedWith.ItemsSource = UserListSelected;
+            oAddCertDropDown.Items.Refresh();
+            LoadProtection();
+            SetEditingControls(false);
+            bHasChanges = false;
+            bLoading = false;
+        }
+
+        private void oItemChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!bLoading && oSaveItemButton != null && oSaveItemButton.IsEnabled) bHasChanges = true;
+        }
+
+        private void oRootWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (bBusy || Keyboard.Modifiers != ModifierKeys.Control) return;
+            if (e.Key == Key.S && oSaveItemButton.IsEnabled) oSaveItemButton_Click(sender, e);
+            else if (e.Key == Key.L && oLockItemButton.IsEnabled) oLockItemButton_Click(sender, e);
+            else return;
+            e.Handled = true;
+        }
+
+        private void oGeneratePasswordButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (bBusy || !oSaveItemButton.IsEnabled || ThisItem.ItemType != "text") return;
+            Utilities.TryOperation(this, () =>
+            {
+                PasswordGenerator oGenerator = new PasswordGenerator(true) { Owner = this };
+                if (oGenerator.ShowDialog() != true) return;
+                int nStart = oItemData.SelectionStart;
+                oItemData.SelectedText = oGenerator.SelectedPassword;
+                oItemData.Select(nStart + oGenerator.SelectedPassword.Length, 0);
+                oItemData.Focus();
+            });
         }
 
         private void oUploadAFile_Click(object sender, RoutedEventArgs e)
         {
-            OpenFileDialog oOpenDialog = new OpenFileDialog()
+            OpenFileDialog oOpenDialog = new OpenFileDialog { Filter = "All Files (*.*)|*.*", CheckFileExists = true };
+            if (oOpenDialog.ShowDialog(this) != true || !ConfirmDiscard()) return;
+            Utilities.TryOperation(this, () =>
             {
-                Filter = "All Files (*.*)|*.*",
-                CheckFileExists = true
-            };
-            if (oOpenDialog.ShowDialog(this).Value)
-            {
+                byte[] oFileData = Utilities.ReadFile(oOpenDialog.FileName);
+                byte[] oCompressed;
+                try
+                {
+                    oCompressed = Utilities.Compress(oFileData);
+                }
+                finally
+                {
+                    Array.Clear(oFileData, 0, oFileData.Length);
+                }
+                ClearPlainText();
+                BinaryItemData = oCompressed;
                 ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
-                BinaryItemData = Utilities.Compress(File.ReadAllBytes(oOpenDialog.FileName));
                 SetEditingControls(true);
-            }
+                bHasChanges = true;
+            });
         }
 
-        private void oDownloadPanel_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        private void oDownloadPanel_Click(object sender, RoutedEventArgs e)
         {
-            // generate the filter field to use based on the stored item type
-            string sFilter = "All Files (*.*)|*.*";
-            if (!String.IsNullOrEmpty(ThisItem.ItemType) && ThisItem.ItemType.StartsWith("."))
+            Utilities.TryOperation(this, () =>
             {
-                sFilter = String.Format("{0} Files (*{0})|*{0}|", ThisItem.ItemType) + sFilter;
-            }
+                // generate the filter field to use based on the stored item type
+                string sFilter = "All Files (*.*)|*.*";
+                if (Regex.IsMatch(ThisItem.ItemType, @"^\.[a-zA-Z0-9]{1,16}$"))
+                    sFilter = String.Format("{0} Files (*{0})|*{0}|", ThisItem.ItemType) + sFilter;
 
-            // ask the user where to store the file
-            SaveFileDialog oSaveDialog = new SaveFileDialog()
-            {
-                Filter = sFilter,
-                AddExtension = true,
-                ValidateNames = true
-            };
-            if (!oSaveDialog.ShowDialog(this).Value) return;
+                // ask the user where to store the file
+                SaveFileDialog oSaveDialog = new SaveFileDialog
+                {
+                    Filter = sFilter, AddExtension = true, ValidateNames = true
+                };
+                if (oSaveDialog.ShowDialog(this) != true) return;
 
-            // write data to file
-            File.WriteAllBytes(oSaveDialog.FileName,
-                Utilities.Decompress(BinaryItemData));
+                // write data to file
+                byte[] oFileData = Utilities.Decompress(BinaryItemData);
+                try
+                {
+                    File.WriteAllBytes(oSaveDialog.FileName, oFileData);
+                }
+                finally
+                {
+                    Array.Clear(oFileData, 0, oFileData.Length);
+                }
+            });
         }
     }
 }

@@ -42,6 +42,8 @@ namespace <#=code.EscapeNamespace(codeNamespace)#>
 #>
 using System;
 using System.Data.Entity;
+using System.Data.Entity.Core.EntityClient;
+using System.Data.SQLite;
 using System.Data.Entity.Infrastructure;
 <#
 if (container.FunctionImports.Any())
@@ -55,9 +57,31 @@ using System.Linq;
 
 <#=Accessibility.ForType(container)#> partial class <#=code.Escape(container)#> : DbContext
 {
-    public <#=code.Escape(container)#>()
-        : base("name=<#=container.Name#>")
+    public static string ConnectionString { get; set; } = "";
+
+    public static string DatabasePath
     {
+        set
+        {
+            SQLiteConnectionStringBuilder oSQLite = new SQLiteConnectionStringBuilder();
+            oSQLite.CacheSize = 2048;
+            oSQLite.DataSource = value;
+            oSQLite.FailIfMissing = true;
+            oSQLite.ForeignKeys = true;
+            oSQLite.Version = 3;
+            EntityConnectionStringBuilder oBuilder = new EntityConnectionStringBuilder();
+            oBuilder.Metadata = "res://*/CryptureEntities.csdl|res://*/CryptureEntities.ssdl|res://*/CryptureEntities.msl";
+            oBuilder.Provider = "System.Data.SQLite.EF6";
+            oBuilder.ProviderConnectionString = oSQLite.ConnectionString;
+            ConnectionString = oBuilder.ConnectionString;
+        }
+    }
+
+    public <#=code.Escape(container)#>()
+        : base(ConnectionString)
+    {
+        Configuration.LazyLoadingEnabled = false;
+        Configuration.ProxyCreationEnabled = false;
 <#
 if (!loader.IsLazyLoadingEnabled(container))
 {

@@ -8,7 +8,8 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>Crypture</RootNamespace>
     <AssemblyName>Crypture</AssemblyName>
-    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <FileAlignment>512</FileAlignment>
     <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <WarningLevel>4</WarningLevel>
@@ -27,7 +28,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.0.0.%2a</ApplicationVersion>
+    <ApplicationVersion>2.0.0.0</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>false</BootstrapperEnabled>
   </PropertyGroup>
@@ -82,6 +83,24 @@
     <Reference Include="Fluent, Version=6.1.0.326, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>packages\Fluent.Ribbon.6.1.0.326\lib\net462\Fluent.dll</HintPath>
     </Reference>
+    <Reference Include="Microsoft.Bcl.Cryptography">
+      <HintPath>packages\Microsoft.Bcl.Cryptography.10.0.12\lib\net462\Microsoft.Bcl.Cryptography.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Formats.Asn1">
+      <HintPath>packages\System.Formats.Asn1.10.0.12\lib\net462\System.Formats.Asn1.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>packages\System.Memory.4.6.3\lib\net462\System.Memory.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.6.1.2\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>packages\System.Buffers.4.6.1\lib\net462\System.Buffers.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>packages\System.Numerics.Vectors.4.6.1\lib\net462\System.Numerics.Vectors.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Data" />
@@ -105,6 +124,7 @@
     <Reference Include="System.Xml" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Numerics" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Xaml">
       <RequiredTargetFramework>4.0</RequiredTargetFramework>
@@ -122,6 +142,18 @@
       <DependentUpon>AboutBox.xaml</DependentUpon>
     </Compile>
     <Compile Include="CertificateOperations.cs" />
+    <Compile Include="DatabaseOperations.cs" />
+    <Compile Include="VaultHealthCheck.cs" />
+    <Compile Include="VaultHealthWindow.xaml.cs">
+      <DependentUpon>VaultHealthWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ItemCryptography.cs" />
+    <Compile Include="CertificateKeyProtection.cs" />
+    <Compile Include="PrincipalProtection.cs" />
+    <Compile Include="PasswordGeneration.cs" />
+    <Compile Include="PasswordGenerator.xaml.cs">
+      <DependentUpon>PasswordGenerator.xaml</DependentUpon>
+    </Compile>
     <Compile Include="CryptureEntities.Context.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
@@ -162,6 +194,10 @@
       <DependentUpon>CryptureEntities.tt</DependentUpon>
     </Compile>
     <Compile Include="Utilities.cs" />
+    <Page Include="Themes\Controls.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="AboutBox.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -169,6 +205,14 @@
     <Page Include="CertWizard.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="VaultHealthWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="PasswordGenerator.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
     <Page Include="ItemEditor.xaml">
       <SubType>Designer</SubType>
@@ -259,6 +303,10 @@
     <Resource Include="Images\Compress.png" />
     <Resource Include="Images\Upload.png" />
     <Resource Include="Images\Download.png" />
+    <None Include="Data\License - DotNet Libraries.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>DotNet.Notices.txt</TargetPath>
+    </None>
     <None Include="Data\License - Crypture.txt" />
     <None Include="Data\License - ControlzEx.txt" />
     <None Include="Data\License - Fluent Ribbon.txt" />

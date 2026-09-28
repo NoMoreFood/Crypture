@@ -18,6 +18,9 @@ namespace Crypture
         public byte[] CipherText { get; set; }
         public byte[] CipherVector { get; set; }
         public long CipherParams { get; set; }
+        public string ProtectionDescriptor { get; set; }
+        public byte[] ProtectedKey { get; set; }
+        public byte[] Signature { get; set; }
     
         public virtual Item Item { get; set; }
     }

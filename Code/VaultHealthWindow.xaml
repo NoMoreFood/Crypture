@@ -1,0 +1,82 @@
+<Window x:Class="Crypture.VaultHealthWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Vault Health Check" Width="940" Height="700"
+    MinWidth="760" MinHeight="600" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+    Icon="pack://application:,,,/Crypture;component/Safe.ico" Loaded="oRunButton_Click" Closed="oWindow_Closed"
+    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="150" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="Vault Health Check" FontSize="21" FontWeight="SemiBold" />
+            <TextBlock x:Name="oVaultName" Margin="0,4,0,6" TextTrimming="CharacterEllipsis"
+                Foreground="{DynamicResource Crypture.MutedBrush}" />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Crypture.MutedBrush}">
+                Check saved recipients and certificates. Results do not prove that recipients can decrypt items.
+            </TextBlock>
+        </StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,12,0,8">
+            <TextBlock x:Name="oSummary" Text="Preparing Health Check..." FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock x:Name="oPolicy" Margin="0,4,0,0" TextWrapping="Wrap"
+                Foreground="{DynamicResource Crypture.MutedBrush}" />
+        </StackPanel>
+        <DockPanel Grid.Row="2" Margin="0,0,0,8">
+            <CheckBox x:Name="oIssuesOnly" Content="Show Only _Issues" DockPanel.Dock="Right" Margin="12,0,0,0"
+                Click="oIssuesOnly_Click" ToolTip="Show errors and warnings." />
+            <TextBlock x:Name="oProgressText" Text="Reading saved Vault recipients..."
+                TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Crypture.MutedBrush}" />
+        </DockPanel>
+        <DataGrid x:Name="oResults" Grid.Row="3" AutoGenerateColumns="False" IsReadOnly="True"
+            CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" RowHeight="32"
+            SelectionMode="Single" GridLinesVisibility="Horizontal" SelectionChanged="oResults_SelectionChanged"
+            AutomationProperties.Name="Health Check Results">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Status" Width="125" SortMemberPath="Severity">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Margin="6,0" VerticalAlignment="Center">
+                                <TextBlock x:Name="oStatusGlyph" Text="{Binding Glyph}"
+                                    Style="{StaticResource Crypture.Glyph}" />
+                                <TextBlock x:Name="oStatusText" Text="{Binding Status}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Status}" Value="Error">
+                                    <Setter TargetName="oStatusGlyph" Property="Foreground"
+                                        Value="{DynamicResource Crypture.WarningBrush}" />
+                                    <Setter TargetName="oStatusText" Property="FontWeight" Value="SemiBold" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="Warning">
+                                    <Setter TargetName="oStatusGlyph" Property="Foreground"
+                                        Value="{DynamicResource Crypture.WarningBrush}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="145" />
+                <DataGridTextColumn Header="Recipient" Binding="{Binding Recipient}" Width="*" MinWidth="190" />
+                <DataGridTextColumn Header="Affected Items" Binding="{Binding ItemCount}" Width="110" />
+            </DataGrid.Columns>
+        </DataGrid>
+        <Label Grid.Row="4" Content="_Details:" Target="{Binding ElementName=oDetails}" Margin="0,8,0,3"
+            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE946;" Padding="0" />
+        <TextBox x:Name="oDetails" Grid.Row="5" IsReadOnly="True" TextWrapping="Wrap" Padding="8"
+            VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+            AutomationProperties.Name="Health Check Details" />
+        <DockPanel Grid.Row="6" Margin="0,14,0,0">
+            <Button DockPanel.Dock="Right" Content="_Close" MinWidth="90" Padding="12,6" IsCancel="True"
+                Click="oCloseButton_Click" Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8BB;" />
+            <Button x:Name="oRunButton" DockPanel.Dock="Right" Content="_Run Again" MinWidth="110" Margin="0,0,8,0"
+                Padding="12,6" Click="oRunButton_Click" Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE72C;" />
+            <Button x:Name="oCancelButton" Content="Ca_ncel Check" MinWidth="120" Padding="12,6"
+                HorizontalAlignment="Left" IsEnabled="False" Click="oCancelButton_Click"
+                Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE711;" />
+        </DockPanel>
+    </Grid>
+</Window>

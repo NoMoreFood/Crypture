@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -9,31 +11,65 @@ namespace Crypture
 {
     internal class CertificateOperations
     {
+        internal static string CurrentUserSid
+        {
+            get
+            {
+                using (WindowsIdentity oIdentity = WindowsIdentity.GetCurrent())
+                    return oIdentity.User.Value;
+            }
+        }
+
         internal static bool CheckCertificateStatus(X509Certificate2 oCert)
         {
-            using (X509Chain oChain = new X509Chain())
+            try
             {
-                oChain.ChainPolicy.RevocationMode = (Properties.Settings.Default.PerformCertificateRevocationCheck) ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
-                oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
-
-                // build the chain based on the specified policy
-                oChain.Build(oCert);
-
-                // check for self signed
-                if (Properties.Settings.Default.AllowSelfSignedCertificates && oChain.ChainElements.Count == 1)
-                {
-                    return true;
-                }
-
-                // check for a valid certificate
-                foreach (X509ChainStatus oStatus in oChain.ChainStatus)
-                {
-                    if (oStatus.Status != X509ChainStatusFlags.NoError) return false;
-                }
+                CertificateKeyProtection.ValidateForEncryption(oCert);
+            }
+            catch (Exception oError) when (oError is CryptographicException || oError is PlatformNotSupportedException)
+            {
+                return false;
             }
 
-            // all checks successful -- looks good
-            return true;
+            using (X509Chain oChain = new X509Chain())
+            {
+                oChain.ChainPolicy.RevocationMode = Properties.Settings.Default.PerformCertificateRevocationCheck
+                    ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
+                oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
+                oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(10);
+
+                // build the chain based on the specified policy
+                if (oChain.Build(oCert)) return true;
+
+                // check for self signed
+                return Properties.Settings.Default.AllowSelfSignedCertificates && IsSelfSigned(oCert) &&
+                    oChain.ChainElements.Count == 1 && oChain.ChainStatus.All(s =>
+                    (s.Status & ~X509ChainStatusFlags.UntrustedRoot) == X509ChainStatusFlags.NoError);
+            }
+        }
+
+        internal static bool IsSelfSigned(X509Certificate2 oCert)
+        {
+            return oCert.SubjectName.RawData.SequenceEqual(oCert.IssuerName.RawData) &&
+                NativeMethods.CryptVerifyCertificateSignatureEx(IntPtr.Zero, 1, 2, oCert.Handle, 2,
+                    oCert.Handle, 0, IntPtr.Zero);
+        }
+
+        internal static HashSet<string> GetPrivateCertificateData()
+        {
+            HashSet<string> oResult = new HashSet<string>();
+            using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+            {
+                oStore.Open(OpenFlags.ReadOnly);
+                foreach (X509Certificate2 oCert in oStore.Certificates)
+                {
+                    using (oCert)
+                    {
+                        if (oCert.HasPrivateKey) oResult.Add(Convert.ToBase64String(oCert.RawData));
+                    }
+                }
+            }
+            return oResult;
         }
 
         internal static List<byte[]> GetAutomaticCertificates()
@@ -50,5 +86,60 @@ namespace Crypture
 
             return oList;
         }
+    }
+
+    public partial class User
+    {
+        public string Name
+        {
+            get
+            {
+                try
+                {
+                    using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                        return oCert.GetNameInfo(X509NameType.SimpleName, false);
+                }
+                catch (System.Security.Cryptography.CryptographicException)
+                {
+                    return "Invalid certificate";
+                }
+            }
+        }
+
+        public string AlgorithmDisplay
+        {
+            get
+            {
+                try
+                {
+                    using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                        return CertificateKeyProtection.GetAlgorithmDisplay(oCert);
+                }
+                catch (CryptographicException)
+                {
+                    return "Unsupported";
+                }
+            }
+        }
+
+        public bool IsSelfSigned
+        {
+            get
+            {
+                using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                {
+                    return CertificateOperations.IsSelfSigned(oCert);
+                }
+            }
+        }
+
+        public bool IsOwnedByCurrentUser
+        {
+            get
+            {
+                return CertificateOperations.CurrentUserSid.Equals(Sid);
+            }
+        }
+
     }
 }

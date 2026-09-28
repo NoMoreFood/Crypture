@@ -12,6 +12,9 @@
           <Property Name="ItemId" Type="integer" Nullable="false" />
           <Property Name="CipherText" Type="blob" Nullable="false" />
           <Property Name="CipherVector" Type="blob" Nullable="false" />
+          <Property Name="ProtectionDescriptor" Type="nvarchar" MaxLength="2147483647" />
+          <Property Name="ProtectedKey" Type="blob" />
+          <Property Name="Signature" Type="blob" />
           <Property Name="CipherParams" Type="integer" Nullable="false" />
         </EntityType>
         <EntityType Name="Instance">
@@ -34,6 +37,7 @@
           <Property Name="Label" Type="nvarchar" MaxLength="2147483647" Nullable="false" />
           <Property Name="ModifiedDate" Type="datetime" Nullable="false" />
           <Property Name="ModifiedBy" Type="integer" />
+          <Property Name="ModifiedByIdentity" Type="nvarchar" MaxLength="2147483647" />
           <Property Name="CreatedDate" Type="datetime" Nullable="false" />
         </EntityType>
         <EntityType Name="User">
@@ -146,6 +150,7 @@
           <Property Name="Label" Type="String" Nullable="false" MaxLength="2147483647" FixedLength="false" Unicode="true" />
           <Property Name="ModifiedDate" Type="DateTime" Nullable="false" />
           <Property Name="ModifiedBy" Type="Int64" />
+          <Property Name="ModifiedByIdentity" Type="String" MaxLength="2147483647" FixedLength="false" Unicode="true" />
           <Property Name="CreatedDate" Type="DateTime" Nullable="false" />
           <NavigationProperty Name="Instances" Relationship="CryptureModel.FK_Instance_Item" FromRole="Item" ToRole="Instance" />
           <NavigationProperty Name="User" Relationship="CryptureModel.FK_Item_User" FromRole="Item" ToRole="User" />
@@ -210,6 +215,9 @@
           <Property Name="ItemId" Type="Int64" Nullable="false" />
           <Property Name="CipherText" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
           <Property Name="CipherVector" Type="Binary" Nullable="false" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="ProtectionDescriptor" Type="String" MaxLength="2147483647" FixedLength="false" Unicode="true" />
+          <Property Name="ProtectedKey" Type="Binary" MaxLength="2147483647" FixedLength="false" />
+          <Property Name="Signature" Type="Binary" MaxLength="2147483647" FixedLength="false" />
           <Property Name="CipherParams" Type="Int64" Nullable="false" />
           <NavigationProperty Name="Item" Relationship="CryptureModel.FK_Cipher_Item" FromRole="Cipher" ToRole="Item" />
         </EntityType>
@@ -250,6 +258,7 @@
               <MappingFragment StoreEntitySet="Item">
                 <ScalarProperty Name="CreatedDate" ColumnName="CreatedDate" />
                 <ScalarProperty Name="ModifiedBy" ColumnName="ModifiedBy" />
+                <ScalarProperty Name="ModifiedByIdentity" ColumnName="ModifiedByIdentity" />
                 <ScalarProperty Name="ModifiedDate" ColumnName="ModifiedDate" />
                 <ScalarProperty Name="Label" ColumnName="Label" />
                 <ScalarProperty Name="ItemType" ColumnName="ItemType" />
@@ -271,6 +280,9 @@
               <MappingFragment StoreEntitySet="Cipher">
                 <ScalarProperty Name="CipherParams" ColumnName="CipherParams" />
                 <ScalarProperty Name="CipherVector" ColumnName="CipherVector" />
+                <ScalarProperty Name="ProtectionDescriptor" ColumnName="ProtectionDescriptor" />
+                <ScalarProperty Name="ProtectedKey" ColumnName="ProtectedKey" />
+                <ScalarProperty Name="Signature" ColumnName="Signature" />
                 <ScalarProperty Name="CipherText" ColumnName="CipherText" />
                 <ScalarProperty Name="ItemId" ColumnName="ItemId" />
               </MappingFragment>

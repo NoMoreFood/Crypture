@@ -26,7 +26,8 @@ namespace Crypture
             {
                 SQLiteConnectionStringBuilder oSQLite = new SQLiteConnectionStringBuilder();
                 oSQLite.CacheSize = 2048;
-                oSQLite.DataSource = value.Replace("\\","\\\\");
+                oSQLite.DataSource = value;
+                oSQLite.FailIfMissing = true;
                 oSQLite.ForeignKeys = true;
                 oSQLite.Version = 3;
                 EntityConnectionStringBuilder oBuilder = new EntityConnectionStringBuilder();
@@ -40,7 +41,8 @@ namespace Crypture
         public CryptureEntities()
             : base(ConnectionString)
         {
-
+            Configuration.LazyLoadingEnabled = false;
+            Configuration.ProxyCreationEnabled = false;
         }
 
         protected override void OnModelCreating(DbModelBuilder modelBuilder)

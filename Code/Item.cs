@@ -25,6 +25,7 @@ namespace Crypture
         public string Label { get; set; }
         public System.DateTime ModifiedDate { get; set; }
         public Nullable<long> ModifiedBy { get; set; }
+        public string ModifiedByIdentity { get; set; }
         public System.DateTime CreatedDate { get; set; }
     
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]

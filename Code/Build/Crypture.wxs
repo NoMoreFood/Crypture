@@ -1,97 +1,116 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<?if $(var.Win64) = yes ?>
-<?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
-<?else ?>
-<?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
-<?endif ?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:netfx="http://schemas.microsoft.com/wix/NetFxExtension">
-	<Product Id="*" Name="Crypture" Language="1033" Version="$(var.Version)" Manufacturer="Bryan Berns" UpgradeCode="fcf13ecd-8d17-489d-b242-41791937c022">
-		<Package InstallerVersion="300" Compressed="yes" InstallScope="perMachine" />
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
+	xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+	<Package InstallerVersion="300" Compressed="yes" Scope="perMachine" Name="Crypture" Language="1033" Version="$(var.Version)" Manufacturer="Bryan Berns" UpgradeCode="fcf13ecd-8d17-489d-b242-41791937c022">
+		<PropertyRef Id="WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED" />
+		<Launch Message="Crypture requires Microsoft .NET Framework 4.8 or later."
+			Condition="Installed OR WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED" />
 		<Media Id="1" Cabinet="crypture.cab" EmbedCab="yes" CompressionLevel="high" />
-		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." AllowSameVersionUpgrades="yes"/>
-		<Directory Id="TARGETDIR" Name="SourceDir">
-			<Directory Id="$(var.PlatformProgramFilesFolder)">
-				<Directory Id="INSTALLFOLDER" Name="Crypture"/>
-			</Directory>
-			<Directory Id="ProgramMenuFolder" Name="Programs"/>
-		</Directory>
+		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."/>
+		<StandardDirectory Id="ProgramFiles6432Folder">
+			<Directory Id="INSTALLFOLDER" Name="Crypture"/>
+		</StandardDirectory>
+		<StandardDirectory Id="ProgramMenuFolder"/>
 		<!--<Icon Id="CryptureIcon" SourceFile="[INSTALLFOLDER]\Crypture.exe" />-->
 		<Feature Id="ProductFeature" Title="Crypture" Level="1" TypicalDefault="install">
 			<ComponentGroupRef Id="CryptureComponents" />
 		</Feature>
-		<Icon Id="ProductIcon" SourceFile="..\..\Safe.ico"/>
+		<Icon Id="ProductIcon" SourceFile="$(var.SourceDir)\Safe.ico"/>
 		<Property Id="ARPPRODUCTICON" Value="ProductIcon" />
-		<Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-		<UIRef Id="WixUI_InstallDir" />
+		<ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 		<UI>
-			<UIRef Id="WixUI_InstallDir" />
-			<Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
-			<Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
+			<Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" />
+			<Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
 		</UI>
 		<CustomAction Id="RunMainApp" Directory="INSTALLFOLDER" ExeCommand="&quot;[SystemFolder]\icacls.exe&quot; . /setintegritylevel H" Execute="commit" Return="ignore"/>
 		<InstallExecuteSequence>
 			<Custom Action="RunMainApp" Before="InstallFinalize" />
 		</InstallExecuteSequence>
-	</Product>
+	</Package>
 	<Fragment>
 		<DirectoryRef Id="INSTALLFOLDER">
 			<Component Id="ActiveDirectoryObjectPicker.dll" Guid="*">
-				<File Id="ActiveDirectoryObjectPicker.dll" KeyPath="yes" Source="ActiveDirectoryObjectPicker.dll" />
+				<File Id="ActiveDirectoryObjectPicker.dll" KeyPath="yes" Source="$(var.PayloadDir)\ActiveDirectoryObjectPicker.dll" />
+			</Component>
+			<Component Id="DotNet.Notices.txt" Guid="*">
+				<File Id="DotNet.Notices.txt" KeyPath="yes" Source="$(var.PayloadDir)\DotNet.Notices.txt" />
+			</Component>
+			<Component Id="Microsoft.Bcl.Cryptography.dll" Guid="*">
+				<File Id="Microsoft.Bcl.Cryptography.dll" KeyPath="yes" Source="$(var.PayloadDir)\Microsoft.Bcl.Cryptography.dll" />
+			</Component>
+			<Component Id="System.Formats.Asn1.dll" Guid="*">
+				<File Id="System.Formats.Asn1.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Formats.Asn1.dll" />
+			</Component>
+			<Component Id="System.Memory.dll" Guid="*">
+				<File Id="System.Memory.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Memory.dll" />
+			</Component>
+			<Component Id="System.Runtime.CompilerServices.Unsafe.dll" Guid="*">
+				<File Id="System.Runtime.CompilerServices.Unsafe.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Runtime.CompilerServices.Unsafe.dll" />
+			</Component>
+			<Component Id="System.Buffers.dll" Guid="*">
+				<File Id="System.Buffers.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Buffers.dll" />
+			</Component>
+			<Component Id="System.Numerics.Vectors.dll" Guid="*">
+				<File Id="System.Numerics.Vectors.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Numerics.Vectors.dll" />
 			</Component>
 			<Component Id="ControlzEx.dll" Guid="*">
-				<File Id="ControlzEx.dll" KeyPath="yes" Source="ControlzEx.dll" />
+				<File Id="ControlzEx.dll" KeyPath="yes" Source="$(var.PayloadDir)\ControlzEx.dll" />
 			</Component>
 			<Component Id="Crypture.exe.config" Guid="*">
-				<File Id="Crypture.exe.config" KeyPath="yes" Source="Crypture.exe.config" />
+				<File Id="Crypture.exe.config" KeyPath="yes" Source="$(var.PayloadDir)\Crypture.exe.config" />
 			</Component>
 			<Component Id="EntityFramework.dll" Guid="*">
-				<File Id="EntityFramework.dll" KeyPath="yes" Source="EntityFramework.dll" />
+				<File Id="EntityFramework.dll" KeyPath="yes" Source="$(var.PayloadDir)\EntityFramework.dll" />
 			</Component>
 			<Component Id="Fluent.dll" Guid="*">
-				<File Id="Fluent.dll" KeyPath="yes" Source="Fluent.dll" />
+				<File Id="Fluent.dll" KeyPath="yes" Source="$(var.PayloadDir)\Fluent.dll" />
 			</Component>
 			<Component Id="System.Data.SQLite.dll" Guid="*">
-				<File Id="System.Data.SQLite.dll" KeyPath="yes" Source="System.Data.SQLite.dll" />
+				<File Id="System.Data.SQLite.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Data.SQLite.dll" />
 			</Component>
 			<Component Id="System.Data.SQLite.EF6.dll" Guid="*">
-				<File Id="System.Data.SQLite.EF6.dll" KeyPath="yes" Source="System.Data.SQLite.EF6.dll" />
+				<File Id="System.Data.SQLite.EF6.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Data.SQLite.EF6.dll" />
 			</Component>
 			<Component Id="System.Data.SQLite.Linq.dll" Guid="*">
-				<File Id="System.Data.SQLite.Linq.dll" KeyPath="yes" Source="System.Data.SQLite.Linq.dll" />
+				<File Id="System.Data.SQLite.Linq.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Data.SQLite.Linq.dll" />
 			</Component>
 			<Component Id="System.Windows.Interactivity.dll" Guid="*">
-				<File Id="System.Windows.Interactivity.dll" KeyPath="yes" Source="System.Windows.Interactivity.dll" />
+				<File Id="System.Windows.Interactivity.dll" KeyPath="yes" Source="$(var.PayloadDir)\System.Windows.Interactivity.dll" />
 			</Component>
 			<Directory Id="SQLite.Interop.dll.x64" Name="x64">
 				<Component Id="SQLite.Interop.dll_x64" Guid="*">
-					<File Id="SQLite.Interop.dll_x64" KeyPath="yes" Source="x64\SQLite.Interop.dll" />
+					<File Id="SQLite.Interop.dll_x64" KeyPath="yes" Source="$(var.PayloadDir)\x64\SQLite.Interop.dll" />
 				</Component>
 			</Directory>
 			<Directory Id="SQLite.Interop.dll.x86" Name="x86">
 				<Component Id="SQLite.Interop.dll_x86" Guid="*">
-					<File Id="SQLite.Interop.dll_x86" KeyPath="yes" Source="x86\SQLite.Interop.dll" />
+					<File Id="SQLite.Interop.dll_x86" KeyPath="yes" Source="$(var.PayloadDir)\x86\SQLite.Interop.dll" />
 				</Component>
 			</Directory>
 			<Component Id="Crypture.exe" Guid="*">
-				<File Id="Crypture.exe" KeyPath="yes" Source="Crypture.exe">
+				<File Id="Crypture.exe" KeyPath="yes" Source="$(var.PayloadDir)\Crypture.exe">
 					<netfx:NativeImage Id="NgenCrypture.exe" Priority="0" AppBaseDirectory="INSTALLFOLDER"/>
+					<Shortcut Id="ApplicationStartMenuShortcut" Name="Crypture" Directory="ProgramMenuFolder"
+						Advertise="yes" WorkingDirectory="INSTALLFOLDER"/>
 				</File>
-			</Component>
-			<Component Id="CryptureFileAssociation" Guid="73c9898b-bfaf-4e0f-a70d-29b005262bef">
-				<ProgId Id="CryptureDb" Description="Crypture Database File" Advertise="no" Icon="Crypture.exe"> 
+				<ProgId Id="CryptureDb" Description="Crypture Vault File" Advertise="no" Icon="Crypture.exe">
 					<Extension Id="cryptdb"> 
 						<Verb Id='open' Command='Open' TargetFile="Crypture.exe" Argument="&quot;%1&quot;" />
 					</Extension> 
 				</ProgId> 
 			</Component>	
 		</DirectoryRef>
-		<Component Id="CryptureApplicationShortcut" Directory="ProgramMenuFolder" Guid="430ee85d-6605-4d7b-b23a-f87b817aef53">
-			<Shortcut Id="ApplicationStartMenuShortcut" Name="Crypture" Target="[INSTALLFOLDER]\Crypture.exe" WorkingDirectory="INSTALLFOLDER"/>
-		</Component>		
 	</Fragment>
 	<Fragment>
 		<ComponentGroup Id="CryptureComponents" Directory="INSTALLFOLDER">
 			<ComponentRef Id="ActiveDirectoryObjectPicker.dll" />
+			<ComponentRef Id="DotNet.Notices.txt" />
+			<ComponentRef Id="Microsoft.Bcl.Cryptography.dll" />
+			<ComponentRef Id="System.Formats.Asn1.dll" />
+			<ComponentRef Id="System.Memory.dll" />
+			<ComponentRef Id="System.Runtime.CompilerServices.Unsafe.dll" />
+			<ComponentRef Id="System.Buffers.dll" />
+			<ComponentRef Id="System.Numerics.Vectors.dll" />
 			<ComponentRef Id="ControlzEx.dll" />
 			<ComponentRef Id="Crypture.exe" />
 			<ComponentRef Id="Crypture.exe.config" />
@@ -103,8 +122,6 @@
 			<ComponentRef Id="System.Windows.Interactivity.dll" />
 			<ComponentRef Id="SQLite.Interop.dll_x86" />
 			<ComponentRef Id="SQLite.Interop.dll_x64" />
-			<ComponentRef Id="CryptureApplicationShortcut" />
-			<ComponentRef Id="CryptureFileAssociation" />			
 		</ComponentGroup>
 	</Fragment>
 </Wix>
