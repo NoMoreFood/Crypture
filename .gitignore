@@ -1,3 +1,30 @@
-/Code/.vs
-/Code/bin
-/Code/obj
+# Build outputs and local tool caches
+[Bb]in/
+[Oo]bj/
+.vs/
+/Binaries/
+/Code/Build/PackageStage/
+/Code/Build/.tools/
+/Code/Build/.wix/
+
+# Local IDE settings
+*.user
+*.suo
+
+# Restored NuGet packages
+/Code/packages/
+
+# Compiled binaries, symbols, and installer artifacts
+*.dll
+*.exe
+*.pdb
+*.msi
+*.msp
+*.msm
+*.cab
+*.nupkg
+*.snupkg
+*.wixobj
+*.wixpdb
+*.wixlib
+*.wixout
