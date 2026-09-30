@@ -64,6 +64,14 @@
                             Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" TextChanged="oItemChanged"
                             ToolTip="Labels are visible in the Vault and are not encrypted." />
                     </DockPanel>
+                    <Label Content="Item _Type:" Target="{Binding ElementName=oItemTypeSelector}"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" Margin="0,6,0,0" />
+                    <ComboBox x:Name="oItemTypeSelector" MinHeight="28"
+                        SelectionChanged="oItemTypeChanged" AutomationProperties.Name="Item Type">
+                        <ComboBoxItem Content="Text Secret" />
+                        <ComboBoxItem Content="TOTP Authenticator" />
+                        <ComboBoxItem Content="File Attachment" IsEnabled="False" />
+                    </ComboBox>
                     <Grid Margin="0,8,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="120" />
@@ -174,6 +182,9 @@
                                     TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource Crypture.MutedBrush}" />
                                 <TextBlock Text="{x:Static local:CertificateKeyProtection.AvailabilityDescription}"
                                     TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource Crypture.MutedBrush}" />
+                                <TextBlock x:Name="oCertificateUsageNotice" Visibility="Collapsed" TextWrapping="Wrap"
+                                    Margin="0,0,0,8" Foreground="{DynamicResource Crypture.WarningBrush}"
+                                    AutomationProperties.Name="Certificate Usage Filters" />
                                 <ListView x:Name="oItemSharedWith" MinHeight="80" MaxHeight="180"
                                     IsHitTestVisible="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <ListView.ItemTemplate>
@@ -196,15 +207,22 @@
             </ScrollViewer>
             <Border Width="1" Background="{DynamicResource Crypture.BorderBrush}" DockPanel.Dock="Left" />
             <DockPanel DockPanel.Dock="Right">
-                <DockPanel DockPanel.Dock="Top" Margin="10,5,10,0">
-                    <Button x:Name="oCopyContentButton" DockPanel.Dock="Right"
-                        Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy Item Content"
-                        Command="ApplicationCommands.Copy" CommandParameter="All"
-                        CommandTarget="{Binding ElementName=oItemData}"
-                        ToolTip="Copy all unlocked text. Clears after 5 minutes or when Crypture closes." />
-                    <Label HorizontalAlignment="Center" Content="Protected Item Content"
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
-                </DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="10,5,10,0">
+                    <DockPanel>
+                        <Button x:Name="oCopyContentButton" DockPanel.Dock="Right"
+                            Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy Item Content"
+                            Command="ApplicationCommands.Copy" CommandParameter="All"
+                            CommandTarget="{Binding ElementName=oItemData}"
+                            ToolTip="Copy all unlocked text. Clears after 5 minutes or when Crypture closes." />
+                        <Label x:Name="oContentTitle" HorizontalAlignment="Center" Content="Protected Item Content"
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
+                    </DockPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                        <Label Content="Secret _Font:" Target="{Binding ElementName=oSecretFontSelector}"
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE185;" />
+                        <local:SecretFontSelector x:Name="oSecretFontSelector" Width="210" />
+                    </StackPanel>
+                </StackPanel>
                 <Grid Margin="10,5,10,10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
@@ -213,9 +231,12 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Image x:Name="oTextLockImage" MaxWidth="160" MaxHeight="180" Grid.Row="0" Grid.Column="0" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Opacity="0.4" Source="pack://application:,,,/Crypture;component/Images/Save.png" Visibility="Collapsed" />
-                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True" AcceptsTab="True" Padding="8" IsUndoEnabled="False"
+                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True"
+                        AcceptsTab="True" Padding="8" IsUndoEnabled="False"
+                        Style="{StaticResource Crypture.SecretText}"
                         ToolTip="Copied or cut text clears from the clipboard after 5 minutes or when Crypture closes."
                         TextChanged="oItemChanged" AutomationProperties.Name="Protected Item Content" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Collapsed" />
+                    <local:TotpPanel x:Name="oTotpPanel" Visibility="Collapsed" />
                     <Button x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"
                         Click="oDownloadPanel_Click" Visibility="Collapsed" Padding="12" AutomationProperties.Name="Save Decrypted File">
                         <StackPanel>

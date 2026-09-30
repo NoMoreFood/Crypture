@@ -1,0 +1,110 @@
+<UserControl x:Class="Crypture.TotpPanel" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="0,2,0,8">
+            <TextBlock x:Name="oAccountTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <Label Content="Current _Code:" Target="{Binding ElementName=oCurrentCode}"
+                Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE823;" />
+            <DockPanel>
+                <Button x:Name="oCopyCode" DockPanel.Dock="Right" Margin="6,0,0,0" VerticalAlignment="Center"
+                    Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy TOTP Code"
+                    Click="oCopyCode_Click" IsEnabled="False"
+                    ToolTip="Copy the current code. The code expires at the next rotation." />
+                <TextBox x:Name="oCurrentCode" IsReadOnly="True" IsUndoEnabled="False" MinHeight="64"
+                    FontSize="32" Padding="8" HorizontalContentAlignment="Center"
+                    Style="{StaticResource Crypture.SecretText}" AutomationProperties.Name="Current TOTP Code" />
+            </DockPanel>
+            <ProgressBar x:Name="oRemainingProgress" Height="5" Margin="0,8,0,0" Minimum="0" Maximum="30"
+                Foreground="{DynamicResource Crypture.AccentBrush}"
+                Background="{DynamicResource Crypture.PanelBrush}" AutomationProperties.Name="TOTP Time Remaining" />
+            <TextBlock x:Name="oRemainingText" Margin="0,5,0,8" Foreground="{DynamicResource Crypture.MutedBrush}"
+                AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="oValidationMessage" TextWrapping="Wrap" Margin="0,0,0,8"
+                Foreground="{DynamicResource Crypture.WarningBrush}" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Foreground="{DynamicResource Crypture.MutedBrush}">
+                <Run Text="Codes rotate automatically using this computer's clock. " />
+                <Run Text="Keep Windows time in sync with the service." />
+            </TextBlock>
+            <Expander x:Name="oSetup" Header="Authenticator Setup" IsExpanded="True">
+                <StackPanel Margin="0,10,0,0">
+                    <Label Content="Import Setup _Link or Base32 Secret:" Target="{Binding ElementName=oImportInput}"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A7;" />
+                    <DockPanel Margin="0,0,0,10">
+                        <Button DockPanel.Dock="Right" Content="_Import" Padding="10,3" Margin="6,0,0,0"
+                            Click="oImport_Click" />
+                        <TextBox x:Name="oImportInput" MinHeight="28" MaxLength="4096" Padding="5,3"
+                            IsUndoEnabled="False" AutomationProperties.Name="TOTP Setup Link or Base32 Secret"
+                            ToolTip="Paste an otpauth://totp/ setup link or the service's Base32 secret." />
+                    </DockPanel>
+                    <Label Content="_Issuer:" Target="{Binding ElementName=oIssuer}"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE80F;" />
+                    <TextBox x:Name="oIssuer" MinHeight="28" Padding="5,3" MaxLength="256" IsUndoEnabled="False"
+                        TextChanged="oOptionsChanged" AutomationProperties.Name="TOTP Issuer" />
+                    <Label Content="_Account:" Target="{Binding ElementName=oAccount}"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
+                    <TextBox x:Name="oAccount" MinHeight="28" Padding="5,3" MaxLength="256" IsUndoEnabled="False"
+                        TextChanged="oOptionsChanged" AutomationProperties.Name="TOTP Account" />
+                    <Label Content="Base32 _Secret:" Target="{Binding ElementName=oSecretInput}"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8D7;" />
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource Crypture.CopyButton}"
+                            Command="ApplicationCommands.Copy" CommandParameter="All"
+                            CommandTarget="{Binding ElementName=oSecretInput}"
+                            AutomationProperties.Name="Copy TOTP Secret"
+                            ToolTip="Copy the Base32 secret. Clears after 5 minutes or when Crypture closes." />
+                        <TextBox x:Name="oSecretInput" MinHeight="28" Padding="5,3" MaxLength="512"
+                            IsUndoEnabled="False" TextChanged="oOptionsChanged"
+                            Style="{StaticResource Crypture.SecretText}" AutomationProperties.Name="TOTP Base32 Secret"
+                            ToolTip="Use Base32 characters A-Z and 2-7. Spaces and dashes are allowed." />
+                    </DockPanel>
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Label Content="Al_gorithm:" Target="{Binding ElementName=oAlgorithm}" Padding="0,4" />
+                        <ComboBox x:Name="oAlgorithm" Grid.Row="1" MinHeight="28" SelectedValuePath="Tag"
+                            SelectedIndex="0" SelectionChanged="oOptionsChanged"
+                            AutomationProperties.Name="TOTP Algorithm">
+                            <ComboBoxItem Content="SHA-1" Tag="SHA1" />
+                            <ComboBoxItem Content="SHA-256" Tag="SHA256" />
+                            <ComboBoxItem Content="SHA-512" Tag="SHA512" />
+                        </ComboBox>
+                        <Label Grid.Column="2" Content="_Digits:" Padding="0,4"
+                            Target="{Binding ElementName=oDigits}" />
+                        <ComboBox x:Name="oDigits" Grid.Column="2" Grid.Row="1" MinHeight="28" SelectedIndex="0"
+                            SelectedValuePath="Tag" SelectionChanged="oOptionsChanged"
+                            AutomationProperties.Name="TOTP Digits">
+                            <ComboBoxItem Content="6" Tag="6" />
+                            <ComboBoxItem Content="8" Tag="8" />
+                        </ComboBox>
+                        <Label Grid.Column="4" Content="_Period (s):" Padding="0,4"
+                            Target="{Binding ElementName=oPeriod}" />
+                        <TextBox x:Name="oPeriod" Grid.Row="1" Grid.Column="4" MinHeight="28" Padding="5,3"
+                            Text="30" MaxLength="4" IsUndoEnabled="False" TextChanged="oOptionsChanged"
+                            AutomationProperties.Name="TOTP Rotation Period in Seconds" />
+                    </Grid>
+                    <WrapPanel Margin="0,12,0,6">
+                        <Button Content="Generate _New Secret" Padding="10,4" Margin="0,0,8,6"
+                            Click="oGenerateSecret_Click"
+                            Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE72C;" />
+                        <Button x:Name="oCopySetup" Content="Copy Setup Link" Padding="10,4" Margin="0,0,0,6"
+                            Click="oCopySetup_Click" IsEnabled="False"
+                            Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8C8;" />
+                    </WrapPanel>
+                    <TextBlock Foreground="{DynamicResource Crypture.MutedBrush}" TextWrapping="Wrap">
+                        <Run Text="Use the service's secret and settings for an existing account. " />
+                        <Run Text="Register any new secret with the service before using its codes." />
+                    </TextBlock>
+                </StackPanel>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

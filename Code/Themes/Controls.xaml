@@ -1,5 +1,6 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:Crypture" xmlns:properties="clr-namespace:Crypture.Properties"
     xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon">
 
     <SolidColorBrush x:Key="Crypture.WindowBrush" Color="#FFFFFF" />
@@ -13,6 +14,8 @@
     <SolidColorBrush x:Key="Crypture.AccentBrush" Color="#0F6CBD" />
     <SolidColorBrush x:Key="Crypture.DisabledBrush" Color="#687582" />
     <SolidColorBrush x:Key="Crypture.WarningBrush" Color="#9A3412" />
+
+    <local:SecretFontConverter x:Key="Crypture.SecretFontConverter" />
 
     <Style x:Key="Crypture.ControlStyle" TargetType="Control">
         <Setter Property="Background" Value="{DynamicResource Crypture.ControlBrush}" />
@@ -48,6 +51,14 @@
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="Crypture.SecretText" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="FontFamily">
+            <Setter.Value>
+                <Binding Source="{x:Static properties:Settings.Default}" Path="SecretFontFamily" Mode="OneWay"
+                    Converter="{StaticResource Crypture.SecretFontConverter}" />
             </Setter.Value>
         </Setter>
     </Style>
@@ -237,6 +248,13 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+    <Style TargetType="local:SecretFontSelector" BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="MinHeight" Value="28" />
+        <Setter Property="MaxDropDownHeight" Value="250" />
+        <Setter Property="AutomationProperties.Name" Value="Secret Font" />
+        <Setter Property="ToolTip"
+            Value="Choose the font for secret text and generated passwords. Remembered for your Windows profile." />
     </Style>
     <Style TargetType="ListBox" BasedOn="{StaticResource Crypture.ControlStyle}" />
     <Style TargetType="ListView" BasedOn="{StaticResource Crypture.ControlStyle}" />

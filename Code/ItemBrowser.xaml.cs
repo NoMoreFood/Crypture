@@ -36,6 +36,9 @@ namespace Crypture
         internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier)
         {
             CertificateKeyProtection.ValidateForEncryption(oCert);
+            if (!CertificateUsageFilter.Read().Matches(oCert))
+                throw new InvalidOperationException("This certificate is excluded by the certificate usage filters " +
+                    "in Crypture.exe.config.");
             if (!CertificateOperations.CheckCertificateStatus(oCert))
                 throw new InvalidOperationException("Select a valid RSA, ECDH, or ML-KEM encryption certificate. " +
                     "Review the certificate validation settings if you use a self-signed certificate.");
@@ -151,6 +154,8 @@ namespace Crypture
         {
             Utilities.TryOperation(this, () =>
             {
+                CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
+
                 // open the locate personal certificate store
                 using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
                 {
@@ -158,10 +163,14 @@ namespace Crypture
                     X509Certificate2Collection oCertificates = oStore.Certificates;
                     try
                     {
-                        // downselect to only display rsa certs
+                        // Filter eligible encryption certificates before opening the selector.
                         X509Certificate2Collection oCollection = new X509Certificate2Collection();
                         foreach (X509Certificate2 oCert in oCertificates)
-                            if (CertificateOperations.CheckCertificateStatus(oCert)) oCollection.Add(oCert);
+                            if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert))
+                                oCollection.Add(oCert);
+                        if (oCollection.Count == 0)
+                            throw new InvalidOperationException("No certificates match the usage filters and " +
+                                "certificate validation settings.");
 
                         // ask the user which certificate to publish
                         oCollection = X509Certificate2UI.SelectFromCollection(oCollection,
@@ -184,6 +193,7 @@ namespace Crypture
         {
             Utilities.TryOperation(this, () =>
             {
+                CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
                 using (DirectoryObjectPickerDialog oPicker = new DirectoryObjectPickerDialog()
                 {
                     DefaultObjectTypes = ObjectTypes.Users,
@@ -219,16 +229,19 @@ namespace Crypture
                         object oAdCertAttribute = oSelected.FetchedAttributes[0];
                         if (oAdCertAttribute is object[])
                         {
-                            // downselect to only display rsa certs
+                            // Filter eligible encryption certificates before opening the selector.
                             X509Certificate2Collection oCollection = new X509Certificate2Collection();
                             try
                             {
                                 foreach (byte[] oCertData in (object[])oAdCertAttribute)
                                 {
                                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
-                                        if (CertificateOperations.CheckCertificateStatus(oCert))
+                                        if (oUsageFilter.Matches(oCert) &&
+                                            CertificateOperations.CheckCertificateStatus(oCert))
                                             oCollection.Add(new X509Certificate2(oCert));
                                 }
+
+                                if (oCollection.Count == 0) continue;
 
                                 // ask the user which certificate to publish
                                 X509Certificate2Collection oSelectedCertificates = X509Certificate2UI.SelectFromCollection(
@@ -390,6 +403,7 @@ namespace Crypture
                 (i.Label.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ModifiedByDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ProtectionDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
+                    i.ItemTypeDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) &&
                 (oHideAccessible.IsChecked != true || ItemCryptography.UsesWindowsProtection(i.Cipher) ||
                     i.Cipher?.CipherParams == ItemCryptography.RecoveryFormat ||

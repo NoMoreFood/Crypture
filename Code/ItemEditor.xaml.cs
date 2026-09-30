@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -48,6 +49,10 @@ namespace Crypture
             InitializeComponent();
             Utilities.EnableClipboardTimeout(oItemData);
             Utilities.EnableClipboardTimeout(oItemLabel);
+            oTotpPanel.SettingsChanged += (s, e) =>
+            {
+                if (!bLoading && bEditing) bHasChanges = true;
+            };
 
             // setup sorting for the drop down list of certs
             oItemSharedWith.Items.IsLiveSorting = true;
@@ -104,12 +109,27 @@ namespace Crypture
                 UserList = new ObservableCollection<User>(oContent.Users.ToList());
             HashSet<string> oPrivateCertificates = CertificateOperations.GetPrivateCertificateData();
             List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
+
+            // Filter new choices while retaining saved and administrator-required recipients.
+            CertificateUsageFilter oUsageFilter = null;
+            try
+            {
+                oUsageFilter = CertificateUsageFilter.Read();
+            }
+            catch (ConfigurationErrorsException oError)
+            {
+                oCertificateUsageNotice.Text = oError.Message;
+                oCertificateUsageNotice.Visibility = Visibility.Visible;
+            }
+            HashSet<long> oAvailable = UserList.Where(u => oUsageFilter?.Matches(u.Certificate) == true ||
+                oAutomatic.Any(c => c.SequenceEqual(u.Certificate))).Select(u => u.UserId).ToHashSet();
             UserListSelected = new ObservableCollection<User>(UserList.Where(u => bNewItem
-                ? oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)) ||
-                    oAutomatic.Any(c => c.SequenceEqual(u.Certificate))
+                ? oAvailable.Contains(u.UserId) && (oAutomatic.Any(c => c.SequenceEqual(u.Certificate)) ||
+                    oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))
                 : ThisItem.Instances.Any(i => i.UserId == u.UserId)));
             oItemSharedWith.ItemsSource = UserListSelected;
-            oAddCertDropDown.ItemsSource = UserList;
+            oAddCertDropDown.ItemsSource = UserList.Where(u => oAvailable.Contains(u.UserId) ||
+                UserListSelected.Contains(u)).ToList();
             if (bNewItem) ThisItem.ModifiedBy = UserListSelected.FirstOrDefault(u =>
                 oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))?.UserId;
         }
@@ -125,6 +145,11 @@ namespace Crypture
             oPrincipalMatch.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             oLoadItemButton.IsEnabled = !bEnabled;
             oItemData.IsEnabled = bEnabled && ThisItem.ItemType == "text";
+            oItemTypeSelector.IsEnabled = bEnabled && ThisItem.ItemType is "text" or "totp";
+            bool bWasLoading = bLoading;
+            bLoading = true;
+            oItemTypeSelector.SelectedIndex = ThisItem.ItemType == "text" ? 0 : ThisItem.ItemType == "totp" ? 1 : 2;
+            bLoading = bWasLoading;
             oItemLabel.IsReadOnly = !bEnabled;
             oUploadAFile.IsEnabled = bEnabled;
             oGeneratePasswordButton.IsEnabled = bEnabled && ThisItem.ItemType == "text";
@@ -134,8 +159,12 @@ namespace Crypture
             // control panel display
             oTextLockImage.Visibility = bEnabled ? Visibility.Collapsed : Visibility.Visible;
             oItemData.Visibility = bEnabled && ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
-            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType != "text"
+            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType is not ("text" or "totp")
                 ? Visibility.Visible : Visibility.Collapsed;
+            oTotpPanel.Visibility = bEnabled && ThisItem.ItemType == "totp" ? Visibility.Visible : Visibility.Collapsed;
+            oTotpPanel.SetActive(bEnabled && ThisItem.ItemType == "totp");
+            oCopyContentButton.Visibility = ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
+            oContentTitle.Content = ThisItem.ItemType == "totp" ? "TOTP Authenticator" : "Protected Item Content";
             oItemStatus.Text = !bEnabled ? "Locked - decrypt to view or edit this item."
                 : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == 0
                 ? "Legacy encryption - save this item to add tamper detection." : "Unlocked - content is visible.";
@@ -204,8 +233,12 @@ namespace Crypture
                             throw new InvalidOperationException("Select at least one recipient using Share With.");
                     }
                     List<User> oRecipients = UserListSelected.ToList();
-                    byte[] oPlainText = ThisItem.ItemType == "text"
-                        ? Encoding.Unicode.GetBytes(oItemData.Text) : BinaryItemData;
+                    byte[] oPlainText = ThisItem.ItemType switch
+                    {
+                        "text" => Encoding.Unicode.GetBytes(oItemData.Text),
+                        "totp" => Encoding.UTF8.GetBytes(oTotpPanel.ReadUri()),
+                        _ => BinaryItemData
+                    };
                     try
                     {
                         // commit changes to database
@@ -214,7 +247,7 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType == "text" && oPlainText != null)
+                        if (ThisItem.ItemType is "text" or "totp" && oPlainText != null)
                             Array.Clear(oPlainText, 0, oPlainText.Length);
                     }
                 });
@@ -313,6 +346,8 @@ namespace Crypture
                     {
                         // process text item
                         if (ThisItem.ItemType == "text") oItemData.Text = Encoding.Unicode.GetString(oPlainText);
+                        else if (ThisItem.ItemType == "totp")
+                            oTotpPanel.LoadUri(new UTF8Encoding(false, true).GetString(oPlainText));
                         // text binary item
                         else BinaryItemData = oPlainText;
                         ThisItem.ModifiedBy = nModifier;
@@ -320,7 +355,7 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType == "text") Array.Clear(oPlainText, 0, oPlainText.Length);
+                        if (ThisItem.ItemType is "text" or "totp") Array.Clear(oPlainText, 0, oPlainText.Length);
                         bLoading = false;
                     }
                 });
@@ -560,6 +595,7 @@ namespace Crypture
         {
             bLoading = true;
             oItemData.Clear();
+            oTotpPanel.Clear();
             if (BinaryItemData != null) Array.Clear(BinaryItemData, 0, BinaryItemData.Length);
             BinaryItemData = null;
             bLoading = false;
@@ -598,6 +634,14 @@ namespace Crypture
         private void oCopyValue_Click(object sender, RoutedEventArgs e)
         {
             Utilities.CopyButtonValue(sender as Button);
+        }
+
+        private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1)) return;
+            ThisItem.ItemType = oItemTypeSelector.SelectedIndex == 1 ? "totp" : "text";
+            SetEditingControls(true);
+            bHasChanges = true;
         }
 
         private void oItemChanged(object sender, TextChangedEventArgs e)

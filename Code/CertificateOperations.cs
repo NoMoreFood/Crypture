@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
+using System.Formats.Asn1;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
@@ -86,6 +88,105 @@ namespace Crypture
 
             return oList;
         }
+    }
+
+    internal sealed class CertificateUsageFilter
+    {
+        private readonly X509KeyUsageFlags oIncludedKeyUsages;
+        private readonly X509KeyUsageFlags oExcludedKeyUsages;
+        private readonly HashSet<string> oIncludedEnhancedUsages;
+        private readonly HashSet<string> oExcludedEnhancedUsages;
+        private readonly bool bAllowUnrestrictedKeyUsage;
+        private readonly bool bAllowUnrestrictedEnhancedUsage;
+
+        internal CertificateUsageFilter(string sKeyInclude, string sKeyExclude, string sEnhancedInclude,
+            string sEnhancedExclude, bool bAllowKeyUsage = true, bool bAllowEnhancedUsage = true)
+        {
+            oIncludedKeyUsages = ParseKeyUsages(sKeyInclude, "CertificateKeyUsageInclude");
+            oExcludedKeyUsages = ParseKeyUsages(sKeyExclude, "CertificateKeyUsageExclude");
+            oIncludedEnhancedUsages = ParseEnhancedUsages(sEnhancedInclude, "CertificateEnhancedKeyUsageInclude");
+            oExcludedEnhancedUsages = ParseEnhancedUsages(sEnhancedExclude, "CertificateEnhancedKeyUsageExclude");
+            bAllowUnrestrictedKeyUsage = bAllowKeyUsage;
+            bAllowUnrestrictedEnhancedUsage = bAllowEnhancedUsage;
+        }
+
+        internal static CertificateUsageFilter Read()
+        {
+            Properties.Settings oSettings = Properties.Settings.Default;
+            return new CertificateUsageFilter(oSettings.CertificateKeyUsageInclude, oSettings.CertificateKeyUsageExclude,
+                oSettings.CertificateEnhancedKeyUsageInclude, oSettings.CertificateEnhancedKeyUsageExclude,
+                oSettings.AllowUnrestrictedCertificateKeyUsage, oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage);
+        }
+
+        internal bool Matches(X509Certificate2 oCert)
+        {
+            // Each include list accepts any match; a declared excluded usage always takes precedence.
+            X509KeyUsageExtension oKeyUsage = oCert.Extensions.OfType<X509KeyUsageExtension>().FirstOrDefault();
+            if (oKeyUsage == null)
+            {
+                if (!bAllowUnrestrictedKeyUsage) return false;
+            }
+            else if ((oKeyUsage.KeyUsages & oExcludedKeyUsages) != 0 ||
+                (oIncludedKeyUsages != X509KeyUsageFlags.None && (oKeyUsage.KeyUsages & oIncludedKeyUsages) == 0))
+                return false;
+            X509EnhancedKeyUsageExtension oEnhancedUsage = oCert.Extensions
+                .OfType<X509EnhancedKeyUsageExtension>().FirstOrDefault();
+            HashSet<string> oUsages = oEnhancedUsage == null ? new HashSet<string>() :
+                oEnhancedUsage.EnhancedKeyUsages.Cast<Oid>().Select(o => o.Value).ToHashSet(StringComparer.Ordinal);
+            if (oExcludedEnhancedUsages.Overlaps(oUsages)) return false;
+            bool bUnrestricted = oUsages.Count == 0 || oUsages.Contains("2.5.29.37.0");
+            return bUnrestricted ? bAllowUnrestrictedEnhancedUsage :
+                oIncludedEnhancedUsages.Count == 0 || oIncludedEnhancedUsages.Overlaps(oUsages);
+        }
+
+        internal bool Matches(byte[] oData)
+        {
+            if (oData == null || oData.Length == 0) return false;
+            try
+            {
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oData)) return Matches(oCert);
+            }
+            catch (CryptographicException)
+            {
+                return false;
+            }
+        }
+
+        private static X509KeyUsageFlags ParseKeyUsages(string sValue, string sSetting)
+        {
+            X509KeyUsageFlags oResult = X509KeyUsageFlags.None;
+            foreach (string sName in SplitList(sValue))
+            {
+                if (!Enum.GetNames<X509KeyUsageFlags>().Contains(sName, StringComparer.OrdinalIgnoreCase))
+                    throw new ConfigurationErrorsException(sSetting + " in Crypture.exe.config contains an invalid " +
+                        "Key Usage: '" + sName + "'. Use Key Usage names separated by commas or semicolons.");
+                oResult |= Enum.Parse<X509KeyUsageFlags>(sName, true);
+            }
+            return oResult;
+        }
+
+        private static HashSet<string> ParseEnhancedUsages(string sValue, string sSetting)
+        {
+            HashSet<string> oResult = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string sOid in SplitList(sValue))
+            {
+                try
+                {
+                    AsnWriter oWriter = new AsnWriter(AsnEncodingRules.DER);
+                    oWriter.WriteObjectIdentifier(sOid);
+                    oResult.Add(new AsnReader(oWriter.Encode(), AsnEncodingRules.DER).ReadObjectIdentifier());
+                }
+                catch (ArgumentException)
+                {
+                    throw new ConfigurationErrorsException(sSetting + " in Crypture.exe.config contains an invalid " +
+                        "Enhanced Key Usage OID: '" + sOid + "'. Use OIDs separated by commas or semicolons.");
+                }
+            }
+            return oResult;
+        }
+
+        private static string[] SplitList(string sValue) => (sValue ?? "").Split([',', ';'],
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
     }
 
     public partial class User

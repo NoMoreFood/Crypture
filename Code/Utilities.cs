@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Collections;
 using System.Windows;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Windows.Media;
 using System.Runtime.InteropServices;
 
 namespace Crypture
@@ -220,6 +222,55 @@ namespace Crypture
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseClipboard();
+    }
+
+    public sealed class SecretFontConverter : IValueConverter
+    {
+        internal static readonly FontFamily[] FontFamilies =
+            Fonts.SystemFontFamilies.OrderBy(f => f.Source, StringComparer.OrdinalIgnoreCase).ToArray();
+
+        internal static FontFamily ResolveFont(string sName)
+        {
+            // Only use installed fonts; missing preferences fall back to Consolas.
+            return FontFamilies.FirstOrDefault(f => String.Equals(f.Source, sName, StringComparison.OrdinalIgnoreCase)) ??
+                FontFamilies.FirstOrDefault(f => f.Source == "Consolas") ?? new FontFamily("Consolas");
+        }
+
+        public object Convert(object value, Type targetType, object parameter,
+            System.Globalization.CultureInfo culture)
+        {
+            return ResolveFont(value as string);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter,
+            System.Globalization.CultureInfo culture)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    public sealed class SecretFontSelector : ComboBox
+    {
+        public SecretFontSelector()
+        {
+            ItemsSource = SecretFontConverter.FontFamilies;
+            DisplayMemberPath = "Source";
+            SetBinding(SelectedItemProperty, new Binding(nameof(Properties.Settings.SecretFontFamily))
+            {
+                Source = Properties.Settings.Default, Mode = BindingMode.OneWay, Converter = new SecretFontConverter()
+            });
+        }
+
+        protected override void OnSelectionChanged(SelectionChangedEventArgs e)
+        {
+            base.OnSelectionChanged(e);
+            if (!IsLoaded || SelectedItem is not FontFamily oFont ||
+                oFont.Equals(SecretFontConverter.ResolveFont(Properties.Settings.Default.SecretFontFamily))) return;
+
+            // Update every open secret field before saving the appearance preference.
+            Properties.Settings.Default.SecretFontFamily = oFont.Source;
+            Utilities.TryOperation(Window.GetWindow(this), () => Properties.Settings.Default.Save());
+        }
     }
 
     public class CheckIfItemIsSelectedConverter : IMultiValueConverter

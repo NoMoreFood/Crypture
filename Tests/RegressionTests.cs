@@ -58,6 +58,11 @@ internal static partial class RegressionTests
         Directory.CreateDirectory(sDirectory);
         try
         {
+            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONFIG_STARTUP") == "1")
+            {
+                TestCertificateUsageStartup();
+                return 0;
+            }
             using (RSA oKey = new RSACng(2048))
             using (RSA oOtherKey = new RSACng(2048))
             using (X509Certificate2 oCert = Certificate(oKey, "Test", DateTimeOffset.Now.AddDays(-1),
@@ -66,10 +71,12 @@ internal static partial class RegressionTests
                 DateTimeOffset.Now.AddDays(1)))
             {
                 TestEncryption(oCert, oOtherCert);
+                TestTotpAlgorithms(oCert);
                 TestPrincipalProtection();
                 TestPasswordGeneration();
                 TestCertificates(oKey, oCert);
                 TestCertificateAlgorithms(sDirectory, oCert);
+                TestCertificateUsageFilters(oKey);
                 TestCompression();
                 TestHealthChecks(sDirectory, oKey, oCert);
                 TestRecovery(sDirectory, oCert, oOtherCert);
@@ -771,7 +778,10 @@ internal static partial class RegressionTests
         TestPasswordGeneratorWindow();
         RenderWindow(oBrowser, "item-browser.png");
         TestAppearance(oBrowser);
+        TestSecretFonts(oBrowser);
+        TestTotpWindow(oBrowser);
         TestProtectionConfiguration(sDatabase, oItem, oWindowsItem);
+        TestCertificateUsageConfiguration(oBrowser, oItem);
         TestRecoveryEditor(sDirectory);
         TestHealthCheckWindow(sDirectory, oBrowser);
         oBrowser.Closing -= (System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(

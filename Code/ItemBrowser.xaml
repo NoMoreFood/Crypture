@@ -83,6 +83,11 @@
                             <ComboBoxItem Content="Dark" Tag="Dark" />
                         </ComboBox>
                     </StackPanel>
+                    <StackPanel Margin="10,4,10,0">
+                        <Label Content="Secret _Font:" Target="{Binding ElementName=oSecretFontSelector}"
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE185;" />
+                        <local:SecretFontSelector x:Name="oSecretFontSelector" Width="210" />
+                    </StackPanel>
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
         </ribbon:Ribbon>
@@ -100,6 +105,13 @@
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE8EC;" />
+                        </Style>
+                    </DataGridTextColumn.HeaderStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Width="110" Binding="{Binding ItemTypeDisplay}" Header="Item Type" IsReadOnly="True">
+                    <DataGridTextColumn.HeaderStyle>
+                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
+                            <Setter Property="Tag" Value="&#xE8A5;" />
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>

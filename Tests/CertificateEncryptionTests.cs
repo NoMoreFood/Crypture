@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Configuration;
+using System.Xml;
+using System.Windows.Controls;
 using System.Formats.Asn1;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,6 +26,221 @@ internal static partial class RegressionTests
             return;
         }
         throw new Exception("FAIL: " + sName);
+    }
+
+    private static X509Certificate2 UsageCertificate(RSA oKey, X509KeyUsageFlags? oKeyUsage,
+        params string[] oEnhancedUsages)
+    {
+        CertificateRequest oRequest = new CertificateRequest("CN=Certificate Usage Test", oKey,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        if (oKeyUsage.HasValue)
+            oRequest.CertificateExtensions.Add(new X509KeyUsageExtension(oKeyUsage.Value, true));
+        if (oEnhancedUsages.Length > 0)
+        {
+            OidCollection oUsages = new OidCollection();
+            foreach (string sOid in oEnhancedUsages) oUsages.Add(new Oid(sOid));
+            oRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(oUsages, false));
+        }
+        return oRequest.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+    }
+
+    private static void TestCertificateUsageFilters(RSA oKey)
+    {
+        const string sClient = "1.3.6.1.5.5.7.3.2";
+        const string sServer = "1.3.6.1.5.5.7.3.1";
+        const string sSigning = "1.3.6.1.5.5.7.3.3";
+        using (X509Certificate2 oPlain = UsageCertificate(oKey, X509KeyUsageFlags.KeyEncipherment))
+        using (X509Certificate2 oUnrestricted = UsageCertificate(oKey, null))
+        using (X509Certificate2 oClient = UsageCertificate(oKey,
+            X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DigitalSignature, sClient))
+        using (X509Certificate2 oServer = UsageCertificate(oKey, X509KeyUsageFlags.KeyEncipherment, sServer))
+        using (X509Certificate2 oMixed = UsageCertificate(oKey,
+            X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DigitalSignature, sClient, sSigning))
+        using (X509Certificate2 oAny = UsageCertificate(oKey, X509KeyUsageFlags.KeyEncipherment, "2.5.29.37.0"))
+        {
+            CertificateUsageFilter oDefaults = CertificateUsageFilter.Read();
+            Check(oDefaults.Matches(oPlain) && oDefaults.Matches(oClient) && oDefaults.Matches(oServer),
+                "Default usage filters retain eligible encryption certificates with different EKUs");
+            Check(oDefaults.Matches(oUnrestricted) && oDefaults.Matches(oAny),
+                "Default usage filters permit unrestricted certificate usages");
+            CertificateUsageFilter oFilter = new CertificateUsageFilter("keyagreement; KEYENCIPHERMENT", "", "", "");
+            Check(oFilter.Matches(oPlain), "Key Usage include lists accept any matching name regardless of case");
+            oFilter = new CertificateUsageFilter("DigitalSignature", "", "", "");
+            Check(oFilter.Matches(oClient) && !oFilter.Matches(oPlain),
+                "Key Usage inclusion distinguishes multipurpose and encryption-only certificates");
+            oFilter = new CertificateUsageFilter("KeyEncipherment", "DigitalSignature", "", "");
+            Check(oFilter.Matches(oPlain) && !oFilter.Matches(oClient),
+                "Excluded Key Usages take precedence over included encryption permissions");
+            oFilter = new CertificateUsageFilter("", "", sClient + "; " + sServer, "");
+            Check(oFilter.Matches(oClient) && oFilter.Matches(oServer) && oFilter.Matches(oPlain),
+                "EKU include lists accept any matching OID and optionally unrestricted certificates");
+            oFilter = new CertificateUsageFilter("", "", sClient, "", true, false);
+            Check(oFilter.Matches(oClient) && !oFilter.Matches(oServer) && !oFilter.Matches(oPlain) &&
+                !oFilter.Matches(oAny), "Strict EKU inclusion rejects missing, any-purpose, and unrelated EKUs");
+            oFilter = new CertificateUsageFilter("", "", sClient, sSigning);
+            Check(oFilter.Matches(oClient) && !oFilter.Matches(oMixed),
+                "Excluded EKUs take precedence on certificates with multiple purposes");
+            oFilter = new CertificateUsageFilter("", "", "", sSigning);
+            Check(!oFilter.Matches(oMixed) && oFilter.Matches(oServer),
+                "An EKU exclusion list works without an inclusion list");
+            oFilter = new CertificateUsageFilter("KeyEncipherment", "", "", "", false);
+            Check(!oFilter.Matches(oUnrestricted) && oFilter.Matches(oPlain),
+                "Unrestricted Key Usage can be excluded separately from unrestricted EKU");
+            oFilter = new CertificateUsageFilter("", "", "", "2.5.29.37.0");
+            Check(!oFilter.Matches(oAny), "Explicit any-purpose EKU exclusions take precedence");
+            oFilter = new CertificateUsageFilter("DigitalSignature", "", sServer, "");
+            Check(!oFilter.Matches(oClient) && !oFilter.Matches(oServer),
+                "Certificates must satisfy both the Key Usage and EKU inclusion lists");
+            oFilter = new CertificateUsageFilter(" , ; ", "", "", "");
+            Check(oFilter.Matches(oClient.RawData) && !oFilter.Matches(new byte[] { 1, 2 }) &&
+                !oFilter.Matches((byte[])null), "Empty filters accept valid certificate data and reject damaged entries");
+            Reject(() => new CertificateUsageFilter("MisspelledUsage", "", "", ""),
+                "Reject unknown Key Usage names instead of silently broadening selection");
+            Reject(() => new CertificateUsageFilter("", "512", "", ""), "Reject numeric Key Usage filter entries");
+            Reject(() => new CertificateUsageFilter("", "", "Client Authentication", ""),
+                "Reject friendly names where an EKU OID is required");
+            Reject(() => new CertificateUsageFilter("", "", "", "1.99.3"), "Reject invalid EKU OID arcs");
+        }
+    }
+
+    private static void TestCertificateUsageStartup()
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(App).TypeHandle);
+        Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
+        Check(ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).FilePath ==
+            Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"),
+            "Application startup reads the named adjacent configuration file");
+        Check(oSettings.CertificateKeyUsageInclude == "DigitalSignature" &&
+            oSettings.CertificateKeyUsageExclude == "KeyAgreement" &&
+            oSettings.CertificateEnhancedKeyUsageInclude == "1.3.6.1.5.5.7.3.2" &&
+            oSettings.CertificateEnhancedKeyUsageExclude == "1.3.6.1.5.5.7.3.3" &&
+            !oSettings.AllowUnrestrictedCertificateKeyUsage && !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
+            "Application startup loads all six certificate selection defaults from the sidecar");
+    }
+
+    private static void TestCertificateUsageConfiguration(ItemBrowser oBrowser, Item oItem)
+    {
+        string sConfigPath = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).FilePath;
+        string sSidecarPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        byte[] oOriginalSidecar = File.ReadAllBytes(sSidecarPath);
+        const string sSection = "applicationSettings/Crypture.Properties.Settings";
+        byte[] oOriginal = File.ReadAllBytes(sConfigPath);
+        Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
+        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
+        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
+        string sTheme = oSettings.ThemeMode;
+        Item oStored = DatabaseOperations.LoadItem(oItem.ItemId);
+        User oRecipient = oStored.Instances.First().User;
+
+        // Reload the real adjacent configuration to exercise deployed defaults and recipient retention.
+        void Reload(string sInclude, bool bAutomatic = false, bool bRecovery = false)
+        {
+            XmlDocument oConfig = new XmlDocument { PreserveWhitespace = true };
+            oConfig.LoadXml(Encoding.UTF8.GetString(oOriginal).TrimStart('\uFEFF'));
+            oConfig.SelectSingleNode("//setting[@name='CertificateKeyUsageInclude']/value").InnerText = sInclude;
+            oConfig.SelectSingleNode("//setting[@name='CertificateKeyUsageExclude']/value").InnerText = "KeyAgreement";
+            oConfig.SelectSingleNode("//setting[@name='CertificateEnhancedKeyUsageInclude']/value").InnerText =
+                "1.3.6.1.5.5.7.3.2";
+            oConfig.SelectSingleNode("//setting[@name='CertificateEnhancedKeyUsageExclude']/value").InnerText =
+                "1.3.6.1.5.5.7.3.3";
+            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateKeyUsage']/value").InnerText = "False";
+            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateEnhancedKeyUsage']/value").InnerText =
+                "False";
+            oConfig.SelectSingleNode("//setting[@name='AutomaticallyAddedCertificatesList']//ArrayOfString").InnerXml =
+                bAutomatic ? "<string>" + Convert.ToBase64String(oRecipient.Certificate) + "</string>" : "";
+            oConfig.SelectSingleNode("//appSettings/add[@key='RecoveryCertificateBase64']/@value").Value =
+                bRecovery ? Convert.ToBase64String(oRecipient.Certificate) : "";
+            File.WriteAllText(sConfigPath, oConfig.OuterXml, new UTF8Encoding(false));
+            File.WriteAllText(sSidecarPath, oConfig.OuterXml, new UTF8Encoding(false));
+            ConfigurationManager.RefreshSection(sSection);
+            ConfigurationManager.RefreshSection("appSettings");
+            oSettings.Reload();
+            oSettings.AllowSelfSignedCertificates = true;
+            oSettings.PerformCertificateRevocationCheck = false;
+            oSettings.ThemeMode = sTheme;
+        }
+        try
+        {
+            Reload("DigitalSignature");
+            Check(oSettings.CertificateKeyUsageInclude == "DigitalSignature" &&
+                oSettings.CertificateKeyUsageExclude == "KeyAgreement" &&
+                oSettings.CertificateEnhancedKeyUsageInclude == "1.3.6.1.5.5.7.3.2" &&
+                oSettings.CertificateEnhancedKeyUsageExclude == "1.3.6.1.5.5.7.3.3" &&
+                !oSettings.AllowUnrestrictedCertificateKeyUsage && !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
+                "Adjacent config supplies all six certificate usage defaults");
+
+            // A fresh process also verifies the real application's startup config path.
+            var oStart = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            oStart.Environment["CRYPTURE_TEST_CONFIG_STARTUP"] = "1";
+            using (var oProcess = System.Diagnostics.Process.Start(oStart))
+            {
+                var oOutput = oProcess.StandardOutput.ReadToEndAsync();
+                var oErrors = oProcess.StandardError.ReadToEndAsync();
+                if (!oProcess.WaitForExit(15000))
+                {
+                    oProcess.Kill(true);
+                    throw new TimeoutException("The configuration startup check did not finish.");
+                }
+                Check(oProcess.ExitCode == 0, "Fresh application startup loads the adjacent usage configuration: " +
+                    oOutput.GetAwaiter().GetResult().Trim() + oErrors.GetAwaiter().GetResult().Trim());
+            }
+            CertificateUsageFilter oFilter = CertificateUsageFilter.Read();
+            Check(!oFilter.Matches(oRecipient.Certificate), "Configured usage filters exclude unrelated new recipients");
+            ItemEditor oNew = new ItemEditor();
+            var oChoices = (System.Windows.Controls.Ribbon.RibbonMenuButton)oNew.FindName("oAddCertDropDown");
+            Check(oChoices.Items.Cast<User>().All(u => oFilter.Matches(u.Certificate)),
+                "New item sharing lists use the configured usage filters");
+            oNew.Close();
+            ItemEditor oExisting = new ItemEditor(oStored);
+            oChoices = (System.Windows.Controls.Ribbon.RibbonMenuButton)oExisting.FindName("oAddCertDropDown");
+            Check(oExisting.UserListSelected.Any(u => u.UserId == oRecipient.UserId) &&
+                oChoices.Items.Cast<User>().Any(u => u.UserId == oRecipient.UserId),
+                "Existing item recipients remain visible and removable despite selection filters");
+            oExisting.Close();
+            using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oRecipient.Certificate))
+            {
+                Check(CertificateOperations.CheckCertificateStatus(oCert),
+                    "Selection filters do not invalidate certificates used for saved access and recovery");
+                Reject(() => oBrowser.AddCertificate(oCert, CertificateOperations.CurrentUserSid),
+                    "Direct certificate imports honor the configured usage filters");
+            }
+            Reload("DigitalSignature", true);
+            ItemEditor oRequired = new ItemEditor();
+            Check(oRequired.UserListSelected.Any(u => u.UserId == oRecipient.UserId),
+                "Administrator-required certificates remain selected when excluded from normal choices");
+            oRequired.Close();
+            Reload("DigitalSignature", false, true);
+            Item oRecoveryItem = new Item { Label = "Filtered Certificate Recovery", ItemType = "text" };
+            byte[] oSecret = Encoding.Unicode.GetBytes("Recovery remains available under restrictive selection filters.");
+            DatabaseOperations.SaveItem(oRecoveryItem, oSecret, Array.Empty<User>(), PrincipalProtection.LocalUserDescriptor);
+            using (CryptureEntities oContent = new CryptureEntities())
+                oRecoveryItem = DatabaseOperations.LoadItem(oContent.Items.Single(i =>
+                    i.Label == "Filtered Certificate Recovery").ItemId);
+            Check(oRecoveryItem.Instances.Any(i => i.User.Certificate.SequenceEqual(oRecipient.Certificate)),
+                "Certificate usage filters do not remove emergency recovery from Windows-protected saves");
+            Check(ItemCryptography.Decrypt(oRecoveryItem).SequenceEqual(oSecret),
+                "Restrictive certificate selection defaults preserve Windows-protected item access");
+            Reload("InvalidUsage");
+            ItemEditor oInvalid = new ItemEditor(oStored);
+            Check(((TextBlock)oInvalid.FindName("oCertificateUsageNotice")).Text.Contains("CertificateKeyUsageInclude") &&
+                oInvalid.UserListSelected.Any(u => u.UserId == oRecipient.UserId),
+                "Invalid usage settings show a diagnostic without blocking existing recipients");
+            oInvalid.Close();
+        }
+        finally
+        {
+            File.WriteAllBytes(sConfigPath, oOriginal);
+            File.WriteAllBytes(sSidecarPath, oOriginalSidecar);
+            ConfigurationManager.RefreshSection(sSection);
+            ConfigurationManager.RefreshSection("appSettings");
+            oSettings.Reload();
+            oSettings.AllowSelfSignedCertificates = bSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bRevocation;
+            oSettings.ThemeMode = sTheme;
+        }
     }
 
     private static X509Certificate2 EccCertificate(CngKey oKey,
@@ -68,6 +286,7 @@ internal static partial class RegressionTests
             using (X509Certificate2 oSigning = EccCertificate(oKey, X509KeyUsageFlags.DigitalSignature))
             {
                 Check(CertificateOperations.CheckCertificateStatus(oCert), "Accept " + oAlgorithm + " certificate");
+                Check(CertificateUsageFilter.Read().Matches(oCert), "Default usage filters retain " + oAlgorithm);
                 Check(!CertificateOperations.CheckCertificateStatus(oSigning), "Reject signing-only " + oAlgorithm);
                 TestRecipientEnvelope(oCert, oRsaCert, oAlgorithm.Algorithm);
                 TestAlgorithmVault(sDirectory, oCert, oAlgorithm.Algorithm);

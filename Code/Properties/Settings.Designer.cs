@@ -29,6 +29,18 @@ namespace Crypture.Properties {
             }
         }
 
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Consolas")]
+        public string SecretFontFamily {
+            get {
+                return ((string)(this["SecretFontFamily"]));
+            }
+            set {
+                this["SecretFontFamily"] = value;
+            }
+        }
+
         public static Settings Default {
             get {
                 return defaultInstance;
@@ -68,6 +80,60 @@ namespace Crypture.Properties {
         public bool EnableCertificateProtection {
             get {
                 return ((bool)(this["EnableCertificateProtection"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("KeyEncipherment;KeyAgreement")]
+        public string CertificateKeyUsageInclude {
+            get {
+                return ((string)(this["CertificateKeyUsageInclude"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string CertificateKeyUsageExclude {
+            get {
+                return ((string)(this["CertificateKeyUsageExclude"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string CertificateEnhancedKeyUsageInclude {
+            get {
+                return ((string)(this["CertificateEnhancedKeyUsageInclude"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string CertificateEnhancedKeyUsageExclude {
+            get {
+                return ((string)(this["CertificateEnhancedKeyUsageExclude"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AllowUnrestrictedCertificateKeyUsage {
+            get {
+                return ((bool)(this["AllowUnrestrictedCertificateKeyUsage"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AllowUnrestrictedCertificateEnhancedKeyUsage {
+            get {
+                return ((bool)(this["AllowUnrestrictedCertificateEnhancedKeyUsage"]));
             }
         }
 
