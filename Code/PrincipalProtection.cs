@@ -86,12 +86,23 @@ namespace Crypture
                 bResolveNames ? null : p.Substring(4))).ToList();
         }
 
-        internal static byte[] Protect(byte[] oKeys, string sDescriptor)
+        internal static void ValidateCustomDescriptor(string sDescriptor)
         {
-            ParseDescriptor(sDescriptor, out _, false);
+            if (String.IsNullOrWhiteSpace(sDescriptor) || sDescriptor.Length > MaxDescriptorLength ||
+                sDescriptor.Contains("\0"))
+                throw new CryptographicException("The recovery protection descriptor is missing or invalid.");
+            int nStatus = NCryptCreateProtectionDescriptor(sDescriptor, 0, out DescriptorHandle oDescriptor);
+            using (oDescriptor) ThrowIfFailed(nStatus, "create the emergency recovery policy");
+        }
+
+        internal static byte[] Protect(byte[] oKeys, string sDescriptor, bool bCustomDescriptor = false)
+        {
+            if (bCustomDescriptor) ValidateCustomDescriptor(sDescriptor);
+            else ParseDescriptor(sDescriptor, out _, false);
             if (oKeys == null || oKeys.Length != 64)
                 throw new CryptographicException("The item encryption keys are invalid.");
-            if (sDescriptor != LocalUserDescriptor && sDescriptor != LocalMachineDescriptor && !IsDomainJoined)
+            if (!bCustomDescriptor && sDescriptor != LocalUserDescriptor &&
+                sDescriptor != LocalMachineDescriptor && !IsDomainJoined)
                 throw new CryptographicException("Domain Users and Groups requires Active Directory. " +
                     "On a standalone computer, choose Saving Account's Local Windows Profile for your own account, " +
                     "or All Users on This Computer for everyone on this computer. " +
@@ -210,7 +221,9 @@ namespace Crypture
     {
         public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";
         public string ProtectionDisplay => Cipher == null ? "Unknown" :
-            Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "Windows (DPAPI-NG)" :
+            Cipher.CipherParams == ItemCryptography.RecoveryFormat
+            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "Windows (DPAPI-NG)" : "Certificates") + " + Recovery"
+            : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "Windows (DPAPI-NG)" :
             Cipher.CipherParams == 0 || Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
             Cipher.CipherParams == ItemCryptography.CertificateFormat
             ? "Certificates" : "Unsupported";

@@ -96,7 +96,7 @@ namespace Crypture
             {
                 try
                 {
-                    using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
                         return oCert.GetNameInfo(X509NameType.SimpleName, false);
                 }
                 catch (System.Security.Cryptography.CryptographicException)
@@ -112,7 +112,7 @@ namespace Crypture
             {
                 try
                 {
-                    using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
                         return CertificateKeyProtection.GetAlgorithmDisplay(oCert);
                 }
                 catch (CryptographicException)
@@ -126,7 +126,7 @@ namespace Crypture
         {
             get
             {
-                using (X509Certificate2 oCert = new X509Certificate2(Certificate))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
                 {
                     return CertificateOperations.IsSelfSigned(oCert);
                 }

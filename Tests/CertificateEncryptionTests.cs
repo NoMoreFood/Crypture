@@ -164,7 +164,7 @@ internal static partial class RegressionTests
                 using (RSA oIssuer = new RSACng(2048))
                 using (X509Certificate2 oOriginal = bPostQuantum
                     ? MlKemCertificate(oIssuer, "768", oKem.ExportEncapsulationKey()) : EccCertificate(oKey))
-                using (X509Certificate2 oCert = new X509Certificate2(oOriginal.RawData))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oOriginal.RawData))
                 {
                     TestKeyProvider oProvider = new TestKeyProvider
                     {
@@ -230,7 +230,7 @@ internal static partial class RegressionTests
         oCertificate.WriteEncodedValue(oAlgorithm.Encode());
         oCertificate.WriteBitString(oIssuer.SignData(oTbs, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
         oCertificate.PopSequence();
-        return new X509Certificate2(oCertificate.Encode());
+        return X509CertificateLoader.LoadCertificate(oCertificate.Encode());
     }
 
     private static void TestRecipientEnvelope(X509Certificate2 oCert, X509Certificate2 oRsaCert, string sName)
@@ -249,7 +249,7 @@ internal static partial class RegressionTests
         ItemCryptography.Encrypt(oItem, oPlain, oRecipients);
         oInstance = oItem.Instances.First();
         Check(!oFirstEnvelope.SequenceEqual(oInstance.CipherKey), sName + " fresh encapsulation per save");
-        using (X509Certificate2 oPublicOnly = new X509Certificate2(oCert.RawData))
+        using (X509Certificate2 oPublicOnly = X509CertificateLoader.LoadCertificate(oCert.RawData))
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oPublicOnly),
                 sName + " requires a private key");
         RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oRsaCert),

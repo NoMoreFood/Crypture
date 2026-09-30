@@ -44,3 +44,6 @@ using System.Windows;
 [assembly: AssemblyVersion("2.0.0.0")]
 [assembly: AssemblyFileVersion("2.0.0.0")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Crypture.Tests")]
+
+[assembly: System.Resources.NeutralResourcesLanguage("en-US")]
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows7.0")]

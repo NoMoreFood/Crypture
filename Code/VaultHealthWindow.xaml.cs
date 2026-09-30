@@ -18,6 +18,7 @@ namespace Crypture
         public VaultHealthWindow(string sPath)
         {
             InitializeComponent();
+            Utilities.EnableClipboardTimeout(oDetails);
             sVaultPath = sPath;
             oVaultName.Text = Path.GetFileName(sPath);
             oVaultName.ToolTip = sPath;

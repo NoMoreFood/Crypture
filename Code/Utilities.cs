@@ -23,17 +23,41 @@ namespace Crypture
             {
                 e.Handled = true;
                 bool bCut = e.Command == ApplicationCommands.Cut;
-                if (!oTextBox.IsEnabled || oTextBox.SelectionLength == 0 || (bCut && oTextBox.IsReadOnly)) return;
-                if (oCopy(oTextBox.SelectedText) && bCut) oTextBox.SelectedText = "";
+
+                // Copy icons use the whole field; keyboard Copy and Cut keep their selection behavior.
+                bool bAll = !bCut && Equals(e.Parameter, "All");
+                string sText = bAll ? oTextBox.Text : oTextBox.SelectedText;
+                if (!oTextBox.IsEnabled || sText.Length == 0 || (bCut && oTextBox.IsReadOnly)) return;
+                if (oCopy(sText) && bCut) oTextBox.SelectedText = "";
             };
             CanExecuteRoutedEventHandler oCanExecute = (s, e) =>
             {
-                e.CanExecute = oTextBox.IsEnabled && oTextBox.SelectionLength > 0 &&
-                    (e.Command != ApplicationCommands.Cut || !oTextBox.IsReadOnly);
+                bool bCut = e.Command == ApplicationCommands.Cut;
+                bool bAll = !bCut && Equals(e.Parameter, "All");
+                e.CanExecute = oTextBox.IsEnabled && (bAll ? oTextBox.Text.Length > 0 :
+                    oTextBox.SelectionLength > 0) && (!bCut || !oTextBox.IsReadOnly);
                 e.Handled = true;
             };
             oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, oExecuted, oCanExecute));
             oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
+            oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+            oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+        }
+
+        internal static bool CopyButtonValue(Button oButton, Func<string, bool> oCopy = null)
+        {
+            if (oButton?.IsEnabled != true) return false;
+
+            // Public certificates use DER Base64 so they can be pasted into recovery configuration.
+            string sText = oButton.Tag switch
+            {
+                byte[] oCertificate => Convert.ToBase64String(oCertificate),
+                string sValue => sValue,
+                _ => null
+            };
+            if (String.IsNullOrEmpty(sText)) return false;
+            oCopy ??= s => TryOperation(Window.GetWindow(oButton), () => App.CopyProtectedText(s));
+            return oCopy(sText);
         }
 
         internal static bool TryOperation(Window oOwner, Action oAction)

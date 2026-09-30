@@ -1,6 +1,6 @@
 ﻿using Microsoft.Win32;
 using System;
-using System.Collections;
+using System.Globalization;
 using System.IO;
 using System.Security;
 using System.Runtime.InteropServices;
@@ -22,6 +22,8 @@ namespace Crypture
 
         static App()
         {
+            CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
+            AppContext.SetData("APP_CONFIG_FILE", Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"));
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
                 new RoutedEventHandler((s, e) => ApplyTitleBarTheme((Window)s)));
         }
@@ -82,11 +84,6 @@ namespace Crypture
         {
             bThemeApplied = true;
             IsDarkMode = bDark;
-            string sTheme = bDark ? "BaseDark" : "BaseLight";
-            Fluent.ThemeManager.ChangeAppTheme(Current, sTheme);
-            // Fluent 6.1 does not refresh existing controls when it adds a merged theme dictionary.
-            foreach (DictionaryEntry oResource in Fluent.ThemeManager.GetAppTheme(sTheme).Resources)
-                Current.Resources[oResource.Key] = oResource.Value;
             SetThemeBrush("Window", bDark ? "#1E1E1E" : "#FFFFFF");
             SetThemeBrush("Panel", bDark ? "#252526" : "#F6F8FB");
             SetThemeBrush("Control", bDark ? "#2D2D30" : "#FFFFFF");

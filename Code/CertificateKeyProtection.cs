@@ -115,7 +115,7 @@ namespace Crypture
         private static MLKem GetMlKemPublicKey(X509Certificate2 oCert, RecipientAlgorithm oAlgorithm)
         {
             MLKemAlgorithm oParameters = GetMlKemAlgorithm(oAlgorithm);
-            if (oCert.PublicKey.EncodedParameters.RawData.Length != 0)
+            if (oCert.PublicKey.EncodedParameters?.RawData?.Length > 0)
                 throw new CryptographicException("The ML-KEM certificate has invalid algorithm parameters.");
             return MLKem.ImportEncapsulationKey(oParameters, oCert.GetPublicKey());
         }

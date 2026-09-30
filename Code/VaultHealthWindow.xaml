@@ -64,8 +64,13 @@
                 <DataGridTextColumn Header="Affected Items" Binding="{Binding ItemCount}" Width="110" />
             </DataGrid.Columns>
         </DataGrid>
-        <Label Grid.Row="4" Content="_Details:" Target="{Binding ElementName=oDetails}" Margin="0,8,0,3"
-            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE946;" Padding="0" />
+        <DockPanel Grid.Row="4" Margin="0,8,0,3">
+            <Button x:Name="oCopyDetailsButton" DockPanel.Dock="Right" Style="{StaticResource Crypture.CopyButton}"
+                AutomationProperties.Name="Copy Health Check Details" Command="ApplicationCommands.Copy"
+                CommandParameter="All" CommandTarget="{Binding ElementName=oDetails}" />
+            <Label Content="_Details:" Target="{Binding ElementName=oDetails}" VerticalAlignment="Center"
+                Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE946;" Padding="0" />
+        </DockPanel>
         <TextBox x:Name="oDetails" Grid.Row="5" IsReadOnly="True" TextWrapping="Wrap" Padding="8"
             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
             AutomationProperties.Name="Health Check Details" />

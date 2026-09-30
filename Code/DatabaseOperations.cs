@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Data.Entity;
-using System.Data.SQLite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using System.IO;
 using System.Linq;
 using System.Security.Principal;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Crypture
 {
@@ -30,7 +31,7 @@ namespace Crypture
             using (CryptureEntities oContent = new CryptureEntities())
             {
                 Item oItem = oContent.Items.Include(i => i.User).Include(i => i.Cipher)
-                    .Include(i => i.Instances.Select(j => j.User)).SingleOrDefault(i => i.ItemId == nItemId);
+                    .Include(i => i.Instances).ThenInclude(j => j.User).SingleOrDefault(i => i.ItemId == nItemId);
                 if (oItem == null) throw new InvalidOperationException("This item has been removed. Refresh the list.");
                 return oItem;
             }
@@ -39,11 +40,35 @@ namespace Crypture
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null)
         {
-            Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
-            ItemCryptography.Encrypt(oEncrypted, oPlainText, oRecipients, sProtectionDescriptor);
-            using (CryptureEntities oContent = new CryptureEntities())
-            using (DbContextTransaction oTransaction = oContent.Database.BeginTransaction())
+            RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+            List<User> oUsers = sProtectionDescriptor == null
+                ? (oRecipients ?? Enumerable.Empty<User>()).ToList() : new List<User>();
+            if (oRecovery.Certificate != null)
             {
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oRecovery.Certificate))
+                    if (!CertificateOperations.CheckCertificateStatus(oCert))
+                        throw new InvalidOperationException("The emergency recovery certificate is not valid for " +
+                            "encryption. Check its expiry, trust, and certificate validation settings.");
+            }
+            Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
+            using (CryptureEntities oContent = new CryptureEntities())
+            using (var oTransaction = oContent.Database.BeginTransaction())
+            {
+                // Enforce recovery at the save boundary, including callers outside the editor.
+                if (oRecovery.Certificate != null)
+                {
+                    User oRecoveryUser = oContent.Users.ToList().FirstOrDefault(u =>
+                        u.Certificate.SequenceEqual(oRecovery.Certificate));
+                    if (oRecoveryUser == null)
+                    {
+                        oRecoveryUser = new User { Certificate = oRecovery.Certificate };
+                        oContent.Users.Add(oRecoveryUser);
+                        oContent.SaveChanges();
+                    }
+                    if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
+                }
+                ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
+                    sProtectionDescriptor, oRecovery.Descriptor);
                 Item oStored = null;
                 if (oItem.ItemId != 0)
                 {
@@ -87,13 +112,13 @@ namespace Crypture
 
         internal static void EnsureProtectionSchema(string sPath)
         {
-            using (SQLiteConnection oConnection = new SQLiteConnection(new SQLiteConnectionStringBuilder
+            using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
-                DataSource = sPath, ForeignKeys = true, FailIfMissing = true, Pooling = false
+                DataSource = sPath, ForeignKeys = true, Mode = SqliteOpenMode.ReadWrite, Pooling = false
             }.ConnectionString))
             {
                 oConnection.Open();
-                using (SQLiteTransaction oTransaction = oConnection.BeginTransaction())
+                using (SqliteTransaction oTransaction = oConnection.BeginTransaction())
                 {
                     Dictionary<string, HashSet<string>> oColumns = new Dictionary<string, HashSet<string>>();
                     foreach (string[] oTable in new[]
@@ -106,9 +131,9 @@ namespace Crypture
                     {
                         string sTable = oTable[0];
                         HashSet<string> oNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        using (SQLiteCommand oCommand = new SQLiteCommand(
+                        using (SqliteCommand oCommand = new SqliteCommand(
                             "PRAGMA table_info([" + sTable + "])", oConnection, oTransaction))
-                        using (SQLiteDataReader oReader = oCommand.ExecuteReader())
+                        using (SqliteDataReader oReader = oCommand.ExecuteReader())
                             while (oReader.Read()) oNames.Add(oReader.GetString(1));
                         if (oTable.Skip(1).Any(c => !oNames.Contains(c)))
                             throw new InvalidDataException("This is not a supported Crypture Vault.");
@@ -123,11 +148,11 @@ namespace Crypture
                     })
                     {
                         if (oColumns[oColumn[0]].Contains(oColumn[1])) continue;
-                        using (SQLiteCommand oCommand = new SQLiteCommand("ALTER TABLE [" + oColumn[0] +
+                        using (SqliteCommand oCommand = new SqliteCommand("ALTER TABLE [" + oColumn[0] +
                             "] ADD COLUMN [" + oColumn[1] + "] " + oColumn[2] + " NULL", oConnection, oTransaction))
                             oCommand.ExecuteNonQuery();
                     }
-                    using (SQLiteCommand oCommand = new SQLiteCommand(
+                    using (SqliteCommand oCommand = new SqliteCommand(
                         PasswordOptionsSchema, oConnection, oTransaction)) oCommand.ExecuteNonQuery();
                     oTransaction.Commit();
                 }
@@ -138,7 +163,7 @@ namespace Crypture
         {
             using (CryptureEntities oContent = new CryptureEntities())
             {
-                PasswordOptions oOptions = oContent.Database.SqlQuery<PasswordOptions>(
+                PasswordOptions oOptions = oContent.Database.SqlQueryRaw<PasswordOptions>(
                     "SELECT MinimumLength, MaximumLength, IncludeUppercase, IncludeLowercase, IncludeDigits, " +
                     "IncludeSymbols, SymbolCharacters, ExcludedCharacters, ExcludeSimilar, RequireEachType " +
                     "FROM PasswordGeneratorSettings WHERE Id = 1").SingleOrDefault() ?? new PasswordOptions();
@@ -152,29 +177,30 @@ namespace Crypture
             oOptions.GetCharacterGroups();
             using (CryptureEntities oContent = new CryptureEntities())
             {
-                oContent.Database.ExecuteSqlCommand(
+                oContent.Database.ExecuteSqlRaw(
                     "INSERT OR REPLACE INTO PasswordGeneratorSettings (Id, MinimumLength, MaximumLength, " +
                     "IncludeUppercase, IncludeLowercase, IncludeDigits, IncludeSymbols, SymbolCharacters, " +
                     "ExcludedCharacters, ExcludeSimilar, RequireEachType) " +
                     "VALUES (1, @min, @max, @upper, @lower, @digits, @symbols, " +
                     "@characters, @excluded, @similar, @each)",
-                    new SQLiteParameter("@min", oOptions.MinimumLength),
-                    new SQLiteParameter("@max", oOptions.MaximumLength),
-                    new SQLiteParameter("@upper", oOptions.IncludeUppercase ? 1 : 0),
-                    new SQLiteParameter("@lower", oOptions.IncludeLowercase ? 1 : 0),
-                    new SQLiteParameter("@digits", oOptions.IncludeDigits ? 1 : 0),
-                    new SQLiteParameter("@symbols", oOptions.IncludeSymbols ? 1 : 0),
-                    new SQLiteParameter("@characters", oOptions.SymbolCharacters),
-                    new SQLiteParameter("@excluded", oOptions.ExcludedCharacters),
-                    new SQLiteParameter("@similar", oOptions.ExcludeSimilar ? 1 : 0),
-                    new SQLiteParameter("@each", oOptions.RequireEachType ? 1 : 0));
+                    new SqliteParameter("@min", oOptions.MinimumLength),
+                    new SqliteParameter("@max", oOptions.MaximumLength),
+                    new SqliteParameter("@upper", oOptions.IncludeUppercase ? 1 : 0),
+                    new SqliteParameter("@lower", oOptions.IncludeLowercase ? 1 : 0),
+                    new SqliteParameter("@digits", oOptions.IncludeDigits ? 1 : 0),
+                    new SqliteParameter("@symbols", oOptions.IncludeSymbols ? 1 : 0),
+                    new SqliteParameter("@characters", oOptions.SymbolCharacters),
+                    new SqliteParameter("@excluded", oOptions.ExcludedCharacters),
+                    new SqliteParameter("@similar", oOptions.ExcludeSimilar ? 1 : 0),
+                    new SqliteParameter("@each", oOptions.RequireEachType ? 1 : 0));
             }
         }
 
         internal static void RemoveCertificate(long nUserId)
         {
+            RecoveryPolicy oRecovery = RecoveryPolicy.Read();
             using (CryptureEntities oContent = new CryptureEntities())
-            using (DbContextTransaction oTransaction = oContent.Database.BeginTransaction())
+            using (var oTransaction = oContent.Database.BeginTransaction())
             {
                 if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
                     !i.Instances.Any(j => j.UserId != nUserId)))
@@ -183,6 +209,9 @@ namespace Crypture
 
                 User oUser = oContent.Users.Find(nUserId);
                 if (oUser == null) return;
+                if (oRecovery.Certificate != null && oUser.Certificate.SequenceEqual(oRecovery.Certificate))
+                    throw new InvalidOperationException(
+                        "The configured emergency recovery certificate cannot be removed.");
                 oContent.Users.Remove(oUser);
                 oContent.SaveChanges();
                 oTransaction.Commit();
@@ -194,14 +223,14 @@ namespace Crypture
             using (FileStream oFile = new FileStream(sPath, FileMode.CreateNew, FileAccess.Write)) { }
             try
             {
-                using (SQLiteConnection oConnection = new SQLiteConnection(new SQLiteConnectionStringBuilder
+                using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
                 {
-                    DataSource = sPath, ForeignKeys = true, FailIfMissing = true, Pooling = false
+                    DataSource = sPath, ForeignKeys = true, Mode = SqliteOpenMode.ReadWrite, Pooling = false
                 }.ConnectionString))
                 {
                     oConnection.Open();
-                    using (SQLiteTransaction oTransaction = oConnection.BeginTransaction())
-                    using (SQLiteCommand oCommand = new SQLiteCommand(sSchema, oConnection, oTransaction))
+                    using (SqliteTransaction oTransaction = oConnection.BeginTransaction())
+                    using (SqliteCommand oCommand = new SqliteCommand(sSchema, oConnection, oTransaction))
                     {
                         oCommand.ExecuteNonQuery();
                         oTransaction.Commit();
@@ -223,18 +252,18 @@ namespace Crypture
             string sTemporary = sDestination + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                using (SQLiteConnection oSource = new SQLiteConnection(new SQLiteConnectionStringBuilder
+                using (SqliteConnection oSource = new SqliteConnection(new SqliteConnectionStringBuilder
                 {
-                    DataSource = sSource, FailIfMissing = true, ReadOnly = true, Pooling = false
+                    DataSource = sSource, Mode = SqliteOpenMode.ReadOnly, Pooling = false
                 }.ConnectionString))
-                using (SQLiteConnection oDestination = new SQLiteConnection(new SQLiteConnectionStringBuilder
+                using (SqliteConnection oDestination = new SqliteConnection(new SqliteConnectionStringBuilder
                 {
                     DataSource = sTemporary, Pooling = false
                 }.ConnectionString))
                 {
                     oSource.Open();
                     oDestination.Open();
-                    oSource.BackupDatabase(oDestination, "main", "main", -1, null, 0);
+                    oSource.BackupDatabase(oDestination);
                 }
                 File.Move(sTemporary, sDestination);
             }

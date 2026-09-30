@@ -1,5 +1,5 @@
 using System;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -74,13 +74,13 @@ internal static partial class RegressionTests
         string sPath = Path.Combine(sDirectory, "health-check.cryptdb");
         DatabaseOperations.CreateDatabase(sPath,
             File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SQLite.sql")));
-        using (SQLiteConnection oConnection = new SQLiteConnection(new SQLiteConnectionStringBuilder
+        using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = sPath, Pooling = false, ForeignKeys = false
         }.ConnectionString))
         {
             oConnection.Open();
-            using (SQLiteCommand oCommand = oConnection.CreateCommand())
+            using (SqliteCommand oCommand = oConnection.CreateCommand())
             {
                 oCommand.CommandText =
                     "INSERT INTO [User] (UserId, Certificate, Sid) VALUES (1, @cert, @sid), (2, X'010203', NULL);" +
@@ -154,7 +154,7 @@ internal static partial class RegressionTests
 
     private static void TestHealthCheckWindow(string sDirectory, ItemBrowser oBrowser)
     {
-        Check(((Fluent.Button)oBrowser.FindName("oHealthCheckButton")).IsEnabled,
+        Check(((System.Windows.Controls.Ribbon.RibbonButton)oBrowser.FindName("oHealthCheckButton")).IsEnabled,
             "A loaded Vault enables the Health Check action");
         VaultHealthWindow oWindow = new VaultHealthWindow(Path.Combine(sDirectory, "health-check.cryptdb"));
         ShowTestWindow(oWindow);
@@ -170,7 +170,11 @@ internal static partial class RegressionTests
         oFilter.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Check(oResults.Items.Cast<HealthCheckFinding>().All(f => f.Severity >= HealthStatus.Warning),
             "Show Only Issues filters out passed and informational health results");
-        Check(((TextBox)oWindow.FindName("oDetails")).Text.Contains("Affected Items:"),
+        TextBox oDetails = (TextBox)oWindow.FindName("oDetails");
+        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oDetails),
+            "Health check details can be copied without selecting their text");
+        RenderWindow(oWindow, "health-check-copy.png");
+        Check(oDetails.Text.Contains("Affected Items:"),
             "Selecting a health result displays affected items and details");
         oRun.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         ((Button)oWindow.FindName("oCancelButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

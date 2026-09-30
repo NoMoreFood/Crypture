@@ -3,8 +3,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Data.Entity;
-using System.Data.SQLite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using System.DirectoryServices;
 using System.ComponentModel;
 using System.IO;
@@ -25,7 +25,7 @@ namespace Crypture
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
-    public partial class ItemBrowser : Fluent.RibbonWindow
+    public partial class ItemBrowser : Window
     {
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
 
@@ -68,9 +68,6 @@ namespace Crypture
             return true;
         }
 
-        [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
-        static extern IntPtr LoadLibrary(string lpFileName);
-
         public ItemBrowser()
         {
             // display splash screen and set to automatically close after constructor returns
@@ -84,20 +81,12 @@ namespace Crypture
             string[] sArgs = Environment.GetCommandLineArgs();
             if (sArgs.Length > 1) LoadDatabase(sArgs[1]);
 
-            // load in cleaner library
-            string sBaseDirectory = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
-            string sArchSetting = (Environment.Is64BitProcess) ? "x64" : "x86";
-            string sLibPath = Path.Combine(new string[] { sBaseDirectory, sArchSetting, "Crypture-WrapperEnabler.dll" });
-            if (File.Exists(sLibPath))
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                LoadLibrary(sLibPath);
-            }
-
             // show certificate generator based on settings file
-            oCertificateToolsGroupBox.Visibility = (Properties.Settings.Default.ShowCertificateTools) ?
-                Visibility.Visible : Visibility.Collapsed;
+            bool bCertificates = Properties.Settings.Default.EnableCertificateProtection;
+            oCertificatesTab.Visibility = bCertificates ? Visibility.Visible : Visibility.Collapsed;
+            oProtectedItemScopeRibbonGroupBox.Visibility = oCertificatesTab.Visibility;
+            oCertificateToolsGroupBox.Visibility = bCertificates && Properties.Settings.Default.ShowCertificateTools
+                ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void oRemoveItemUser_Click(object sender, RoutedEventArgs e)
@@ -153,7 +142,7 @@ namespace Crypture
                 if (X509Certificate2.GetCertContentType(oOpenDialog.FileName) != X509ContentType.Cert)
                     throw new InvalidOperationException("Select a public certificate (.cer). " +
                         "Import private keys using Windows.");
-                using (X509Certificate2 oCert = new X509Certificate2(oOpenDialog.FileName))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificateFromFile(oOpenDialog.FileName))
                     AddCertificate(oCert, CertificateOperations.CurrentUserSid);
             });
         }
@@ -236,7 +225,7 @@ namespace Crypture
                             {
                                 foreach (byte[] oCertData in (object[])oAdCertAttribute)
                                 {
-                                    using (X509Certificate2 oCert = new X509Certificate2(oCertData))
+                                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
                                         if (CertificateOperations.CheckCertificateStatus(oCert))
                                             oCollection.Add(new X509Certificate2(oCert));
                                 }
@@ -256,7 +245,7 @@ namespace Crypture
 
                         // add the certificate to the store
                         SecurityIdentifier oSid = new SecurityIdentifier((byte[])oSelected.FetchedAttributes[1], 0);
-                        using (X509Certificate2 oCert = new X509Certificate2((byte[])oAdCertAttribute))
+                        using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate((byte[])oAdCertAttribute))
                         {
                             AddCertificate(oCert, oSid.ToString());
                         }
@@ -295,6 +284,11 @@ namespace Crypture
             ApplyFilter();
         }
 
+        private void oCopyValue_Click(object sender, RoutedEventArgs e)
+        {
+            Utilities.CopyButtonValue(sender as Button);
+        }
+
         private void oViewCertButton_Click(object sender, RoutedEventArgs e)
         {
             Utilities.TryOperation(this, () =>
@@ -304,7 +298,7 @@ namespace Crypture
 
                 // display the selected certificate
                 User oUser = (User)oCertDataGrid.SelectedItem;
-                using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
                 {
                     X509Certificate2UI.DisplayCertificate(oCert);
                 }
@@ -313,6 +307,14 @@ namespace Crypture
 
         private void oCertDataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
+            // Copy icons retain their own action when double-clicked inside a certificate row.
+            for (DependencyObject oSource = e.OriginalSource as DependencyObject;
+                oSource != null && oSource != oCertDataGrid;)
+            {
+                if (oSource is Button) return;
+                oSource = oSource is System.Windows.Media.Visual
+                    ? System.Windows.Media.VisualTreeHelper.GetParent(oSource) : LogicalTreeHelper.GetParent(oSource);
+            }
             if (ItemsControl.ContainerFromElement(oCertDataGrid, e.OriginalSource as DependencyObject) is DataGridRow)
                 oViewCertButton_Click(sender, e);
         }
@@ -333,6 +335,8 @@ namespace Crypture
 
         private void oAddItemButton_Click(object sender, RoutedEventArgs e)
         {
+            if (!Properties.Settings.Default.EnableDpapiNgProtection &&
+                !Properties.Settings.Default.EnableCertificateProtection) return;
             Utilities.TryOperation(this, () =>
             {
                 ItemEditor oViewer = new ItemEditor { Owner = this };
@@ -354,7 +358,7 @@ namespace Crypture
             HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
             using (CryptureEntities oContent = new CryptureEntities())
             {
-                oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances.Select(j => j.User)).ToList();
+                oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances).ThenInclude(j => j.User).ToList();
                 oUsers = oContent.Users.ToList();
                 var oProtection = oContent.Ciphers.Select(c => new
                 {
@@ -387,7 +391,8 @@ namespace Crypture
                     i.ModifiedByDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ProtectionDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) &&
-                (oHideAccessible.IsChecked != true || i.Cipher?.CipherParams == ItemCryptography.PrincipalFormat ||
+                (oHideAccessible.IsChecked != true || ItemCryptography.UsesWindowsProtection(i.Cipher) ||
+                    i.Cipher?.CipherParams == ItemCryptography.RecoveryFormat ||
                     i.Instances.Any(j =>
                     PrivateCertificates.Contains(Convert.ToBase64String(j.User.Certificate))))).ToList();
             List<User> oUsers = CertificateList.Where(u =>
@@ -467,7 +472,7 @@ namespace Crypture
                 {
                     // skip certificates already in database
                     if (oUsers.Any(u => u.Certificate.SequenceEqual(bCertData))) continue;
-                    using (X509Certificate2 oCert = new X509Certificate2(bCertData))
+                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(bCertData))
                         CertificateKeyProtection.ValidateForEncryption(oCert);
                     // create new item to add
                     User oUser = new User { Certificate = bCertData, Sid = null };
@@ -499,6 +504,8 @@ namespace Crypture
                 sDatabasePath = sDatabase;
                 RefreshData();
                 oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
+                oAddItemButton.IsEnabled = bEnableControls && (Properties.Settings.Default.EnableDpapiNgProtection ||
+                    Properties.Settings.Default.EnableCertificateProtection);
                 oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
                 oCertificatesTab.IsEnabled = bEnableControls;
                 oAdvancedTab.IsEnabled = bEnableControls;
@@ -586,7 +593,7 @@ namespace Crypture
             {
                 using (CryptureEntities oContent = new CryptureEntities())
                 {
-                    oContent.Database.ExecuteSqlCommand(TransactionalBehavior.DoNotEnsureTransaction, "VACUUM;");
+                    oContent.Database.ExecuteSqlRaw("VACUUM;");
                 }
 
                 MessageBox.Show(this, "Compact operation complete.",

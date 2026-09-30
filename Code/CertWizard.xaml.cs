@@ -13,7 +13,6 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using CertEnroll = CERTENROLLLib;
 
 namespace Crypture
 {
@@ -111,6 +110,11 @@ namespace Crypture
                     .IsInRole(WindowsBuiltInRole.Administrator);
         }
 
+        private static dynamic CreateEnrollmentObject(string sClass)
+        {
+            return Activator.CreateInstance(Type.GetTypeFromProgID("X509Enrollment.C" + sClass, true));
+        }
+
         private static Task<ProviderDetails> GetDefaultProviderAsync(bool bRefresh)
         {
             lock (ProviderCacheLock)
@@ -119,11 +123,11 @@ namespace Crypture
                     (bRefresh && DefaultProviderCache.IsCompleted))
                     DefaultProviderCache = Task.Run(() =>
                     {
-                        CertEnroll.CCspInformation oCsp = new CertEnroll.CCspInformation();
+                        dynamic oCsp = CreateEnrollmentObject("CspInformation");
                         try
                         {
                             oCsp.InitializeFromName(DefaultProviderName);
-                            return ReadProviderDetails(oCsp);
+                            return (ProviderDetails)ReadProviderDetails(oCsp);
                         }
                         finally
                         {
@@ -143,7 +147,7 @@ namespace Crypture
                     AvailableProviderCache = Task.Run(() =>
                     {
                         // create a list of all csp providers
-                        CertEnroll.CCspInformations CspInformations = new CertEnroll.CCspInformations();
+                        dynamic CspInformations = CreateEnrollmentObject("CspInformations");
                         try
                         {
                             CspInformations.AddAvailableCsps();
@@ -152,7 +156,7 @@ namespace Crypture
                             // enumerate each provider
                             for (int nIndex = 0; nIndex < CspInformations.Count; nIndex++)
                             {
-                                CertEnroll.ICspInformation oCsp = CspInformations[nIndex];
+                                dynamic oCsp = CspInformations[nIndex];
                                 try
                                 {
                                     oProviders.Add(oCsp.Name, ReadProviderDetails(oCsp));
@@ -173,19 +177,19 @@ namespace Crypture
             }
         }
 
-        private static ProviderDetails ReadProviderDetails(CertEnroll.ICspInformation oCsp)
+        private static ProviderDetails ReadProviderDetails(dynamic oCsp)
         {
             // create a structure for display purposes
             ProviderDetails oOpt = new ProviderDetails();
             oOpt.IsHardware = oCsp.IsSmartCard || oCsp.IsHardwareDevice;
             oOpt.IsLegacy = oCsp.LegacyCsp;
-            CertEnroll.ICspAlgorithms oAlgorithms = oCsp.CspAlgorithms;
+            dynamic oAlgorithms = oCsp.CspAlgorithms;
             try
             {
                 // populate display structure with algorithmn information
                 for (int nIndex = 0; nIndex < oAlgorithms.Count; nIndex++)
                 {
-                    CertEnroll.ICspAlgorithm oAlg = oAlgorithms[nIndex];
+                    dynamic oAlg = oAlgorithms[nIndex];
                     try
                     {
                         // special case: eliminate generic ecdsa that does not work
@@ -194,16 +198,16 @@ namespace Crypture
                             oAlg.Name != "ECDH_P256" && oAlg.Name != "ECDH_P384" && oAlg.Name != "ECDH_P521") continue;
 
                         // hash algorithms
-                        if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_HASH_INTERFACE)
+                        if (oAlg.Type == 2)
                         {
                             if (oOpt.HashAlgorithmns.Contains(oAlg.Name)) continue;
                             oOpt.HashAlgorithmns.Add(oAlg.Name);
                         }
 
                         // signature algorithms
-                        else if (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_SIGNATURE_INTERFACE ||
-                            oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_ASYMMETRIC_ENCRYPTION_INTERFACE ||
-                            (oAlg.Type == CertEnroll.AlgorithmType.XCN_BCRYPT_SECRET_AGREEMENT_INTERFACE &&
+                        else if (oAlg.Type == 5 ||
+                            oAlg.Type == 3 ||
+                            (oAlg.Type == 4 &&
                                 oAlg.Name.StartsWith("ECDH", StringComparison.Ordinal)))
                         {
                             if (oOpt.SignatureAlgorithmns.Contains(oAlg.Name)) continue;
@@ -417,58 +421,49 @@ namespace Crypture
                     sRequestPath = oSaveDialog.FileName;
                 }
 
-                CertEnroll.CCspInformation oProviderInfo = new CertEnroll.CCspInformation();
+                dynamic oProviderInfo = CreateEnrollmentObject("CspInformation");
                 oProviderInfo.InitializeFromName(SelectedProvider);
 
                 // create DN for subject and issuer
-                CertEnroll.CX500DistinguishedName oSubjectDistinguishedName = new CertEnroll.CX500DistinguishedName();
+                dynamic oSubjectDistinguishedName = CreateEnrollmentObject("X500DistinguishedName");
                 oSubjectDistinguishedName.Encode("CN=\"" + oSubjectTextBox.Text.Trim().Replace("\"", "\"\"") + "\"",
-                    CertEnroll.X500NameFlags.XCN_CERT_NAME_STR_NONE);
+                    0);
 
                 // create a new private key for the certificate
-                CertEnroll.IX509PrivateKey oPrivateKey = new CertEnroll.CX509PrivateKey();
+                dynamic oPrivateKey = CreateEnrollmentObject("X509PrivateKey");
                 bool bCreated = false;
                 bool bSaved = false;
                 try
                 {
                     oPrivateKey.ProviderName = SelectedProvider;
                     oPrivateKey.Algorithm = oProviderInfo.CspAlgorithms.ItemByName[SelectedSignature].GetAlgorithmOid(
-                        0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
+                        0, 0);
                     oPrivateKey.MachineContext = oCertificateStoreMachineRadio.IsChecked == true;
                     oPrivateKey.Length = nKeyLength;
                     if (SelectedSignature == "RSA")
                     {
-                        oPrivateKey.KeySpec = CertEnroll.X509KeySpec.XCN_AT_KEYEXCHANGE;
-                        oPrivateKey.KeyUsage = CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_DECRYPT_FLAG |
-                            CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_SIGNING_FLAG;
+                        oPrivateKey.KeySpec = 1;
+                        oPrivateKey.KeyUsage = 3;
                     }
                     else if (SelectedSignature.StartsWith("ECDH", StringComparison.Ordinal))
                     {
-                        oPrivateKey.KeyUsage = CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_KEY_AGREEMENT_FLAG |
-                            CertEnroll.X509PrivateKeyUsageFlags.XCN_NCRYPT_ALLOW_SIGNING_FLAG;
+                        oPrivateKey.KeyUsage = 6;
                     }
-                    oPrivateKey.KeyProtection = oPasswordProtectCheckbox.IsChecked == true
-                        ? CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_PROTECT_KEY_FLAG
-                        : CertEnroll.X509PrivateKeyProtection.XCN_NCRYPT_UI_NO_PROTECTION_FLAG;
-                    oPrivateKey.ExportPolicy = oKeyExportableCheckbox.IsChecked == true
-                        ? CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG |
-                            CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_FLAG
-                        : CertEnroll.X509PrivateKeyExportFlags.XCN_NCRYPT_ALLOW_EXPORT_NONE;
+                    oPrivateKey.KeyProtection = oPasswordProtectCheckbox.IsChecked == true ? 1 : 0;
+                    oPrivateKey.ExportPolicy = oKeyExportableCheckbox.IsChecked == true ? 3 : 0;
                     oPrivateKey.Create();
                     bCreated = true;
 
                     // set the signature mechanism for the certificate
-                    CertEnroll.CObjectId oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(
-                        0, CertEnroll.AlgorithmFlags.AlgorithmFlagsNone);
-                    CertEnroll.X509CertificateEnrollmentContext oContext = oPrivateKey.MachineContext
-                        ? CertEnroll.X509CertificateEnrollmentContext.ContextMachine
-                        : CertEnroll.X509CertificateEnrollmentContext.ContextUser;
+                    dynamic oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(
+                        0, 0);
+                    int oContext = oPrivateKey.MachineContext ? 2 : 1;
 
                     // create a certificate request with the requested info
-                    CertEnroll.IX509CertificateRequestPkcs10 oCertRequestInfo;
+                    dynamic oCertRequestInfo;
                     if (bSelfSigned)
                     {
-                        var oCertificate = new CertEnroll.CX509CertificateRequestCertificate();
+                        dynamic oCertificate = CreateEnrollmentObject("X509CertificateRequestCertificate");
                         oCertificate.InitializeFromPrivateKey(oContext, oPrivateKey, "");
                         oCertificate.Issuer = oSubjectDistinguishedName;
                         oCertificate.NotBefore = oValidFromDatePicker.SelectedDate.Value;
@@ -477,7 +472,7 @@ namespace Crypture
                     }
                     else
                     {
-                        oCertRequestInfo = new CertEnroll.CX509CertificateRequestPkcs10();
+                        oCertRequestInfo = CreateEnrollmentObject("X509CertificateRequestPkcs10");
                         oCertRequestInfo.InitializeFromPrivateKey(oContext, oPrivateKey, "");
                     }
                     oCertRequestInfo.Subject = oSubjectDistinguishedName;
@@ -488,30 +483,30 @@ namespace Crypture
                         oUsage |= (X509KeyUsageFlags)Enum.Parse(typeof(X509KeyUsageFlags), oOption.Oid);
                     if (oUsage != X509KeyUsageFlags.None)
                     {
-                        CertEnroll.CX509ExtensionKeyUsage oKeyUsage = new CertEnroll.CX509ExtensionKeyUsage();
-                        oKeyUsage.InitializeEncode((CertEnroll.X509KeyUsageFlags)oUsage);
-                        oCertRequestInfo.X509Extensions.Add((CertEnroll.CX509Extension)oKeyUsage);
+                        dynamic oKeyUsage = CreateEnrollmentObject("X509ExtensionKeyUsage");
+                        oKeyUsage.InitializeEncode((int)oUsage);
+                        oCertRequestInfo.X509Extensions.Add(oKeyUsage);
                     }
 
                     // translate the list to a list that the enrollment will understand key a list of key
                     // usages to use
                     if (EnhancedKeyUsages.Any(k => k.Selected))
                     {
-                        CertEnroll.CObjectIds oKeyUsagesToAdd = new CertEnroll.CObjectIds();
+                        dynamic oKeyUsagesToAdd = CreateEnrollmentObject("ObjectIds");
                         foreach (EkuOption oKeyUsage in EnhancedKeyUsages.Where(k => k.Selected))
                         {
-                            CertEnroll.CObjectId oOID = new CertEnroll.CObjectId();
+                            dynamic oOID = CreateEnrollmentObject("ObjectId");
                             oOID.InitializeFromValue(oKeyUsage.Oid);
                             oKeyUsagesToAdd.Add(oOID);
                         }
-                        var oKeyUsageList = new CertEnroll.CX509ExtensionEnhancedKeyUsage();
+                        dynamic oKeyUsageList = CreateEnrollmentObject("X509ExtensionEnhancedKeyUsage");
                         oKeyUsageList.InitializeEncode(oKeyUsagesToAdd);
-                        oCertRequestInfo.X509Extensions.Add((CertEnroll.CX509Extension)oKeyUsageList);
+                        oCertRequestInfo.X509Extensions.Add(oKeyUsageList);
                     }
 
                     // create an enrollment request
                     oCertRequestInfo.Encode();
-                    CertEnroll.CX509Enrollment oEnrollRequest = new CertEnroll.CX509Enrollment();
+                    dynamic oEnrollRequest = CreateEnrollmentObject("X509Enrollment");
                     oEnrollRequest.InitializeFromRequest(oCertRequestInfo);
 
                     // install certificate into selected certificate store
@@ -519,14 +514,14 @@ namespace Crypture
                     {
                         string sCertRequestString = oEnrollRequest.CreateRequest();
                         oEnrollRequest.InstallResponse(
-                            CertEnroll.InstallResponseRestrictionFlags.AllowUntrustedCertificate,
-                            sCertRequestString, CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64, "");
+                            2,
+                            sCertRequestString, 1, "");
                     }
                     // produce request file
                     else
                     {
                         string sCertRequestString = oEnrollRequest.CreateRequest(
-                            CertEnroll.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER);
+                            3);
                         System.IO.File.WriteAllText(sRequestPath, sCertRequestString, Encoding.ASCII);
                     }
                     bSaved = true;

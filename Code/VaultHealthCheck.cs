@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 using System.DirectoryServices;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Threading;
+using System.Text.RegularExpressions;
 
 namespace Crypture
 {
@@ -59,20 +60,21 @@ namespace Crypture
             oProgress?.Report("Reading saved Vault recipients...");
             List<User> oUsers = new List<User>();
             Dictionary<long, Item> oItems = new Dictionary<long, Item>();
-            SQLiteConnectionStringBuilder oBuilder = new SQLiteConnectionStringBuilder
+            SqliteConnectionStringBuilder oBuilder = new SqliteConnectionStringBuilder
             {
-                DataSource = sPath, ReadOnly = true, FailIfMissing = true, Pooling = false
+                DataSource = sPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false
             };
-            using (SQLiteConnection oConnection = new SQLiteConnection(oBuilder.ConnectionString))
+            using (SqliteConnection oConnection = new SqliteConnection(oBuilder.ConnectionString))
             {
                 oConnection.Open();
-                using (SQLiteTransaction oTransaction = oConnection.BeginTransaction(IsolationLevel.ReadCommitted))
-                using (SQLiteCommand oCommand = oConnection.CreateCommand())
+                using (SqliteTransaction oTransaction = oConnection.BeginTransaction(deferred: true))
+                using (SqliteCommand oCommand = oConnection.CreateCommand())
                 {
                     oCommand.Transaction = oTransaction;
-                    oCommand.CommandText = "SELECT i.ItemId, i.Label, c.CipherParams, c.ProtectionDescriptor " +
+                    oCommand.CommandText = "SELECT i.ItemId, i.Label, c.CipherParams, " +
+                        "c.ProtectionDescriptor, c.ProtectedKey " +
                         "FROM Item i LEFT JOIN Cipher c ON i.ItemId = c.ItemId";
-                    using (SQLiteDataReader oReader = oCommand.ExecuteReader())
+                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
@@ -81,13 +83,14 @@ namespace Crypture
                             if (!oReader.IsDBNull(2)) oItem.Cipher = new Cipher
                             {
                                 CipherParams = oReader.GetInt64(2),
-                                ProtectionDescriptor = oReader.IsDBNull(3) ? null : oReader.GetString(3)
+                                ProtectionDescriptor = oReader.IsDBNull(3) ? null : oReader.GetString(3),
+                                ProtectedKey = oReader.IsDBNull(4) ? null : (byte[])oReader.GetValue(4)
                             };
                             oItems.Add(oItem.ItemId, oItem);
                         }
                     }
                     oCommand.CommandText = "SELECT UserId, Certificate, Sid FROM [User]";
-                    using (SQLiteDataReader oReader = oCommand.ExecuteReader())
+                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
@@ -101,7 +104,7 @@ namespace Crypture
                         }
                     }
                     oCommand.CommandText = "SELECT ItemId, UserId FROM Instance";
-                    using (SQLiteDataReader oReader = oCommand.ExecuteReader())
+                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
@@ -133,6 +136,30 @@ namespace Crypture
                 if (oItem.Cipher == null)
                 {
                     oPolicy.Add(HealthStatus.Error, "The saved protection policy is missing.");
+                    oReport.Findings.Add(oPolicy);
+                    continue;
+                }
+                if (oItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                {
+                    try
+                    {
+                        foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(oItem.Cipher))
+                        {
+                            PrincipalProtection.ValidateCustomDescriptor(oEntry.Key);
+                            foreach (Match oMatch in Regex.Matches(oEntry.Key, @"S-\d+(?:-\d+)+"))
+                                AddPrincipal(oPrincipals, oMatch.Value, new[] { oItem });
+                            oPolicy.Add(HealthStatus.Information, "Saved Windows Policy: " + oEntry.Key +
+                                ". This metadata check does not verify decryption access.");
+                        }
+                    }
+                    catch (CryptographicException oError)
+                    {
+                        oPolicy.Add(HealthStatus.Error, "The saved recovery policy is invalid. " + oError.Message);
+                    }
+                    if (oItem.Cipher.ProtectionDescriptor == null && oItem.Instances.Count == 0)
+                        oPolicy.Add(HealthStatus.Error, "No primary certificate recipients are saved for this item.");
+                    if (oItem.Instances.Any(i => !oUserIds.Contains(i.UserId)))
+                        oPolicy.Add(HealthStatus.Error, "A recipient refers to a certificate missing from the Vault.");
                     oReport.Findings.Add(oPolicy);
                     continue;
                 }
@@ -172,6 +199,51 @@ namespace Crypture
                 if (oItem.Instances.Any(i => !oUserIds.Contains(i.UserId)))
                     oPolicy.Add(HealthStatus.Error, "A recipient refers to a certificate missing from the Vault.");
                 if (oPolicy.Severity != HealthStatus.Passed) oReport.Findings.Add(oPolicy);
+            }
+
+            // Report items that predate the configured recovery recipients without decrypting them.
+            try
+            {
+                RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+                if (oRecovery.IsEnabled)
+                {
+                    HashSet<long> oRecoveryUsers = new HashSet<long>(oUsers.Where(u =>
+                        oRecovery.Certificate != null && u.Certificate != null &&
+                        u.Certificate.SequenceEqual(oRecovery.Certificate)).Select(u => u.UserId));
+                    foreach (Item oItem in oItems.Where(i => i.Cipher != null))
+                    {
+                        oCancellation.ThrowIfCancellationRequested();
+                        bool bWindows = oRecovery.Descriptor == null ||
+                            oItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat &&
+                            oItem.Cipher.ProtectionDescriptor == oRecovery.Descriptor;
+                        if (!bWindows && oItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                        {
+                            try
+                            {
+                                bWindows = RecoveryProtection.ReadWindowsKeys(oItem.Cipher)
+                                    .Any(e => e.Key == oRecovery.Descriptor);
+                            }
+                            catch (CryptographicException)
+                            {
+                                // The invalid envelope is reported by the saved-policy check above.
+                            }
+                        }
+                        if (bWindows && (oRecovery.Certificate == null ||
+                            oItem.Instances.Any(i => oRecoveryUsers.Contains(i.UserId)))) continue;
+                        HealthCheckFinding oMissing = Finding("Emergency Recovery", oItem.Label,
+                            "Item #" + oItem.ItemId, new[] { oItem });
+                        oMissing.Add(HealthStatus.Warning, "Configured emergency recovery access is missing. " +
+                            "Decrypt and save this item to apply the current recovery policy.");
+                        oReport.Findings.Add(oMissing);
+                    }
+                }
+            }
+            catch (InvalidOperationException oError)
+            {
+                HealthCheckFinding oInvalid = Finding("Emergency Recovery",
+                    "Configuration", "Crypture.exe.config", oItems);
+                oInvalid.Add(HealthStatus.Error, oError.Message);
+                oReport.Findings.Add(oInvalid);
             }
             int nCertificate = 0;
             foreach (User oUser in oUsers)
@@ -280,7 +352,7 @@ namespace Crypture
                 if (oUser.Certificate == null || oUser.Certificate.Length == 0 ||
                     X509Certificate2.GetCertContentType(oUser.Certificate) != X509ContentType.Cert)
                     throw new CryptographicException("Stored data is not a public X.509 certificate.");
-                using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
                 {
                     string sName = oCert.GetNameInfo(X509NameType.SimpleName, false);
                     if (!String.IsNullOrWhiteSpace(sName)) oResult.Recipient = sName;

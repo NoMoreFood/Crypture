@@ -1,4 +1,4 @@
-﻿<Fluent:RibbonWindow x:Class="Crypture.ItemBrowser" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:Fluent="urn:fluent-ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:properties="clr-namespace:Crypture.Properties" x:Name="oItemBrowser" Title="Crypture" Width="940" Height="560" MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d" Loaded="oItemBrowser_Loaded" Closing="oItemBrowser_Closing" PreviewKeyDown="oItemBrowser_PreviewKeyDown"
+﻿<Window x:Class="Crypture.ItemBrowser" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:properties="clr-namespace:Crypture.Properties" x:Name="oItemBrowser" Title="Crypture" Width="940" Height="560" MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d" Loaded="oItemBrowser_Loaded" Closing="oItemBrowser_Closing" PreviewKeyDown="oItemBrowser_PreviewKeyDown"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
     <Grid>
         <Grid.RowDefinitions>
@@ -7,74 +7,70 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <Fluent:Ribbon x:Name="ribbon" IsAutomaticCollapseEnabled="False" IsQuickAccessToolBarVisible="False" SelectedTabChanged="Ribbon_SelectedTabChanged">
+        <ribbon:Ribbon x:Name="ribbon" IsMinimized="False" SelectionChanged="Ribbon_SelectedTabChanged">
             <!--  Tabs  -->
-            <Fluent:RibbonTabItem x:Name="ribbonTabHome" Header="Home">
-                <Fluent:RibbonGroupBox Header="Vault Actions">
-                    <Fluent:Button x:Name="oNewDatabaseButton" Height="Auto" Margin="10,10,10,0" Click="oNewDatabaseButton_Click" Header="New" LargeIcon="pack://application:,,,/Crypture;component/Images/DatabaseNew.png" Size="Large" />
-                    <Fluent:Button x:Name="oLoadDatabaseButton" Height="Auto" Margin="10,10,10,0" Click="oLoadDatabaseButton_Click" Header="Load" LargeIcon="pack://application:,,,/Crypture;component/Images/DatabaseLoad.png" Size="Large" />
-                    <Fluent:Button x:Name="oBackupDatabaseButton" Margin="10,10,10,0" Header="Back Up..."
-                        Click="oBackupDatabaseButton_Click" IsEnabled="False" Size="Middle"
-                        Icon="pack://application:,,,/Crypture;component/Images/Save.png"
+            <ribbon:RibbonTab x:Name="ribbonTabHome" Header="Home">
+                <ribbon:RibbonGroup Header="Vault Actions">
+                    <ribbon:RibbonButton x:Name="oNewDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oNewDatabaseButton_Click" Label="New" LargeImageSource="pack://application:,,,/Crypture;component/Images/DatabaseNew.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oLoadDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oLoadDatabaseButton_Click" Label="Load" LargeImageSource="pack://application:,,,/Crypture;component/Images/DatabaseLoad.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oBackupDatabaseButton" Margin="6,6,6,0" Label="Back Up..."
+                        Click="oBackupDatabaseButton_Click" IsEnabled="False" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
+                        SmallImageSource="pack://application:,,,/Crypture;component/Images/Save.png"
                         ToolTip="Create a consistent copy of the encrypted Vault." />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox Header="Passwords">
-                    <Fluent:Button x:Name="oGeneratePasswordButton" Header="Generate&#160;Password..." Size="Large" Height="Auto"
-                        Margin="10,10,10,0" Click="oGeneratePasswordButton_Click"
-                        LargeIcon="pack://application:,,,/Crypture;component/Images/Refresh.png"
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Header="Passwords">
+                    <ribbon:RibbonButton x:Name="oGeneratePasswordButton" Label="Generate Password..." ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" Height="Auto"
+                        Margin="6,6,6,0" Click="oGeneratePasswordButton_Click"
+                        LargeImageSource="pack://application:,,,/Crypture;component/Images/Refresh.png"
                         ToolTip="Generate passwords with or without an open Vault." />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox x:Name="oProtectedItemActionRibbonGroupBox" Header="Protected Item Actions" IsEnabled="False">
-                    <Fluent:Button x:Name="oAddItemButton" Height="Auto" Margin="10,10,10,0" Click="oAddItemButton_Click" Header="Add&#160;New&#160;Item" LargeIcon="pack://application:,,,/Crypture;component/Images/Add.png" Size="Large" />
-                    <Fluent:Button x:Name="oRefreshItemButton" Height="Auto" Margin="10,10,10,0" Click="oRefreshItemButton_Click" Header="Refresh" LargeIcon="pack://application:,,,/Crypture;component/Images/Refresh.png" Size="Large" />
-                    <Fluent:Button x:Name="oViewItemButton" Height="Auto" Margin="10,10,10,0" Click="oViewItemButton_Click" Header="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" Icon="pack://application:,,,/Crypture;component/Images/View.png" Size="Middle" />
-                    <Fluent:Button x:Name="oRemoveItemButton" Height="Auto" Margin="10,10,10,0" Click="oRemoveItemUser_Click" Header="Remove Item" Icon="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" Size="Middle" />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox x:Name="oProtectedItemScopeRibbonGroupBox" Header="Protected Item Scope" IsEnabled="False">
-                    <CheckBox x:Name="oHideAccessible" Margin="10,10,10,0" Click="oHideAccessible_Click" Content="Hide Missing Certificate Keys"
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup x:Name="oProtectedItemActionRibbonGroupBox" Header="Protected Item Actions" IsEnabled="False">
+                    <ribbon:RibbonButton x:Name="oAddItemButton" Height="Auto" Margin="6,6,6,0" Click="oAddItemButton_Click" Label="Add New Item" LargeImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oRefreshItemButton" Height="Auto" Margin="6,6,6,0" Click="oRefreshItemButton_Click" Label="Refresh" LargeImageSource="pack://application:,,,/Crypture;component/Images/Refresh.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oViewItemButton" Height="Auto" Margin="6,6,6,0" Click="oViewItemButton_Click" Label="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" SmallImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oRemoveItemButton" Height="Auto" Margin="6,6,6,0" Click="oRemoveItemUser_Click" Label="Remove Item" SmallImageSource="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup x:Name="oProtectedItemScopeRibbonGroupBox" Header="Protected Item Scope" IsEnabled="False">
+                    <CheckBox x:Name="oHideAccessible" Margin="6,6,6,0" Click="oHideAccessible_Click" Content="Hide Missing Certificate Keys"
                         ToolTip="Hide certificate items without a matching local private key. Windows items remain visible; Windows checks access when you decrypt." />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox Header="Help">
-                    <Fluent:Button x:Name="oAboutButton" Height="Auto" Margin="10,10,10,0" Click="oAboutButton_Click" Header="About" LargeIcon="pack://application:,,,/Crypture;component/Images/About.png" Size="Large" />
-                </Fluent:RibbonGroupBox>
-            </Fluent:RibbonTabItem>
-            <Fluent:RibbonTabItem x:Name="oCertificatesTab" Header="Certificates" IsEnabled="False">
-                <Fluent:RibbonGroupBox Header="Certificate Actions">
-                    <Fluent:Button x:Name="oViewCertButton" Height="Auto" Margin="10,10,10,0" Click="oViewCertButton_Click" Header="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" LargeIcon="pack://application:,,,/Crypture;component/Images/View.png" Size="Large" />
-                    <Fluent:Button x:Name="oClaimCertButton" Height="Auto" Margin="10,10,10,0" Click="oClaimCertButton_Click" Header="Claim" Icon="pack://application:,,,/Crypture;component/Images/Own.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" Size="Middle" />
-                    <Fluent:Button x:Name="oRemoveCertButton" Height="Auto" Margin="10,10,10,0" Click="oRemoveItemUser_Click" Header="Remove Certificate" Icon="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" Size="Middle" />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox Header="Add a Certificate From...">
-                    <Fluent:Button x:Name="oAddFromStoreButton" Height="Auto" Margin="10,10,10,0" Click="oAddFromStoreButton_Click" Header="Store" LargeIcon="pack://application:,,,/Crypture;component/Images/Add.png" Size="Large" />
-                    <Fluent:Button x:Name="oAddFromFileButton" Height="Auto" Margin="10,10,10,0" Click="oAddFromFileButton_Click" Header="File" Icon="pack://application:,,,/Crypture;component/Images/Add.png" Size="Middle" />
-                    <Fluent:Button x:Name="oAddFromAdButton" Height="Auto" Margin="10,10,10,0"
-                        Click="oAddFromAdButton_Click" Header="Active Directory" Size="Middle" IsEnabled="False"
-                        Icon="pack://application:,,,/Crypture;component/Images/Add.png" ToolTipService.ShowOnDisabled="True"
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Header="Help">
+                    <ribbon:RibbonButton x:Name="oAboutButton" Height="Auto" Margin="6,6,6,0" Click="oAboutButton_Click" Label="About" LargeImageSource="pack://application:,,,/Crypture;component/Images/About.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                </ribbon:RibbonGroup>
+            </ribbon:RibbonTab>
+            <ribbon:RibbonTab x:Name="oCertificatesTab" Header="Certificates" IsEnabled="False">
+                <ribbon:RibbonGroup Header="Certificate Actions">
+                    <ribbon:RibbonButton x:Name="oViewCertButton" Height="Auto" Margin="6,6,6,0" Click="oViewCertButton_Click" Label="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" LargeImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oClaimCertButton" Height="Auto" Margin="6,6,6,0" Click="oClaimCertButton_Click" Label="Claim" SmallImageSource="pack://application:,,,/Crypture;component/Images/Own.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oRemoveCertButton" Height="Auto" Margin="6,6,6,0" Click="oRemoveItemUser_Click" Label="Remove Certificate" SmallImageSource="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Header="Add a Certificate From...">
+                    <ribbon:RibbonButton x:Name="oAddFromStoreButton" Height="Auto" Margin="6,6,6,0" Click="oAddFromStoreButton_Click" Label="Store" LargeImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oAddFromFileButton" Height="Auto" Margin="6,6,6,0" Click="oAddFromFileButton_Click" Label="File" SmallImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oAddFromAdButton" Height="Auto" Margin="6,6,6,0"
+                        Click="oAddFromAdButton_Click" Label="Active Directory" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" IsEnabled="False"
+                        SmallImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ToolTipService.ShowOnDisabled="True"
                         ToolTip="Requires a computer joined to an Active Directory domain." />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox Header="Certificate Validation">
-                    <Fluent:CheckBox x:Name="oAllowSelfSignedCheckBox" Margin="10,10,10,0" Header="Allow Self-Signed" IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=AllowSelfSignedCertificates}" />
-                    <Fluent:CheckBox x:Name="oDoRevocationCheckBox" Margin="10,10,10,0" Header="Do Revocation Check" IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=PerformCertificateRevocationCheck}" />
-                </Fluent:RibbonGroupBox>
-            </Fluent:RibbonTabItem>
-            <Fluent:RibbonTabItem x:Name="oAdvancedTab" Header="Advanced" IsEnabled="False">
-                <Fluent:RibbonGroupBox x:Name="oCertificateToolsGroupBox" Width="100" HorizontalContentAlignment="Center" Header="Certificate Tools">
-                    <Fluent:Button x:Name="oGenerateCertButton" Height="Auto" Margin="10,10,10,0" Click="oGenerateCertButton_Click" Header="Generator" LargeIcon="pack://application:,,,/Crypture;component/Images/Certificate.png" Size="Large" />
-                </Fluent:RibbonGroupBox>
-                <Fluent:RibbonGroupBox Width="220" HorizontalContentAlignment="Center" Header="Vault Tools">
-                    <Fluent:Button x:Name="oHealthCheckButton" Header="Health&#160;Check" Size="Large" Height="Auto"
-                        Margin="10,10,10,0" Click="oHealthCheckButton_Click"
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Header="Certificate Validation">
+                    <CheckBox x:Name="oAllowSelfSignedCheckBox" Margin="6,6,6,0" Content="Allow Self-Signed" IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=AllowSelfSignedCertificates}" />
+                    <CheckBox x:Name="oDoRevocationCheckBox" Margin="6,6,6,0" Content="Do Revocation Check" IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=PerformCertificateRevocationCheck}" />
+                </ribbon:RibbonGroup>
+            </ribbon:RibbonTab>
+            <ribbon:RibbonTab x:Name="oAdvancedTab" Header="Advanced" IsEnabled="False">
+                <ribbon:RibbonGroup x:Name="oCertificateToolsGroupBox" Width="100" HorizontalContentAlignment="Center" Header="Certificate Tools">
+                    <ribbon:RibbonButton x:Name="oGenerateCertButton" Height="Auto" Margin="6,6,6,0" Click="oGenerateCertButton_Click" Label="Generator" LargeImageSource="pack://application:,,,/Crypture;component/Images/Certificate.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Width="220" HorizontalContentAlignment="Center" Header="Vault Tools">
+                    <ribbon:RibbonButton x:Name="oHealthCheckButton" Label="Health Check" LargeImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" Height="Auto"
+                        Margin="6,6,6,0" Click="oHealthCheckButton_Click"
                         ToolTip="Check saved Windows principals and recipient certificates.">
-                        <Fluent:Button.LargeIcon>
-                            <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="32"
-                                Foreground="{DynamicResource Crypture.AccentBrush}" />
-                        </Fluent:Button.LargeIcon>
-                    </Fluent:Button>
-                    <Fluent:Button x:Name="oCompactDatabaseButton" Height="Auto" Margin="10,10,10,0" Click="oCompactDatabaseButton_Click" Header="Compact" LargeIcon="pack://application:,,,/Crypture;component/Images/Compress.png" Size="Large" />
-                </Fluent:RibbonGroupBox>
-            </Fluent:RibbonTabItem>
-            <Fluent:RibbonTabItem x:Name="oViewTab" Header="View">
-                <Fluent:RibbonGroupBox Header="Appearance">
+                    </ribbon:RibbonButton>
+                    <ribbon:RibbonButton x:Name="oCompactDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oCompactDatabaseButton_Click" Label="Compact" LargeImageSource="pack://application:,,,/Crypture;component/Images/Compress.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                </ribbon:RibbonGroup>
+            </ribbon:RibbonTab>
+            <ribbon:RibbonTab x:Name="oViewTab" Header="View">
+                <ribbon:RibbonGroup Header="Appearance">
                     <StackPanel Margin="10,4,10,0">
                         <Label Content="_Theme:" Target="{Binding ElementName=oThemeComboBox}"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE790;" />
@@ -87,9 +83,9 @@
                             <ComboBoxItem Content="Dark" Tag="Dark" />
                         </ComboBox>
                     </StackPanel>
-                </Fluent:RibbonGroupBox>
-            </Fluent:RibbonTabItem>
-        </Fluent:Ribbon>
+                </ribbon:RibbonGroup>
+            </ribbon:RibbonTab>
+        </ribbon:Ribbon>
         <DockPanel Grid.Row="1" Margin="12,8">
             <Label Content="_Search:" Target="{Binding ElementName=oSearchTextBox}"
                 Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE721;" />
@@ -133,13 +129,26 @@
         <DataGrid x:Name="oCertDataGrid" Grid.Row="2" Width="Auto" AutoGenerateColumns="False" DockPanel.Dock="Top" HeadersVisibility="Column" IsReadOnly="True" CanUserAddRows="False"
             CanUserDeleteRows="False" GridLinesVisibility="Horizontal" RowHeight="30" BorderThickness="0" Margin="12,0,12,8" MouseDoubleClick="oCertDataGrid_MouseDoubleClick" SelectionMode="Single" Visibility="Hidden">
             <DataGrid.Columns>
-                <DataGridTextColumn Width="*" Binding="{Binding Name}" Header="Subject Name on Certificate" IsReadOnly="True">
-                    <DataGridTextColumn.HeaderStyle>
+                <DataGridTemplateColumn Width="*" Header="Subject Name on Certificate" SortMemberPath="Name"
+                    ClipboardContentBinding="{Binding Name}">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Height="28" Tag="{Binding Certificate}"
+                                    Style="{StaticResource Crypture.CopyValueButton}" Click="oCopyValue_Click"
+                                    AutomationProperties.Name="Copy Public Certificate"
+                                    ToolTip="Copy the public certificate as Base64 for recovery configuration." />
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="5,0"
+                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                    <DataGridTemplateColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE77B;" />
                         </Style>
-                    </DataGridTextColumn.HeaderStyle>
-                </DataGridTextColumn>
+                    </DataGridTemplateColumn.HeaderStyle>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Width="Auto" MinWidth="140" Binding="{Binding AlgorithmDisplay}"
                     Header="Encryption Algorithm" IsReadOnly="True">
                     <DataGridTextColumn.HeaderStyle>
@@ -148,13 +157,26 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn MinWidth="300" Binding="{Binding Sid}" Header="Windows Security Identifier" IsReadOnly="True">
-                    <DataGridTextColumn.HeaderStyle>
+                <DataGridTemplateColumn MinWidth="300" Header="Windows Security Identifier" SortMemberPath="Sid"
+                    ClipboardContentBinding="{Binding Sid}">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Height="28" Tag="{Binding Sid}"
+                                    Style="{StaticResource Crypture.CopyValueButton}" Click="oCopyValue_Click"
+                                    AutomationProperties.Name="Copy Security Identifier"
+                                    ToolTip="Copy this Windows security identifier." />
+                                <TextBlock Text="{Binding Sid}" VerticalAlignment="Center" Margin="5,0"
+                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding Sid}" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                    <DataGridTemplateColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE716;" />
                         </Style>
-                    </DataGridTextColumn.HeaderStyle>
-                </DataGridTextColumn>
+                    </DataGridTemplateColumn.HeaderStyle>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
         <TextBlock x:Name="oEmptyState" Grid.Row="2" Text="Create or load a Vault to get started."
@@ -167,4 +189,4 @@
             <StatusBarItem><TextBlock x:Name="oCountStatus" /></StatusBarItem>
         </StatusBar>
     </Grid>
-</Fluent:RibbonWindow>
+</Window>

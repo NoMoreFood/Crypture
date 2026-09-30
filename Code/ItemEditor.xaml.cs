@@ -1,4 +1,4 @@
-﻿using Fluent;
+﻿using System.Windows.Controls.Ribbon;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -20,7 +20,7 @@ using System.Windows.Interop;
 
 namespace Crypture
 {
-    public partial class ItemEditor : RibbonWindow
+    public partial class ItemEditor : Window
     {
         public Item ThisItem { get; set; } = new Item();
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
@@ -30,6 +30,9 @@ namespace Crypture
         private bool bHasChanges;
         private bool bCompleted;
         private bool bBusy;
+        private bool bEditing;
+        private readonly bool bDpapiNgEnabled = Properties.Settings.Default.EnableDpapiNgProtection;
+        private readonly bool bCertificatesEnabled = Properties.Settings.Default.EnableCertificateProtection;
         private readonly bool bDomainJoined = PrincipalProtection.IsDomainJoined;
         private readonly ObservableCollection<ProtectionPrincipal> PrincipalList =
             new ObservableCollection<ProtectionPrincipal>();
@@ -44,6 +47,7 @@ namespace Crypture
             DataContext = ThisItem;
             InitializeComponent();
             Utilities.EnableClipboardTimeout(oItemData);
+            Utilities.EnableClipboardTimeout(oItemLabel);
 
             // setup sorting for the drop down list of certs
             oItemSharedWith.Items.IsLiveSorting = true;
@@ -56,7 +60,11 @@ namespace Crypture
                 new SortDescription(oAddCertDropDown.DisplayMemberPath, ListSortDirection.Ascending));
 
             // add in our keys by default
-            if (bNewItem) LoadUsers(true);
+            if (bNewItem && bCertificatesEnabled) LoadUsers(true);
+            oDpapiNgProtection.IsEnabled = bDpapiNgEnabled;
+            oDpapiNgProtection.Visibility = bDpapiNgEnabled ? Visibility.Visible : Visibility.Collapsed;
+            oCertificateProtection.IsEnabled = bCertificatesEnabled;
+            oCertificateProtection.Visibility = bCertificatesEnabled ? Visibility.Visible : Visibility.Collapsed;
             oPrincipalList.ItemsSource = PrincipalList;
             oDomainScope.IsEnabled = bDomainJoined;
             oPrincipalScope.SelectedIndex = !bDomainJoined || String.Equals(Environment.UserDomainName,
@@ -64,7 +72,9 @@ namespace Crypture
             if (bNewItem)
             {
                 PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
-                oProtectionMode.SelectedIndex = CertificateOperations.GetAutomaticCertificates().Count == 0 ? 0 : 1;
+                oProtectionMode.SelectedIndex = bCertificatesEnabled &&
+                    (!bDpapiNgEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
+                    ? 1 : bDpapiNgEnabled ? 0 : -1;
             }
 
             // show certificate generator based on settings file
@@ -107,14 +117,14 @@ namespace Crypture
         public void SetEditingControls(bool bEnabled)
         {
             // toggle what controls are available based on whether item item is decoded
-            oAddCertDropDown.IsEnabled = bEnabled;
-            oProtectionMode.IsEnabled = bEnabled;
-            oPrincipalScope.IsEnabled = bEnabled;
-            oPrincipalControls.IsEnabled = bEnabled && bDomainJoined;
-            oPrincipalMatch.IsEnabled = bEnabled && bDomainJoined;
+            bEditing = bEnabled;
+            oAddCertDropDown.IsEnabled = bEnabled && bCertificatesEnabled;
+            oProtectionMode.IsEnabled = bEnabled && (bDpapiNgEnabled || bCertificatesEnabled);
+            oPrincipalScope.IsEnabled = bEnabled && bDpapiNgEnabled;
+            oPrincipalControls.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
+            oPrincipalMatch.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             oLoadItemButton.IsEnabled = !bEnabled;
-            oSaveItemButton.IsEnabled = bEnabled;
-            oItemData.IsEnabled = bEnabled;
+            oItemData.IsEnabled = bEnabled && ThisItem.ItemType == "text";
             oItemLabel.IsReadOnly = !bEnabled;
             oUploadAFile.IsEnabled = bEnabled;
             oGeneratePasswordButton.IsEnabled = bEnabled && ThisItem.ItemType == "text";
@@ -134,7 +144,7 @@ namespace Crypture
 
         private async void oSaveItemButton_Click(object sender, RoutedEventArgs e)
         {
-            if (bBusy) return;
+            if (bBusy || !oSaveItemButton.IsEnabled) return;
             bool bSaved = false;
             SetBusy(true, "Encrypting and saving...");
             try
@@ -179,7 +189,7 @@ namespace Crypture
                         // verify the selected users
                         foreach (User oUser in UserListSelected)
                         {
-                            using (X509Certificate2 oCert = new X509Certificate2(oUser.Certificate))
+                            using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
                             {
                                 CertificateKeyProtection.ValidateForEncryption(oCert);
                                 if (!CertificateOperations.CheckCertificateStatus(oCert))
@@ -190,7 +200,7 @@ namespace Crypture
                         }
 
                         // error if there are no selected users
-                        if (UserListSelected.Count == 0)
+                        if (UserListSelected.Count == 0 && RecoveryPolicy.Read().Certificate == null)
                             throw new InvalidOperationException("Select at least one recipient using Share With.");
                     }
                     List<User> oRecipients = UserListSelected.ToList();
@@ -265,9 +275,20 @@ namespace Crypture
                 {
                     byte[] oPlainText;
                     long? nModifier = null;
-                    if (ThisItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat)
-                        oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem));
-                    else
+                    oPlainText = null;
+                    if (ThisItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat ||
+                        ThisItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                    {
+                        try
+                        {
+                            oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem));
+                        }
+                        catch (CryptographicException) when (ThisItem.Instances.Count != 0)
+                        {
+                            // A recovery certificate remains available when Windows cannot grant access.
+                        }
+                    }
+                    if (oPlainText == null)
                     {
                         // select all the certs associated with this user
                         using (X509Certificate2 oCert = GetUserKey(UserListSelected))
@@ -317,7 +338,7 @@ namespace Crypture
             oEditorPanels.IsEnabled = !bEnabled;
             Cursor = bEnabled ? Cursors.Wait : null;
             if (bEnabled) oItemStatus.Text = sStatus;
-            else SetEditingControls(oSaveItemButton.IsEnabled);
+            else SetEditingControls(bEditing);
         }
 
         private void LoadProtection()
@@ -326,7 +347,7 @@ namespace Crypture
             bLoading = true;
             try
             {
-                bool bPrincipals = ThisItem.Cipher?.CipherParams == ItemCryptography.PrincipalFormat;
+                bool bPrincipals = ItemCryptography.UsesWindowsProtection(ThisItem.Cipher);
                 oProtectionMode.SelectedIndex = bPrincipals ? 0 : 1;
                 PrincipalList.Clear();
                 if (!bPrincipals) return;
@@ -349,12 +370,22 @@ namespace Crypture
         {
             if (oPrincipalPanel == null || oPrincipalHint == null || oCertificatePanel == null) return;
             bool bPrincipals = oProtectionMode.SelectedIndex == 0;
+            bool bCertificates = oProtectionMode.SelectedIndex == 1;
+            bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
+            oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled;
+            oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
+            oProtectionDisabledNotice.Text = !bDpapiNgEnabled && !bCertificatesEnabled
+                ? "All protection methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
+                : "This protection method is disabled in Crypture.exe.config. " +
+                    "Decrypt the item, then select an enabled protection method before saving.";
             bool bLocal = oPrincipalScope.SelectedIndex != 0;
             bool bRequiredCertificates = CertificateOperations.GetAutomaticCertificates().Count != 0;
             oRequiredCertificateNotice.Visibility = bRequiredCertificates ? Visibility.Visible : Visibility.Collapsed;
-            oPrincipalPanel.Visibility = bPrincipals ? Visibility.Visible : Visibility.Collapsed;
-            oCertificatePanel.Visibility = bPrincipals ? Visibility.Collapsed : Visibility.Visible;
-            oCertificateSharingGroup.Visibility = bPrincipals ? Visibility.Collapsed : Visibility.Visible;
+            UpdateRecoveryNotice();
+            oPrincipalPanel.Visibility = bPrincipals && bDpapiNgEnabled ? Visibility.Visible : Visibility.Collapsed;
+            oCertificatePanel.Visibility = bCertificates && bCertificatesEnabled
+                ? Visibility.Visible : Visibility.Collapsed;
+            oCertificateSharingGroup.Visibility = oCertificatePanel.Visibility;
             oPrincipalTargets.Visibility = bLocal ? Visibility.Collapsed : Visibility.Visible;
             oDomainNotice.Visibility = bDomainJoined ? Visibility.Collapsed : Visibility.Visible;
             oPrincipalHint.Text = oPrincipalScope.SelectedIndex == 2
@@ -368,10 +399,45 @@ namespace Crypture
                     "Include yourself or a recovery group if you need access after saving.";
         }
 
+        private void UpdateRecoveryNotice()
+        {
+            if (oRecoveryNotice == null) return;
+            List<string> oDetails = new List<string>();
+            try
+            {
+                RecoveryPolicy oPolicy = RecoveryPolicy.Read();
+                if (oPolicy.Descriptor != null) oDetails.Add("Windows Policy: " + oPolicy.Descriptor);
+                if (oPolicy.Certificate != null)
+                {
+                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oPolicy.Certificate))
+                        oDetails.Add("Certificate: " + oCert.GetNameInfo(X509NameType.SimpleName, false));
+                }
+                if (oDetails.Count != 0) oDetails.Add("Recovery is added automatically on every save. " +
+                    "Decrypt and save older items to add it. Recovery recipients can decrypt independently.");
+                if (ThisItem.Cipher?.CipherParams == ItemCryptography.RecoveryFormat)
+                {
+                    foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(ThisItem.Cipher))
+                        if (oEntry.Key != ThisItem.Cipher.ProtectionDescriptor)
+                            oDetails.Add("Saved Windows Recovery: " + oEntry.Key);
+                    if (ItemCryptography.UsesWindowsProtection(ThisItem.Cipher) && UserListSelected.Count != 0)
+                        oDetails.Add("Saved Recovery Certificates: " +
+                            String.Join(", ", UserListSelected.Select(u => u.Name)));
+                }
+                oRecoveryNotice.Text = "Emergency Recovery" + Environment.NewLine +
+                    String.Join(Environment.NewLine, oDetails);
+            }
+            catch (Exception oError) when (oError is InvalidOperationException || oError is CryptographicException)
+            {
+                oDetails.Add(oError.Message);
+                oRecoveryNotice.Text = "Emergency Recovery: " + oError.Message;
+            }
+            oRecoveryNotice.Visibility = oDetails.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
+
         private void oProtectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateProtectionControls();
-            if (!bLoading && oSaveItemButton != null && oSaveItemButton.IsEnabled) bHasChanges = true;
+            if (!bLoading && bEditing) bHasChanges = true;
         }
 
         private async void oAddPrincipal_Click(object sender, RoutedEventArgs e)
@@ -445,7 +511,7 @@ namespace Crypture
 
         private void MenuItemWithRadioButtons_Click(object sender, RoutedEventArgs e)
         {
-            Fluent.MenuItem oMenu = (Fluent.MenuItem)sender;
+            RibbonMenuItem oMenu = (RibbonMenuItem)sender;
             User oUser = (User)oMenu.DataContext;
             if (CertificateOperations.GetAutomaticCertificates().Any(c => c.SequenceEqual(oUser.Certificate)))
             {
@@ -529,9 +595,14 @@ namespace Crypture
             bLoading = false;
         }
 
+        private void oCopyValue_Click(object sender, RoutedEventArgs e)
+        {
+            Utilities.CopyButtonValue(sender as Button);
+        }
+
         private void oItemChanged(object sender, TextChangedEventArgs e)
         {
-            if (!bLoading && oSaveItemButton != null && oSaveItemButton.IsEnabled) bHasChanges = true;
+            if (!bLoading && bEditing) bHasChanges = true;
         }
 
         private void oRootWindow_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -545,7 +616,7 @@ namespace Crypture
 
         private void oGeneratePasswordButton_Click(object sender, RoutedEventArgs e)
         {
-            if (bBusy || !oSaveItemButton.IsEnabled || ThisItem.ItemType != "text") return;
+            if (bBusy || !bEditing || ThisItem.ItemType != "text") return;
             Utilities.TryOperation(this, () =>
             {
                 PasswordGenerator oGenerator = new PasswordGenerator(true) { Owner = this };

@@ -1,11 +1,13 @@
 #requires -Version 5.1
 param(
-    [Parameter(Mandatory = $true)][string] $BinaryDirectory,
-    [Parameter(Mandatory = $true)][string] $OutputDirectory,
-    [Parameter(Mandatory = $true)][string] $StageDirectory,
-    [Parameter(Mandatory = $true)][string] $TimestampUrl,
-    [Parameter(Mandatory = $true)][string] $ProductName,
-    [Parameter(Mandatory = $true)][string] $ProductUrl
+    [string] $BinaryDirectory = "$PSScriptRoot\..\bin\Release\Portable\win-x64",
+    [string] $OutputDirectory = "$PSScriptRoot\..\..\Binaries",
+    [string] $StageDirectory = "$PSScriptRoot\PackageStage",
+    [string] $TimestampUrl = 'http://timestamp.digicert.com',
+    [string] $ProductName = 'Crypture',
+    [string] $ProductUrl = 'https://github.com/NoMoreFood/Crypture',
+    [ValidateSet('win-x64', 'win-x86', 'win-arm64')][string] $RuntimeIdentifier = 'win-x64',
+    [switch] $SkipSigning
 )
 
 Set-StrictMode -Version Latest
@@ -19,190 +21,127 @@ function Invoke-Tool([string] $Path, [string[]] $Arguments)
 
 try
 {
+    $project = [IO.Path]::GetFullPath("$PSScriptRoot\..\Crypture.csproj")
     $BinaryDirectory = [IO.Path]::GetFullPath($BinaryDirectory)
     $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
     $StageDirectory = [IO.Path]::GetFullPath($StageDirectory)
-    $executable = Join-Path $BinaryDirectory 'Crypture.exe'
+    [xml] $projectSource = Get-Content -LiteralPath $project -Raw
+    $version = [string] $projectSource.Project.PropertyGroup[0].Version
+    $packageName = "Crypture-$version-$RuntimeIdentifier-portable.exe"
+    $destination = Join-Path $OutputDirectory $packageName
+    if (Test-Path -LiteralPath $destination) { throw "Package already exists: $destination" }
 
-    $assemblyInfo = Get-Content -LiteralPath "$PSScriptRoot\..\Properties\AssemblyInfo.cs" -Raw
-    $versionMatch = [regex]::Match($assemblyInfo, 'AssemblyFileVersion\("(\d+\.\d+\.\d+\.\d+)"\)')
-    if (!$versionMatch.Success) { throw 'AssemblyFileVersion must contain a four-part release version.' }
-    $releaseVersion = [version] $versionMatch.Groups[1].Value
-    if ($releaseVersion.Revision -ne 0 -or $releaseVersion.Major -gt 255 -or
-        $releaseVersion.Minor -gt 255 -or $releaseVersion.Build -gt 65535)
-    {
-        throw 'MSI versions require Major.Minor.Build.0, with limits of 255.255.65535.0.'
-    }
-    $version = $releaseVersion.ToString(3)
-    $installerNames = @('x86', 'x64') | ForEach-Object { "Crypture-$_-$version-installer.msi" }
-    $portableName = "Crypture-$version-portable.zip"
-    $packageNames = @($installerNames) + $portableName
-    if (Test-Path -LiteralPath $StageDirectory) { throw 'PackageStage already exists. Move or remove it first.' }
-    foreach ($name in $packageNames)
-    {
-        if (Test-Path -LiteralPath (Join-Path $OutputDirectory $name)) { throw "Package already exists: $name" }
-    }
-
-    $msbuild = $null
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (Test-Path -LiteralPath $vswhere -PathType Leaf)
-    {
-        $msbuild = Invoke-Tool $vswhere @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild',
-            '-find', 'MSBuild\**\Bin\MSBuild.exe') | Select-Object -First 1
-    }
-    if (!$msbuild)
-    {
-        $command = Get-Command MSBuild.exe -CommandType Application -ErrorAction SilentlyContinue
-        if ($command) { $msbuild = $command.Source }
-    }
-    if (!$msbuild)
-    {
-        throw 'Install Visual Studio or Build Tools with .NET desktop build tools and the .NET 4.8 targeting pack.'
-    }
-
-    Write-Host "Restoring packages and rebuilding Crypture $version in Release mode with $msbuild."
-    Invoke-Tool $msbuild @("$PSScriptRoot\..\Crypture.csproj", '/nologo', '/verbosity:minimal', '/restore',
-        '/t:Rebuild', '/p:Configuration=Release', '/p:Platform=AnyCPU', '/p:RestorePackagesConfig=true',
-        "/p:RestoreRepositoryPath=$PSScriptRoot\..\packages",
-        "/p:OutputPath=$BinaryDirectory/", "/p:OutDir=$BinaryDirectory/")
-    if (!(Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'MSBuild did not produce Crypture.exe.' }
-    $binaryVersion = [version] (Get-Item -LiteralPath $executable).VersionInfo.FileVersion
-    if ($binaryVersion -ne $releaseVersion) { throw 'The built executable does not match the release version.' }
-
+    # Use a fresh staging folder so existing artifacts and signed outputs remain intact.
+    $stage = Join-Path $StageDirectory ([Guid]::NewGuid().ToString('N'))
+    $publishDirectory = Join-Path $stage 'Publish'
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
     $dotnet = (Get-Command dotnet.exe -CommandType Application -ErrorAction Stop).Source
-    $sdkRoot = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' `
-        -Name KitsRoot10 -ErrorAction SilentlyContinue
-    if (!$sdkRoot) { $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10' }
-    $hostArchitecture = $env:PROCESSOR_ARCHITECTURE
-    if ($env:PROCESSOR_ARCHITEW6432) { $hostArchitecture = $env:PROCESSOR_ARCHITEW6432 }
-    $toolArchitecture = switch ($hostArchitecture) { 'ARM64' { 'arm64' } 'AMD64' { 'x64' } default { 'x86' } }
-    $signTool = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'bin') -Directory |
-        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
-        Sort-Object { [version] $_.Name } -Descending |
-        ForEach-Object { Join-Path $_.FullName "$toolArchitecture\signtool.exe" } |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-    if (!$signTool) { throw 'Install the Windows SDK signing tools before packaging.' }
+    Invoke-Tool $dotnet @('restore', $project, '--runtime', $RuntimeIdentifier, '--verbosity', 'minimal',
+        '-p:SelfContained=true')
 
-    $signOptions = @('sign', '/a', '/fd', 'sha256', '/tr', $TimestampUrl, '/td', 'sha256',
-        '/d', $ProductName, '/du', $ProductUrl)
-    $signingStore = $null
-    $now = Get-Date
-    foreach ($location in @('CurrentUser', 'LocalMachine'))
+    # Embed the runtime and every distributed dependency's license/notice text in About.
+    $assetsPath = Join-Path (Split-Path -Parent $project) 'obj\project.assets.json'
+    $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
+    $packageRoot = $assets.packageFolders.PSObject.Properties.Name | Select-Object -First 1
+    $notices = Join-Path $stage 'RuntimeNotices.txt'
+    $texts = [Collections.Generic.List[string]]::new()
+    foreach ($library in $assets.libraries.PSObject.Properties)
     {
-        $certificateStore = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', $location)
-        try
+        if ($library.Value.type -ne 'package') { continue }
+        $packageDirectory = Join-Path $packageRoot $library.Value.path
+        [xml] $manifest = Get-Content -LiteralPath (Get-ChildItem -LiteralPath $packageDirectory `
+            -Filter '*.nuspec' | Select-Object -First 1).FullName -Raw
+        $metadata = $manifest.package.metadata
+        if ($metadata.PSObject.Properties['license'])
         {
-            $certificateStore.Open('ReadOnly, OpenExistingOnly')
-            $certificates = @($certificateStore.Certificates.Find('FindByApplicationPolicy',
-                '1.3.6.1.5.5.7.3.3', $false) | Where-Object {
-                $_.HasPrivateKey -and $_.NotBefore -le $now -and $_.NotAfter -gt $now
-            })
-            if ($certificates.Count -eq 0) { continue }
-            $signingStore = $location
-            break
-        }
-        finally
-        {
-            $certificateStore.Dispose()
+            $license = $metadata.license
+            $texts.Add("$($library.Name)`r`n" + $(if ($license.type -eq 'expression') {
+                [string] (Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/spdx/license-list-data/main/text/$($license.'#text').txt").Content
+            } else { Get-Content -LiteralPath (Join-Path $packageDirectory $license.'#text') -Raw }))
         }
     }
-    if (!$signingStore)
+    foreach ($runtime in @('microsoft.netcore.app.runtime', 'microsoft.windowsdesktop.app.runtime'))
     {
-        throw 'No valid code-signing certificate with a private key was found in either Personal store.'
-    }
-    if ($signingStore -eq 'LocalMachine') { $signOptions += '/sm' }
-    Write-Host "Packaging Crypture $version; SignTool: $signTool; certificate store: $signingStore"
-
-    $toolDirectory = Join-Path $PSScriptRoot '.tools'
-    New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
-    $nugetConfiguration = Join-Path $toolDirectory 'NuGet.Config'
-    @'
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources><clear /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
-</configuration>
-'@ | Set-Content -LiteralPath $nugetConfiguration -Encoding UTF8
-    Invoke-Tool $dotnet @('tool', 'update', 'wix', '--tool-path', $toolDirectory,
-        '--configfile', $nugetConfiguration, '--no-cache')
-    $wix = Join-Path $toolDirectory 'wix.exe'
-    $wixVersionOutput = Invoke-Tool $wix @('--version')
-    $wixVersion = ([string] $wixVersionOutput).Trim().Split('+')[0]
-    if ($wixVersion -notmatch '^\d+\.\d+\.\d+$' -or [version] $wixVersion -lt [version] '7.0.0')
-    {
-        throw "Expected the latest stable WiX version (7.0 or later), but found $wixVersion."
-    }
-    Write-Host "Using WiX $wixVersion with matching UI and .NET extensions."
-
-    Push-Location -LiteralPath $PSScriptRoot
-    try
-    {
-        $extensions = @("WixToolset.UI.wixext/$wixVersion", "WixToolset.Netfx.wixext/$wixVersion")
-        foreach ($extension in $extensions) { Invoke-Tool $wix @('extension', 'add', $extension) }
-
-        # copy release files to a package staging directory
-        New-Item -ItemType Directory -Path $StageDirectory | Out-Null
-        Get-ChildItem -LiteralPath $BinaryDirectory -Force | Copy-Item -Destination $StageDirectory -Recurse
-        # sign the main executables
-        Invoke-Tool $signTool ($signOptions + (Join-Path $StageDirectory 'Crypture.exe'))
-        Invoke-Tool $signTool @('verify', '/pa', '/tw', (Join-Path $StageDirectory 'Crypture.exe'))
-
-        # do the build
-        foreach ($architecture in @('x86', 'x64'))
+        $runtimeDirectory = Join-Path $packageRoot "$runtime.$RuntimeIdentifier"
+        $runtimePackage = Get-ChildItem -LiteralPath $runtimeDirectory -Directory |
+            Where-Object { $_.Name -match '^10\.0\.\d+$' } |
+            Sort-Object { [version] $_.Name } -Descending | Select-Object -First 1
+        if (!$runtimePackage) { throw "The .NET 10 runtime package was not restored: $runtimeDirectory" }
+        foreach ($file in Get-ChildItem -LiteralPath $runtimePackage.FullName -File |
+            Where-Object { $_.Name -match 'LICENSE|NOTICE' })
         {
-            $installer = Join-Path $StageDirectory "Crypture-$architecture-$version-installer.msi"
-            Invoke-Tool $wix @('build', "$PSScriptRoot\Crypture.wxs", '-arch', $architecture,
-                '-ext', $extensions[0], '-ext', $extensions[1], '-d', "Version=$version",
-                '-d', "SourceDir=$PSScriptRoot\..", '-d', "PayloadDir=$StageDirectory", '-bcgg',
-                '-pdbtype', 'none', '-out', $installer)
-            Invoke-Tool $wix @('msi', 'validate', $installer)
-            # sign the msi files
-            Invoke-Tool $signTool ($signOptions + $installer)
-            Invoke-Tool $signTool @('verify', '/pa', '/tw', $installer)
+            $texts.Add("$runtime $($runtimePackage.Name)`r`n" + (Get-Content -LiteralPath $file.FullName -Raw))
         }
-
-        $portableDirectory = Join-Path $StageDirectory 'Portable'
-        New-Item -ItemType Directory -Path $portableDirectory | Out-Null
-        [xml] $installerSource = Get-Content -LiteralPath "$PSScriptRoot\Crypture.wxs" -Raw
-        $payloadPrefix = '$(var.PayloadDir)\'
-        foreach ($file in $installerSource.SelectNodes("//*[local-name()='File']/@Source"))
-        {
-            if (!$file.Value.StartsWith($payloadPrefix)) { throw "Unexpected installer payload path: $($file.Value)" }
-            $relativePath = $file.Value.Substring($payloadPrefix.Length)
-            $destination = Join-Path $portableDirectory $relativePath
-            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-            Copy-Item -LiteralPath (Join-Path $StageDirectory $relativePath) -Destination $destination
-        }
-        Copy-Item -LiteralPath "$PSScriptRoot\..\LICENSE" -Destination (Join-Path $portableDirectory 'LICENSE.txt')
-        @"
-Crypture $version Portable
-
-Extract the entire ZIP into a folder, then run Crypture.exe.
-Requires Windows with .NET Framework 4.8 or later. No installation is required.
-The same package supports x86 and x64 Windows; keep both architecture folders.
-
-Application preferences are stored in your Windows user profile.
-Vault access still requires the authorized Windows identity or certificate private key.
-Copying a Vault does not transfer local Windows profile or machine protection keys.
-
-The executable is digitally signed. License: LICENSE.txt.
-Third-party license information is available in About and DotNet.Notices.txt.
-"@ | Set-Content -LiteralPath (Join-Path $portableDirectory 'README.txt') -Encoding UTF8
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [IO.Compression.ZipFile]::CreateFromDirectory($portableDirectory,
-            (Join-Path $StageDirectory $portableName), [IO.Compression.CompressionLevel]::Optimal, $false)
-        Write-Host "Created portable package: $portableName"
-
-        New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-        foreach ($name in $packageNames)
-        {
-            [IO.File]::Copy((Join-Path $StageDirectory $name), (Join-Path $OutputDirectory $name), $false)
-        }
-        Write-Host "Signed installers and the portable ZIP are ready in $OutputDirectory."
     }
-    finally
+    [IO.File]::WriteAllText($notices, ($texts -join "`r`n`r`n"), [Text.UTF8Encoding]::new($false))
+
+    Write-Host "Publishing Crypture $version as an English-only, self-contained $RuntimeIdentifier EXE."
+    Invoke-Tool $dotnet @('publish', $project, '--configuration', 'Release', '--runtime', $RuntimeIdentifier,
+        '--no-restore', '--verbosity', 'minimal', '-p:PublishProfile=Portable',
+        "-p:PublishDir=$publishDirectory/", "-p:RuntimeNoticesFile=$notices")
+    $payload = @(Get-ChildItem -LiteralPath $publishDirectory -Force)
+    if ($payload.Count -ne 1 -or $payload[0].Name -ne 'Crypture.exe')
     {
-        Pop-Location
+        throw 'Publishing must produce exactly one file, Crypture.exe, with no external dependencies.'
     }
+    $executable = $payload[0].FullName
+    if ([version] (Get-Item -LiteralPath $executable).VersionInfo.FileVersion -ne [version] "$version.0")
+    {
+        throw 'The built executable does not match the release version.'
+    }
+
+    if (!$SkipSigning)
+    {
+        $sdkRoot = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' `
+            -Name KitsRoot10 -ErrorAction SilentlyContinue
+        if (!$sdkRoot) { $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10' }
+        $hostArchitecture = $env:PROCESSOR_ARCHITECTURE
+        if ($env:PROCESSOR_ARCHITEW6432) { $hostArchitecture = $env:PROCESSOR_ARCHITEW6432 }
+        $toolArchitecture = switch ($hostArchitecture) { 'ARM64' { 'arm64' } 'AMD64' { 'x64' } default { 'x86' } }
+        $signTool = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'bin') -Directory |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version] $_.Name } -Descending |
+            ForEach-Object { Join-Path $_.FullName "$toolArchitecture\signtool.exe" } |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+        if (!$signTool) { throw 'Install the Windows SDK signing tools, or use -SkipSigning for an unsigned build.' }
+
+        $signOptions = @('sign', '/a', '/fd', 'sha256',
+            '/d', $ProductName, '/du', $ProductUrl)
+        $signingStore = $null
+        $now = Get-Date
+        foreach ($location in @('CurrentUser', 'LocalMachine'))
+        {
+            $certificateStore = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', $location)
+            try
+            {
+                $certificateStore.Open('ReadOnly, OpenExistingOnly')
+                $certificates = @($certificateStore.Certificates.Find('FindByApplicationPolicy',
+                    '1.3.6.1.5.5.7.3.3', $true) | Where-Object {
+                    $_.HasPrivateKey -and $_.NotBefore -le $now -and $_.NotAfter -gt $now
+                })
+                if ($certificates.Count -eq 0) { continue }
+                $signingStore = $location
+                $signingThumbprint = ($certificates | Sort-Object NotAfter -Descending |
+                    Select-Object -First 1).Thumbprint
+                break
+            }
+            finally
+            {
+                $certificateStore.Dispose()
+            }
+        }
+        if (!$signingStore) { throw 'No trusted, valid code-signing certificate was found. Use -SkipSigning if needed.' }
+        if ($signingStore -eq 'LocalMachine') { $signOptions += '/sm' }
+        $signOptions += @('/sha1', $signingThumbprint)
+        Invoke-Tool $signTool ($signOptions + $executable)
+        Invoke-Tool $signTool @('timestamp', '/tr', $TimestampUrl, '/td', 'sha256', $executable)
+        Invoke-Tool $signTool @('verify', '/pa', '/tw', $executable)
+    }
+
+    New-Item -ItemType Directory -Path $BinaryDirectory, $OutputDirectory -Force | Out-Null
+    Copy-Item -LiteralPath $executable -Destination (Join-Path $BinaryDirectory 'Crypture.exe') -Force
+    [IO.File]::Copy($executable, $destination, $false)
+    Write-Host "Portable EXE ready: $destination"
 }
 catch
 {
