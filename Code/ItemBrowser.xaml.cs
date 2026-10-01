@@ -18,7 +18,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using Tulpep.ActiveDirectoryObjectPicker;
 
 namespace Crypture
 {
@@ -194,74 +193,45 @@ namespace Crypture
             Utilities.TryOperation(this, () =>
             {
                 CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
-                using (DirectoryObjectPickerDialog oPicker = new DirectoryObjectPickerDialog()
-                {
-                    DefaultObjectTypes = ObjectTypes.Users,
-                    AllowedObjectTypes = ObjectTypes.Users,
-                    MultiSelect = true,
-                    DefaultLocations = Locations.GlobalCatalog,
-                    AllowedLocations = Locations.All
-                })
-                {
-                    oPicker.AttributesToFetch.Add("userCertificate");
-                    oPicker.AttributesToFetch.Add("objectSid");
+                DirectoryPicker oPicker = new DirectoryPicker(true) { Owner = this };
 
-                    // show dialog and return if cancelled
-                    if (oPicker.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                // show dialog and return if cancelled
+                if (oPicker.ShowDialog() != true) return;
+                foreach (DirectoryAccount oAccount in oPicker.SelectedAccounts)
+                {
+                    // skip if no certificate information was found
+                    if (oAccount.Certificates.Length == 0)
                     {
-                        return;
+                        MessageBox.Show(this, "There was no certificate associated with '" + oAccount.Name + "'.",
+                            "No Certificate Information Found", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                        continue;
                     }
 
-                    foreach (DirectoryObject oSelected in oPicker.SelectedObjects)
+                    // Filter eligible encryption certificates before opening the selector.
+                    X509Certificate2Collection oCollection = new X509Certificate2Collection();
+                    try
                     {
-                        // skip if no certificate information was found
-                        if (oSelected.FetchedAttributes[0] == null)
+                        foreach (byte[] oCertData in oAccount.Certificates)
                         {
-                            MessageBox.Show(this,
-                                "There was no certificate associated with '" + oSelected.Name + "'.",
-                                "No Certificate Information Found",
-                                MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                            continue;
+                            using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
+                                if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert))
+                                    oCollection.Add(new X509Certificate2(oCert));
                         }
+                        if (oCollection.Count == 0) continue;
 
-                        // if the user has more than one certificate, then we need to wrap the structure as a
-                        // single element in an object array;
-                        object oAdCertAttribute = oSelected.FetchedAttributes[0];
-                        if (oAdCertAttribute is object[])
-                        {
-                            // Filter eligible encryption certificates before opening the selector.
-                            X509Certificate2Collection oCollection = new X509Certificate2Collection();
-                            try
-                            {
-                                foreach (byte[] oCertData in (object[])oAdCertAttribute)
-                                {
-                                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
-                                        if (oUsageFilter.Matches(oCert) &&
-                                            CertificateOperations.CheckCertificateStatus(oCert))
-                                            oCollection.Add(new X509Certificate2(oCert));
-                                }
-
-                                if (oCollection.Count == 0) continue;
-
-                                // ask the user which certificate to publish
-                                X509Certificate2Collection oSelectedCertificates = X509Certificate2UI.SelectFromCollection(
-                                    oCollection, "Select Certificate", "Select Certificate To Add",
-                                    X509SelectionFlag.SingleSelection, new WindowInteropHelper(this).Handle);
-                                if (oSelectedCertificates.Count == 0) continue;
-                                oAdCertAttribute = oSelectedCertificates[0].RawData;
-                            }
-                            finally
-                            {
-                                foreach (X509Certificate2 oCert in oCollection) oCert.Dispose();
-                            }
-                        }
+                        // ask the user which certificate to publish
+                        X509Certificate2Collection oSelected = oCollection.Count == 1 ? oCollection :
+                            X509Certificate2UI.SelectFromCollection(oCollection, "Select Certificate",
+                                "Select Certificate To Add", X509SelectionFlag.SingleSelection,
+                                new WindowInteropHelper(this).Handle);
+                        if (oSelected.Count == 0) continue;
 
                         // add the certificate to the store
-                        SecurityIdentifier oSid = new SecurityIdentifier((byte[])oSelected.FetchedAttributes[1], 0);
-                        using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate((byte[])oAdCertAttribute))
-                        {
-                            AddCertificate(oCert, oSid.ToString());
-                        }
+                        AddCertificate(oSelected[0], oAccount.Sid);
+                    }
+                    finally
+                    {
+                        foreach (X509Certificate2 oCert in oCollection) oCert.Dispose();
                     }
                 }
             });

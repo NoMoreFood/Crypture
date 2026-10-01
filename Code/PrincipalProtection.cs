@@ -37,9 +37,16 @@ namespace Crypture
                 throw new InvalidOperationException("Enter a Windows account, group, or SID.");
             if (sAccount.StartsWith("S-", StringComparison.OrdinalIgnoreCase))
                 return new ProtectionPrincipal(sAccount);
-            SecurityIdentifier oSid = (SecurityIdentifier)new NTAccount(sAccount)
-                .Translate(typeof(SecurityIdentifier));
-            return new ProtectionPrincipal(oSid.Value, sAccount);
+            try
+            {
+                SecurityIdentifier oSid = (SecurityIdentifier)new NTAccount(sAccount)
+                    .Translate(typeof(SecurityIdentifier));
+                return new ProtectionPrincipal(oSid.Value, sAccount);
+            }
+            catch (IdentityNotMappedException) when (PrincipalProtection.IsDomainJoined)
+            {
+                return ForestDirectory.ResolvePrincipal(sAccount);
+            }
         }
     }
 

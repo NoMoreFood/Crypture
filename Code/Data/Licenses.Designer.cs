@@ -61,24 +61,6 @@ namespace Crypture.Data {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Microsoft Public License (MS-PL)
-        ///
-        ///The initial project was originally created by Armand du Plessis &lt;armand@dotnet.org.za&gt; in 2004 and now is extended and maintained by Tulpep.
-        ///
-        ///This license governs use of the accompanying software. If you use the software, you accept this license. If you do not accept the license, do not use the software.
-        ///
-        ///1. Definitions
-        ///The terms &quot;reproduce,&quot; &quot;reproduction,&quot; &quot;derivative works,&quot; and &quot;distribution&quot; have the same meaning here as under U.S. copyright law.
-        ///A &quot;contributio [rest of string was truncated]&quot;;.
-        /// </summary>
-        public static string ActiveDirectoryObjectPicker {
-            get {
-                return ResourceManager.GetString("ActiveDirectoryObjectPicker", resourceCulture);
-            }
-        }
-        
-        
-        /// <summary>
         ///   Looks up a localized string similar to The MIT License (MIT)
         ///
         ///Copyright (c) Bryan Berns

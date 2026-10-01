@@ -3,7 +3,6 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
     <LangVersion>14.0</LangVersion>
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
@@ -22,7 +21,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="Tulpep.ActiveDirectoryObjectPicker" Version="3.0.11" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Safe.ico;Images\*.png;Data\SQLite.sql" />
@@ -37,9 +35,7 @@
           Condition="'%(ResolvedFileToPublish.Extension)' == '.config' Or
               '%(ResolvedFileToPublish.Extension)' == '.pdb' Or '%(ResolvedFileToPublish.Extension)' == '.xml' Or
               '%(ResolvedFileToPublish.Filename)' == 'System.Design' Or
-              '%(ResolvedFileToPublish.Filename)' == 'System.Drawing.Design' Or
-              '%(ResolvedFileToPublish.Filename)' == 'System.Windows.Forms.Design' Or
-              '%(ResolvedFileToPublish.Filename)' == 'System.Windows.Forms.Design.Editors'" />
+              '%(ResolvedFileToPublish.Filename)' == 'System.Drawing.Design'" />
     </ItemGroup>
   </Target>
 </Project>

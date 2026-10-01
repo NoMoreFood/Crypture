@@ -1,0 +1,68 @@
+﻿<Window x:Class="Crypture.DirectoryPicker" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Choose Windows Principals"
+    Width="840" Height="560" MinWidth="700" MinHeight="420" WindowStartupLocation="CenterOwner"
+    ShowInTaskbar="False" Icon="pack://application:,,,/Crypture;component/Safe.ico" Closed="oWindow_Closed"
+    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock x:Name="oHeading" Text="Choose Windows Principals" FontSize="21" FontWeight="SemiBold" />
+            <TextBlock Margin="0,6,0,12" TextWrapping="Wrap" Foreground="{DynamicResource Crypture.MutedBrush}"
+                Text="Search the entire forest by name, account, UPN, or SID. Ctrl or Shift selects multiple rows." />
+        </StackPanel>
+        <DockPanel Grid.Row="1" Margin="0,0,0,12">
+            <Button x:Name="oSearchButton" Content="_Search" DockPanel.Dock="Right" Margin="10,0,0,0"
+                MinWidth="100" Padding="12,6" IsDefault="True" Click="oSearchButton_Click"
+                Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE721;" />
+            <Label Content="_Find:" DockPanel.Dock="Left" Target="{Binding ElementName=oQuery}"
+                VerticalAlignment="Center" Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
+            <TextBox x:Name="oQuery" MaxLength="256" Padding="8,6" VerticalContentAlignment="Center"
+                AutomationProperties.Name="Forest Search" />
+        </DockPanel>
+        <DataGrid x:Name="oResults" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
+            CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+            SelectionMode="Extended" SelectionUnit="FullRow" GridLinesVisibility="Horizontal"
+            SelectionChanged="oResults_SelectionChanged" MouseDoubleClick="oResults_MouseDoubleClick"
+            AutomationProperties.Name="Forest Search Results" RowHeight="32">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" MinWidth="120" />
+                <DataGridTextColumn Header="Account" Binding="{Binding Account}" Width="*" MinWidth="160" />
+                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="115" />
+                <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*" MinWidth="130" />
+            </DataGrid.Columns>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                    <Setter Property="ToolTip">
+                        <Setter.Value>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Sid}" />
+                                <TextBlock Text="{Binding DistinguishedName}" TextWrapping="Wrap" MaxWidth="550" />
+                            </StackPanel>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </DataGrid.RowStyle>
+        </DataGrid>
+        <StackPanel Grid.Row="3" Margin="0,10,0,0">
+            <TextBlock x:Name="oStatus" Text="Enter a search to find accounts in the joined forest."
+                TextWrapping="Wrap" Foreground="{DynamicResource Crypture.MutedBrush}" />
+            <TextBlock x:Name="oSelection" Text="0 Selected" Margin="0,4,0,0" />
+        </StackPanel>
+        <DockPanel Grid.Row="4" Margin="0,14,0,0">
+            <Button Content="_Cancel" DockPanel.Dock="Right" MinWidth="90" Padding="12,6" IsCancel="True"
+                Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8BB;" />
+            <Button x:Name="oAddButton" Content="_Add Selected" DockPanel.Dock="Right" IsEnabled="False"
+                MinWidth="130" Padding="12,6" Margin="0,0,8,0" Click="oAddButton_Click"
+                Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
+            <Button x:Name="oCancelSearchButton" Content="Cancel S_earch" IsEnabled="False" MinWidth="130"
+                Padding="12,6" HorizontalAlignment="Left" Click="oCancelSearchButton_Click"
+                Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE711;" />
+        </DockPanel>
+    </Grid>
+</Window>

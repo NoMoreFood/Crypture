@@ -621,6 +621,7 @@ internal static partial class RegressionTests
         };
         App.ApplyTheme(false);
         TestClipboardTimeout();
+        TestDirectoryPicker();
         ItemEditor oEditor = new ItemEditor(oItem);
         Check(!((System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton")).IsEnabled,
             "Password insertion is disabled for locked items");

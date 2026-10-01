@@ -13,7 +13,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Principal;
 using System.Threading.Tasks;
-using Tulpep.ActiveDirectoryObjectPicker;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -520,27 +519,14 @@ namespace Crypture
         {
             Utilities.TryOperation(this, () =>
             {
-                using (DirectoryObjectPickerDialog oPicker = new DirectoryObjectPickerDialog
-                {
-                    DefaultObjectTypes = ObjectTypes.Users | ObjectTypes.Groups,
-                    AllowedObjectTypes = ObjectTypes.Users | ObjectTypes.Groups | ObjectTypes.Computers |
-                        ObjectTypes.ServiceAccounts | ObjectTypes.WellKnownPrincipals | ObjectTypes.BuiltInGroups,
-                    DefaultLocations = Locations.JoinedDomain,
-                    AllowedLocations = Locations.JoinedDomain | Locations.EnterpriseDomain |
-                        Locations.GlobalCatalog | Locations.ExternalDomain,
-                    MultiSelect = true
-                })
-                {
-                    oPicker.AttributesToFetch.Add("objectSid");
-                    if (oPicker.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-                    foreach (DirectoryObject oObject in oPicker.SelectedObjects)
-                    {
-                        if (!(oObject.FetchedAttributes[0] is byte[] oSid))
-                            throw new InvalidOperationException(
-                                "The selected object has no Windows security identifier.");
-                        AddPrincipal(new ProtectionPrincipal(new SecurityIdentifier(oSid, 0).Value));
-                    }
-                }
+                DirectoryPicker oPicker = new DirectoryPicker { Owner = this };
+                if (oPicker.ShowDialog() != true) return;
+                DirectoryAccount[] oNew = oPicker.SelectedAccounts
+                    .Where(a => !PrincipalList.Any(p => p.Sid == a.Sid)).ToArray();
+                if (PrincipalList.Count + oNew.Length > PrincipalProtection.MaxPrincipals)
+                    throw new InvalidOperationException("An item can have up to 100 Windows principals.");
+                foreach (DirectoryAccount oAccount in oNew)
+                    AddPrincipal(new ProtectionPrincipal(oAccount.Sid, oAccount.Account));
             });
         }
 
