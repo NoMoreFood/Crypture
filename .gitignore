@@ -3,9 +3,9 @@
 [Oo]bj/
 .vs/
 /Binaries/
-/Code/Build/PackageStage/
-/Code/Build/.tools/
-/Code/Build/.wix/
+/Build/PackageStage/
+/Build/.tools/
+/Build/.wix/
 
 # Local IDE settings
 *.user

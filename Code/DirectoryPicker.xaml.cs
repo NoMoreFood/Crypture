@@ -133,7 +133,7 @@ namespace Crypture
         internal DirectoryPicker(bool bCertificates = false, int nLimit = PrincipalProtection.MaxPrincipals,
             Func<string, bool, CancellationToken, DirectorySearchResult> oFind = null)
         {
-            if (nLimit < 1) throw new InvalidOperationException("An item can have up to 100 Windows principals.");
+            if (nLimit < 1) throw new InvalidOperationException("An item can include up to 100 users or groups.");
             InitializeComponent();
             bUsersOnly = bCertificates;
             nSelectionLimit = nLimit;

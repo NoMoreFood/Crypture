@@ -12,7 +12,7 @@
     <ApplicationIcon>Safe.ico</ApplicationIcon>
     <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <DefaultItemExcludes>$(DefaultItemExcludes);packages/**;Build/PackageStage/**;Build/.tools/**;Build/.wix/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);packages/**</DefaultItemExcludes>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>

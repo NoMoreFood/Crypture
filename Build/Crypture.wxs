@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+    <Package Name="$(var.ProductName)" Manufacturer="Bryan Berns" Version="$(var.Version)" Language="1033"
+        UpgradeCode="FCF13ECD-8D17-489D-B242-41791937C022" Scope="perMachine">
+        <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+            DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+        <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+        <Icon Id="Crypture.exe" SourceFile="$(var.IconPath)" />
+        <Property Id="ARPPRODUCTICON" Value="Crypture.exe" />
+        <Property Id="ARPURLINFOABOUT" Value="$(var.ProductUrl)" />
+        <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" Before="InstallValidate" Sequence="execute" />
+
+        <StandardDirectory Id="ProgramFiles6432Folder">
+            <Directory Id="INSTALLFOLDER" Name="$(var.ProductName)">
+                <Component Id="CryptureApplication" Guid="*">
+                    <File Id="CryptureExecutable" Source="$(var.ExecutablePath)" Name="Crypture.exe" KeyPath="yes">
+                        <Shortcut Id="ApplicationStartMenuShortcut" Directory="ProgramMenuFolder"
+                            Name="$(var.ProductName)" Advertise="yes" WorkingDirectory="INSTALLFOLDER"
+                            Icon="Crypture.exe" />
+                    </File>
+                </Component>
+            </Directory>
+        </StandardDirectory>
+        <StandardDirectory Id="ProgramMenuFolder" />
+        <Feature Id="CryptureFeature" Title="$(var.ProductName)" Level="1">
+            <ComponentRef Id="CryptureApplication" />
+        </Feature>
+
+        <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+        <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    </Package>
+</Wix>

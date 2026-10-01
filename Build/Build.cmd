@@ -6,8 +6,8 @@ SET LIBNAME=Crypture
 SET LIBURL=https://github.com/NoMoreFood/Crypture
 :: setup environment variables based on location of this script
 SET BASEDIR=%~dp0.
-SET BINDIR=%~dp0..\bin\Release\Portable\win-x64
-SET OUTDIR=%~dp0..\..\Binaries
+SET BINDIR=%~dp0..\Code\bin\Release\Portable
+SET OUTDIR=%~dp0..\Binaries
 SET STAGEDIR=%~dp0PackageStage
 POWERSHELL -NoProfile -File "%BASEDIR%\Build.ps1" -BinaryDirectory "%BINDIR%" ^
  -OutputDirectory "%OUTDIR%" -StageDirectory "%STAGEDIR%" ^

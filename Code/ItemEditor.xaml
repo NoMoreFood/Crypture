@@ -92,19 +92,19 @@
                     </Grid>
                     <Border Padding="12" BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="1" CornerRadius="3" Background="{DynamicResource Crypture.PanelBrush}">
                         <StackPanel>
-                            <Label Content="_Protection:" Target="{Binding ElementName=oProtectionMode}" Padding="0,0,0,5"
+                            <Label Content="_Encryption:" Target="{Binding ElementName=oProtectionMode}" Padding="0,0,0,5"
                                 Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE72E;" />
                             <ComboBox x:Name="oProtectionMode" MinHeight="28" SelectedIndex="0"
-                                SelectionChanged="oProtectionChanged" AutomationProperties.Name="Protection Model">
-                                <ComboBoxItem x:Name="oDpapiNgProtection" Content="Windows Users and Groups (DPAPI-NG)" />
-                                <ComboBoxItem x:Name="oCertificateProtection" Content="Certificates (RSA, ECC, ML-KEM)" />
+                                SelectionChanged="oProtectionChanged" AutomationProperties.Name="Encryption Method">
+                                <ComboBoxItem x:Name="oDpapiNgProtection" Content="User Based" />
+                                <ComboBoxItem x:Name="oCertificateProtection" Content="Certificate Based" />
                             </ComboBox>
                             <TextBlock x:Name="oProtectionDisabledNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
-                                AutomationProperties.Name="Disabled Protection" />
+                                AutomationProperties.Name="Disabled Encryption" />
                             <TextBlock x:Name="oRequiredCertificateNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
-                                Text="Required recipient certificates are configured. Saving requires certificate protection." />
+                                Text="Required recipient certificates are configured. Saving requires Certificate Based encryption." />
                             <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Emergency Recovery" />
@@ -112,7 +112,7 @@
                                 <Label Content="_Scope:" Target="{Binding ElementName=oPrincipalScope}" Padding="0,0,0,4"
                                     Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE774;" />
                                 <ComboBox x:Name="oPrincipalScope" MinHeight="28" SelectedIndex="0"
-                                    SelectionChanged="oProtectionChanged" AutomationProperties.Name="Windows Protection Scope">
+                                    SelectionChanged="oProtectionChanged" AutomationProperties.Name="User Based Encryption Scope">
                                     <ComboBoxItem x:Name="oDomainScope" Content="Domain Users and Groups"
                                         ToolTip="Requires Active Directory domain credentials and key distribution."
                                         ToolTipService.ShowOnDisabled="True" />
@@ -121,7 +121,7 @@
                                 </ComboBox>
                                 <TextBlock x:Name="oDomainNotice" TextWrapping="Wrap" Margin="0,8,0,4"
                                     Foreground="{DynamicResource Crypture.MutedBrush}" Visibility="Collapsed"
-                                    Text="Domain scope needs Active Directory. Use a local scope or certificates." />
+                                    Text="Domain scope needs Active Directory. Choose a local scope or Certificate Based encryption." />
                                 <TextBlock x:Name="oPrincipalHint" TextWrapping="Wrap" Margin="0,8,0,4" Foreground="{DynamicResource Crypture.MutedBrush}" />
                                 <StackPanel x:Name="oPrincipalTargets">
                                     <StackPanel x:Name="oPrincipalControls">
@@ -145,29 +145,23 @@
                                     </StackPanel>
                                     <ListBox x:Name="oPrincipalList" Height="96" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                         HorizontalContentAlignment="Stretch"
-                                        AutomationProperties.Name="Selected Windows Principals">
+                                        AutomationProperties.Name="Selected Users and Groups">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <DockPanel Margin="3,3">
-                                                    <Button DockPanel.Dock="Right" Margin="4,0,0,0" Tag="{Binding Sid}"
-                                                        Style="{StaticResource Crypture.CopyValueButton}"
-                                                        Click="oCopyValue_Click" AutomationProperties.Name="Copy Security Identifier"
-                                                        ToolTip="Copy this Windows security identifier." />
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Text="{Binding Sid}" FontSize="11"
-                                                            Foreground="{DynamicResource Crypture.MutedBrush}"
-                                                            TextTrimming="CharacterEllipsis" ToolTip="{Binding Sid}" />
-                                                    </StackPanel>
-                                                </DockPanel>
+                                                <StackPanel Margin="3,3">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Sid}" FontSize="11"
+                                                        Foreground="{DynamicResource Crypture.MutedBrush}"
+                                                        TextTrimming="CharacterEllipsis" ToolTip="{Binding Sid}" />
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
                                     <ComboBox x:Name="oPrincipalMatch" MinHeight="28" Margin="0,8,0,0" SelectedIndex="0"
-                                        SelectionChanged="oProtectionChanged" AutomationProperties.Name="Principal Matching Rule">
-                                        <ComboBoxItem Content="Allow Any Listed Principal (OR)" />
-                                        <ComboBoxItem Content="Require All Listed Principals (AND)" />
+                                        SelectionChanged="oProtectionChanged" AutomationProperties.Name="User and Group Matching Rule">
+                                        <ComboBoxItem Content="Allow Any Listed User or Group" />
+                                        <ComboBoxItem Content="Require All Listed Users and Groups" />
                                     </ComboBox>
                                 </StackPanel>
                             </StackPanel>

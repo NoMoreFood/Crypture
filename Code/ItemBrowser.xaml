@@ -42,7 +42,7 @@
                 </ribbon:RibbonGroup>
                 <ribbon:RibbonGroup x:Name="oProtectedItemScopeRibbonGroupBox" Header="Protected Item Scope" IsEnabled="False">
                     <CheckBox x:Name="oHideAccessible" Margin="6,6,6,0" Click="oHideAccessible_Click" Content="Hide Missing Certificate Keys"
-                        ToolTip="Hide certificate items without a matching local private key. Windows items remain visible; Windows checks access when you decrypt." />
+                        ToolTip="Hide Certificate Based items without a matching local private key. User Based items remain visible; Windows checks access when you decrypt." />
                 </ribbon:RibbonGroup>
                 <ribbon:RibbonGroup Header="Help">
                     <ribbon:RibbonButton x:Name="oAboutButton" Height="Auto" Margin="6,6,6,0" Click="oAboutButton_Click" Label="About" LargeImageSource="pack://application:,,,/Crypture;component/Images/About.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
@@ -74,12 +74,18 @@
                 <ribbon:RibbonGroup Width="220" HorizontalContentAlignment="Center" Header="Vault Tools">
                     <ribbon:RibbonButton x:Name="oHealthCheckButton" Label="Health Check" LargeImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" Height="Auto"
                         Margin="6,6,6,0" Click="oHealthCheckButton_Click"
-                        ToolTip="Check saved Windows principals and recipient certificates.">
+                        ToolTip="Check saved users, groups, and recipient certificates.">
                     </ribbon:RibbonButton>
                     <ribbon:RibbonButton x:Name="oCompactDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oCompactDatabaseButton_Click" Label="Compact" LargeImageSource="pack://application:,,,/Crypture;component/Images/Compress.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
             <ribbon:RibbonTab x:Name="oViewTab" Header="View">
+                <ribbon:RibbonGroup Header="Startup">
+                    <CheckBox x:Name="oLoadLastVaultOnStartupCheckBox" Margin="10,6,10,0"
+                        Content="Load Last _Vault On Startup" Click="oLoadLastVaultOnStartup_Click"
+                        IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=LoadLastVaultOnStartup,Mode=TwoWay}"
+                        ToolTip="Automatically reopen the most recently used Vault when Crypture starts." />
+                </ribbon:RibbonGroup>
                 <ribbon:RibbonGroup Header="Appearance">
                     <StackPanel Margin="10,4,10,0">
                         <Label Content="_Theme:" Target="{Binding ElementName=oThemeComboBox}"
@@ -105,7 +111,7 @@
             <Label Content="_Search:" Target="{Binding ElementName=oSearchTextBox}"
                 Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE721;" />
             <TextBox x:Name="oSearchTextBox" MinHeight="28" Padding="6,3" IsEnabled="False"
-                TextChanged="oSearchTextBox_TextChanged" ToolTip="Search labels, protection models, names, or security identifiers (Ctrl+F)."
+                TextChanged="oSearchTextBox_TextChanged" ToolTip="Search labels, encryption methods, names, or security identifiers (Ctrl+F)."
                 AutomationProperties.Name="Search Items and Certificates" />
         </DockPanel>
         <DataGrid x:Name="oItemDataGrid" Grid.Row="2" Width="Auto" AutoGenerateColumns="False" DockPanel.Dock="Top" HeadersVisibility="Column" IsReadOnly="True" CanUserAddRows="False"
@@ -125,7 +131,7 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="150" Binding="{Binding ProtectionDisplay}" Header="Protection" IsReadOnly="True">
+                <DataGridTextColumn Width="Auto" MinWidth="150" Binding="{Binding ProtectionDisplay}" Header="Encryption" IsReadOnly="True">
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE72E;" />
@@ -151,18 +157,11 @@
         <DataGrid x:Name="oCertDataGrid" Grid.Row="2" Width="Auto" AutoGenerateColumns="False" DockPanel.Dock="Top" HeadersVisibility="Column" IsReadOnly="True" CanUserAddRows="False"
             CanUserDeleteRows="False" GridLinesVisibility="Horizontal" RowHeight="30" BorderThickness="0" Margin="12,0,12,8" MouseDoubleClick="oCertDataGrid_MouseDoubleClick" SelectionMode="Single" Visibility="Hidden">
             <DataGrid.Columns>
-                <DataGridTemplateColumn Width="*" Header="Subject Name on Certificate" SortMemberPath="Name"
-                    ClipboardContentBinding="{Binding Name}">
+                <DataGridTemplateColumn Width="*" Header="Subject Name on Certificate" SortMemberPath="Name">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Height="28" Tag="{Binding Certificate}"
-                                    Style="{StaticResource Crypture.CopyValueButton}" Click="oCopyValue_Click"
-                                    AutomationProperties.Name="Copy Public Certificate"
-                                    ToolTip="Copy the public certificate as Base64 for recovery configuration." />
-                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="5,0"
-                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
-                            </DockPanel>
+                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="5,0"
+                                TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                     <DataGridTemplateColumn.HeaderStyle>
@@ -179,18 +178,11 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTemplateColumn MinWidth="300" Header="Windows Security Identifier" SortMemberPath="Sid"
-                    ClipboardContentBinding="{Binding Sid}">
+                <DataGridTemplateColumn MinWidth="300" Header="Windows Security Identifier" SortMemberPath="Sid">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Height="28" Tag="{Binding Sid}"
-                                    Style="{StaticResource Crypture.CopyValueButton}" Click="oCopyValue_Click"
-                                    AutomationProperties.Name="Copy Security Identifier"
-                                    ToolTip="Copy this Windows security identifier." />
-                                <TextBlock Text="{Binding Sid}" VerticalAlignment="Center" Margin="5,0"
-                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding Sid}" />
-                            </DockPanel>
+                            <TextBlock Text="{Binding Sid}" VerticalAlignment="Center" Margin="5,0"
+                                TextTrimming="CharacterEllipsis" ToolTip="{Binding Sid}" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                     <DataGridTemplateColumn.HeaderStyle>

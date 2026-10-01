@@ -181,6 +181,30 @@ internal static partial class RegressionTests
             Check(oCertificateItem.Instances.Count == 1,
                 "Recovery certificate matching a primary recipient is not duplicated");
 
+            // Retain primary certificate recipients while allowing optional recovery removal from Windows items.
+            SetRecoveryConfig(null, null);
+            User oOptionalRecovery;
+            using (CryptureEntities oContext = new CryptureEntities())
+                oOptionalRecovery = oContext.Users.Single(u => u.UserId == oRecoveryInstance.UserId);
+            DatabaseOperations.SaveItem(new Item { Label = "Certificate-only removal guard", ItemType = "text" },
+                oPlain, new[] { oOptionalRecovery });
+            Reject(() => DatabaseOperations.RemoveCertificate(oOptionalRecovery.UserId),
+                "A Windows item does not waive another item's last certificate recipient guard");
+            using (CryptureEntities oContext = new CryptureEntities())
+            {
+                oContext.Items.Remove(oContext.Items.Single(i => i.Label == "Certificate-only removal guard"));
+                oContext.SaveChanges();
+            }
+            DatabaseOperations.RemoveCertificate(oOptionalRecovery.UserId);
+            oWindowsItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
+            Check(oWindowsItem.Instances.Count == 0 && ItemCryptography.Decrypt(oWindowsItem).SequenceEqual(oPlain),
+                "Removing an optional recovery certificate preserves primary Windows decryption");
+            using (CryptureEntities oContext = new CryptureEntities())
+                Check(!oContext.Users.Any(u => u.UserId == oOptionalRecovery.UserId),
+                    "The optional recovery certificate is removed from the Vault");
+            Reject(() => DatabaseOperations.RemoveCertificate(oPrimary.UserId),
+                "Windows recovery does not waive a certificate item's last primary recipient guard");
+
             // Exercise real group authorization when the opt-in domain test environment is available.
             string sDomainSids = Environment.GetEnvironmentVariable("CRYPTURE_TEST_DOMAIN_SIDS");
             if (PrincipalProtection.IsDomainJoined && !String.IsNullOrWhiteSpace(sDomainSids))

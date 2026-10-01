@@ -33,6 +33,9 @@ namespace Crypture
 
         internal const int RecentVaultLimit = 10;
 
+        private static readonly string sApplicationTitle =
+            $"Crypture {typeof(App).Assembly.GetName().Version.ToString(3)}";
+
         private string sDatabasePath;
         private List<User> CertificateList = new List<User>();
         private HashSet<string> PrivateCertificates = new HashSet<string>();
@@ -83,6 +86,7 @@ namespace Crypture
 
             // initialize xaml form display
             InitializeComponent();
+            Title = sApplicationTitle;
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
             RefreshRecentVaults();
 
@@ -161,36 +165,32 @@ namespace Crypture
             {
                 CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
 
-                // open the locate personal certificate store
-                using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+                // Open the user and computer personal certificate stores.
+                X509Certificate2Collection oCertificates = CertificateOperations.GetPersonalCertificates();
+                try
                 {
-                    oStore.Open(OpenFlags.ReadOnly);
-                    X509Certificate2Collection oCertificates = oStore.Certificates;
-                    try
-                    {
-                        // Filter eligible encryption certificates before opening the selector.
-                        X509Certificate2Collection oCollection = new X509Certificate2Collection();
-                        foreach (X509Certificate2 oCert in oCertificates)
-                            if (oUsageFilter.Matches(oCert) &&
-                                CertificateOperations.CheckCertificateStatus(oCert, true))
-                                oCollection.Add(oCert);
-                        if (oCollection.Count == 0)
-                            throw new InvalidOperationException("No certificates match the usage filters and " +
-                                "certificate validation settings.");
+                    // Filter eligible encryption certificates before opening the selector.
+                    X509Certificate2Collection oCollection = new X509Certificate2Collection();
+                    foreach (X509Certificate2 oCert in oCertificates)
+                        if (oUsageFilter.Matches(oCert) &&
+                            CertificateOperations.CheckCertificateStatus(oCert, true))
+                            oCollection.Add(oCert);
+                    if (oCollection.Count == 0)
+                        throw new InvalidOperationException("No certificates match the usage filters and " +
+                            "certificate validation settings.");
 
-                        // ask the user which certificate to publish
-                        oCollection = X509Certificate2UI.SelectFromCollection(oCollection,
-                            "Select Certificate", "Select Certificate To Add",
-                            X509SelectionFlag.SingleSelection, new WindowInteropHelper(this).Handle);
+                    // ask the user which certificate to publish
+                    oCollection = X509Certificate2UI.SelectFromCollection(oCollection,
+                        "Select Certificate", "Select Certificate To Add",
+                        X509SelectionFlag.SingleSelection, new WindowInteropHelper(this).Handle);
 
-                        // commit the certificate to the database
-                        foreach (X509Certificate2 oCert in oCollection)
-                            AddCertificate(oCert, CertificateOperations.CurrentUserSid);
-                    }
-                    finally
-                    {
-                        foreach (X509Certificate2 oCert in oCertificates) oCert.Dispose();
-                    }
+                    // commit the certificate to the database
+                    foreach (X509Certificate2 oCert in oCollection)
+                        AddCertificate(oCert, CertificateOperations.CurrentUserSid);
+                }
+                finally
+                {
+                    foreach (X509Certificate2 oCert in oCertificates) oCert.Dispose();
                 }
             });
         }
@@ -254,6 +254,11 @@ namespace Crypture
             Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
         }
 
+        private void oLoadLastVaultOnStartup_Click(object sender, RoutedEventArgs e)
+        {
+            Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
+        }
+
         private void Ribbon_SelectedTabChanged(object sender, SelectionChangedEventArgs e)
         {
             if (oItemDataGrid == null || oCertDataGrid == null) return;
@@ -275,11 +280,6 @@ namespace Crypture
             ApplyFilter();
         }
 
-        private void oCopyValue_Click(object sender, RoutedEventArgs e)
-        {
-            Utilities.CopyButtonValue(sender as Button);
-        }
-
         private void oViewCertButton_Click(object sender, RoutedEventArgs e)
         {
             Utilities.TryOperation(this, () =>
@@ -298,14 +298,6 @@ namespace Crypture
 
         private void oCertDataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            // Copy icons retain their own action when double-clicked inside a certificate row.
-            for (DependencyObject oSource = e.OriginalSource as DependencyObject;
-                oSource != null && oSource != oCertDataGrid;)
-            {
-                if (oSource is Button) return;
-                oSource = oSource is System.Windows.Media.Visual
-                    ? System.Windows.Media.VisualTreeHelper.GetParent(oSource) : LogicalTreeHelper.GetParent(oSource);
-            }
             if (ItemsControl.ContainerFromElement(oCertDataGrid, e.OriginalSource as DependencyObject) is DataGridRow)
                 oViewCertButton_Click(sender, e);
         }
@@ -510,7 +502,7 @@ namespace Crypture
                 oBackupDatabaseButton.IsEnabled = bEnableControls;
                 oSearchTextBox.IsEnabled = bEnableControls;
                 oDatabaseStatus.Text = sDatabase;
-                Title = "Crypture - " + Path.GetFileName(sDatabase);
+                Title = sApplicationTitle + " - " + Path.GetFileName(sDatabase);
                 RememberRecentVault(sDatabase);
                 return true;
             }
@@ -715,6 +707,15 @@ namespace Crypture
 
         private void oItemBrowser_Loaded(object sender, RoutedEventArgs e)
         {
+            // Reopen the last Vault only when no Vault was specified on the command line.
+            if (Properties.Settings.Default.LoadLastVaultOnStartup && String.IsNullOrEmpty(sDatabasePath) &&
+                Environment.GetCommandLineArgs().Length == 1)
+            {
+                string sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()
+                    .FirstOrDefault(p => !String.IsNullOrWhiteSpace(p));
+                if (File.Exists(sLastVault)) LoadDatabase(sLastVault);
+            }
+
             if (!string.IsNullOrWhiteSpace(Properties.Settings.Default.StartupMessageText))
             {
                 Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate ()

@@ -21,7 +21,9 @@ namespace Crypture
         internal static void Encrypt(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null, string sRecoveryDescriptor = null)
         {
-            if (oPlainText == null || oPlainText.Length > Utilities.MaxItemSize)
+            int nMaxSize = oItem.ItemType is "text" or "totp"
+                ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
+            if (oPlainText == null || oPlainText.Length > nMaxSize)
                 throw new InvalidDataException("Items must be no larger than 64 MB.");
 
             bool bPrincipals = sProtectionDescriptor != null;
@@ -96,13 +98,15 @@ namespace Crypture
         internal static byte[] Decrypt(Item oItem, Instance oInstance = null, X509Certificate2 oCert = null)
         {
             Cipher oCipher = oItem.Cipher;
+            int nMaxSize = oItem.ItemType is "text" or "totp"
+                ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
             bool bPrincipals = oCipher?.CipherParams == PrincipalFormat;
             bool bRecovery = oCipher?.CipherParams == RecoveryFormat;
             bool bCertificate = oInstance != null && oCert != null;
             if ((oInstance == null) != (oCert == null) ||
                 oCipher == null || oCipher.CipherVector == null || oCipher.CipherVector.Length != 16 ||
                 oCipher.CipherText == null || oCipher.CipherText.Length == 0 ||
-                oCipher.CipherText.Length % 16 != 0 || oCipher.CipherText.Length > Utilities.MaxItemSize + 16 ||
+                oCipher.CipherText.Length % 16 != 0 || oCipher.CipherText.Length > nMaxSize + 16 ||
                 ((!bPrincipals && !bRecovery || bRecovery && bCertificate) &&
                 (oInstance == null || oCert == null ||
                 oCipher.CipherParams != oInstance.CipherParams ||
@@ -157,7 +161,13 @@ namespace Crypture
                     oAes.Key = oEncryptionKey;
                     oAes.IV = oCipher.CipherVector;
                     using (ICryptoTransform oDecryptor = oAes.CreateDecryptor())
-                        return oDecryptor.TransformFinalBlock(oCipher.CipherText, 0, oCipher.CipherText.Length);
+                    {
+                        byte[] oPlainText = oDecryptor.TransformFinalBlock(
+                            oCipher.CipherText, 0, oCipher.CipherText.Length);
+                        if (oPlainText.Length <= nMaxSize) return oPlainText;
+                        Array.Clear(oPlainText, 0, oPlainText.Length);
+                        throw new CryptographicException("The decrypted item exceeds the size limit.");
+                    }
                 }
             }
             finally

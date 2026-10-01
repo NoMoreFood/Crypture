@@ -1,5 +1,5 @@
 ﻿<Window x:Class="Crypture.DirectoryPicker" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Choose Windows Principals"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Choose Users and Groups"
     Width="840" Height="560" MinWidth="700" MinHeight="420" WindowStartupLocation="CenterOwner"
     ShowInTaskbar="False" Icon="pack://application:,,,/Crypture;component/Safe.ico" Closed="oWindow_Closed"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
@@ -12,7 +12,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel>
-            <TextBlock x:Name="oHeading" Text="Choose Windows Principals" FontSize="21" FontWeight="SemiBold" />
+            <TextBlock x:Name="oHeading" Text="Choose Users and Groups" FontSize="21" FontWeight="SemiBold" />
             <TextBlock Margin="0,6,0,12" TextWrapping="Wrap" Foreground="{DynamicResource Crypture.MutedBrush}"
                 Text="Search the entire forest by name, account, UPN, or SID. Ctrl or Shift selects multiple rows." />
         </StackPanel>

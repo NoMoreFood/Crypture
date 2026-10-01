@@ -31,6 +31,18 @@ namespace Crypture.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool LoadLastVaultOnStartup {
+            get {
+                return ((bool)(this["LoadLastVaultOnStartup"]));
+            }
+            set {
+                this["LoadLastVaultOnStartup"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("Consolas")]
         public string SecretFontFamily {
             get {

@@ -231,10 +231,10 @@ namespace Crypture
         public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";
         public string ProtectionDisplay => Cipher == null ? "Unknown" :
             Cipher.CipherParams == ItemCryptography.RecoveryFormat
-            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "Windows (DPAPI-NG)" : "Certificates") + " + Recovery"
-            : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "Windows (DPAPI-NG)" :
+            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based") + " + Recovery"
+            : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
             Cipher.CipherParams == 0 || Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
             Cipher.CipherParams == ItemCryptography.CertificateFormat
-            ? "Certificates" : "Unsupported";
+            ? "Certificate Based" : "Unsupported";
     }
 }

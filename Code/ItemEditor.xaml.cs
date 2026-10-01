@@ -12,6 +12,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Principal;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -31,6 +32,10 @@ namespace Crypture
         private bool bCompleted;
         private bool bBusy;
         private bool bEditing;
+        private bool bLoadingCertificates;
+        private bool bClosed;
+        private readonly CancellationTokenSource oCertificateCancellation = new CancellationTokenSource();
+        internal Task CertificateLoading { get; private set; } = Task.CompletedTask;
         private readonly bool bDpapiNgEnabled = Properties.Settings.Default.EnableDpapiNgProtection;
         private readonly bool bCertificatesEnabled = Properties.Settings.Default.EnableCertificateProtection;
         private readonly bool bDomainJoined = PrincipalProtection.IsDomainJoined;
@@ -46,6 +51,14 @@ namespace Crypture
             ThisItem.ItemType = "text";
             DataContext = ThisItem;
             InitializeComponent();
+
+            // Cancel pending certificate lookups when the editor closes.
+            Closed += (s, e) =>
+            {
+                bClosed = true;
+                oCertificateCancellation.Cancel();
+                oCertificateCancellation.Dispose();
+            };
             Utilities.EnableClipboardTimeout(oItemData);
             Utilities.EnableClipboardTimeout(oItemLabel);
             oTotpPanel.SettingsChanged += (s, e) =>
@@ -106,39 +119,91 @@ namespace Crypture
         {
             using (CryptureEntities oContent = new CryptureEntities())
                 UserList = new ObservableCollection<User>(oContent.Users.ToList());
-            HashSet<string> oPrivateCertificates = CertificateOperations.GetPrivateCertificateData();
             List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
 
             // Filter new choices while retaining saved and administrator-required recipients.
-            CertificateUsageFilter oUsageFilter = null;
-            try
-            {
-                oUsageFilter = CertificateUsageFilter.Read();
-            }
-            catch (ConfigurationErrorsException oError)
-            {
-                oCertificateUsageNotice.Text = oError.Message;
-                oCertificateUsageNotice.Visibility = Visibility.Visible;
-            }
-            HashSet<long> oAvailable = UserList.Where(u =>
-                CertificateOperations.CanSelectCertificate(u.Certificate, oUsageFilter) ||
-                oAutomatic.Any(c => c.SequenceEqual(u.Certificate))).Select(u => u.UserId).ToHashSet();
             UserListSelected = new ObservableCollection<User>(UserList.Where(u => bNewItem
-                ? oAvailable.Contains(u.UserId) && (oAutomatic.Any(c => c.SequenceEqual(u.Certificate)) ||
-                    oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))
+                ? oAutomatic.Any(c => c.SequenceEqual(u.Certificate))
                 : ThisItem.Instances.Any(i => i.UserId == u.UserId)));
             oItemSharedWith.ItemsSource = UserListSelected;
-            oAddCertDropDown.ItemsSource = UserList.Where(u => oAvailable.Contains(u.UserId) ||
-                UserListSelected.Contains(u)).ToList();
-            if (bNewItem) ThisItem.ModifiedBy = UserListSelected.FirstOrDefault(u =>
-                oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))?.UserId;
+            oAddCertDropDown.ItemsSource = UserListSelected.ToList();
+            bLoadingCertificates = true;
+            oCertificateUsageNotice.Text = "Checking recipient certificates...";
+            oCertificateUsageNotice.Visibility = Visibility.Visible;
+            CertificateLoading = Dispatcher.InvokeAsync(() => LoadCertificateChoices(bNewItem, oAutomatic))
+                .Task.Unwrap();
+        }
+
+        private async Task LoadCertificateChoices(bool bNewItem, List<byte[]> oAutomatic)
+        {
+            if (bClosed) return;
+            CancellationToken oToken = oCertificateCancellation.Token;
+            try
+            {
+                CertificateUsageFilter oUsageFilter = null;
+                string sNotice = null;
+                try
+                {
+                    oUsageFilter = CertificateUsageFilter.Read();
+                }
+                catch (ConfigurationErrorsException oError)
+                {
+                    sNotice = oError.Message;
+                }
+                List<User> oUsers = UserList.ToList();
+
+                // Chain building may fetch issuers and revocation data; keep it off the dispatcher.
+                var (oAvailable, oPrivateCertificates) = await Task.Run(() =>
+                {
+                    HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
+                    HashSet<long> oChoices = new HashSet<long>();
+                    foreach (User oUser in oUsers)
+                    {
+                        oToken.ThrowIfCancellationRequested();
+                        if (oAutomatic.Any(c => c.SequenceEqual(oUser.Certificate)) ||
+                            CertificateOperations.CanSelectCertificate(oUser.Certificate, oUsageFilter))
+                            oChoices.Add(oUser.UserId);
+                    }
+                    return (oChoices, oPrivate);
+                }, oToken);
+                if (bClosed) return;
+                if (bNewItem)
+                {
+                    foreach (User oUser in oUsers.Where(u => oAvailable.Contains(u.UserId) &&
+                        oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate))))
+                        if (!UserListSelected.Contains(oUser)) UserListSelected.Add(oUser);
+                    ThisItem.ModifiedBy = UserListSelected.FirstOrDefault(u =>
+                        oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate)))?.UserId;
+                }
+                oAddCertDropDown.ItemsSource = oUsers.Where(u => oAvailable.Contains(u.UserId) ||
+                    UserListSelected.Contains(u)).ToList();
+                oCertificateUsageNotice.Text = sNotice;
+                oCertificateUsageNotice.Visibility = sNotice == null ? Visibility.Collapsed : Visibility.Visible;
+            }
+            catch (OperationCanceledException) when (oToken.IsCancellationRequested) { }
+            catch (Exception oError)
+            {
+                if (bClosed) return;
+                oCertificateUsageNotice.Text = "Certificate choices could not be loaded. " +
+                    oError.GetBaseException().Message;
+                oCertificateUsageNotice.Visibility = Visibility.Visible;
+            }
+            finally
+            {
+                bLoadingCertificates = false;
+                if (!bClosed)
+                {
+                    oAddCertDropDown.IsEnabled = bEditing && bCertificatesEnabled;
+                    UpdateProtectionControls();
+                }
+            }
         }
 
         public void SetEditingControls(bool bEnabled)
         {
             // toggle what controls are available based on whether item item is decoded
             bEditing = bEnabled;
-            oAddCertDropDown.IsEnabled = bEnabled && bCertificatesEnabled;
+            oAddCertDropDown.IsEnabled = bEnabled && bCertificatesEnabled && !bLoadingCertificates;
             oProtectionMode.IsEnabled = bEnabled && (bDpapiNgEnabled || bCertificatesEnabled);
             oPrincipalScope.IsEnabled = bEnabled && bDpapiNgEnabled;
             oPrincipalControls.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
@@ -195,8 +260,9 @@ namespace Crypture
                     if (oProtectionMode.SelectedIndex == 0)
                     {
                         if (CertificateOperations.GetAutomaticCertificates().Count != 0)
-                            throw new InvalidOperationException("Required recipient certificates are configured. " +
-                                "Use certificate protection or ask the administrator to update that configuration.");
+                            throw new InvalidOperationException(
+                                "Required recipient certificates are configured. Use Certificate Based encryption " +
+                                "or ask the administrator to update that configuration.");
                         if (oPrincipalScope.SelectedIndex == 0 && !String.IsNullOrWhiteSpace(oPrincipalName.Text))
                             throw new InvalidOperationException("Add the entered account to the recipient list, " +
                                 "or clear the account field before saving.");
@@ -215,19 +281,6 @@ namespace Crypture
                             if (!UserListSelected.Contains(oUser)) UserListSelected.Add(oUser);
                         }
 
-                        // verify the selected users
-                        foreach (User oUser in UserListSelected)
-                        {
-                            using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
-                            {
-                                CertificateKeyProtection.ValidateForEncryption(oCert);
-                                if (!CertificateOperations.CheckCertificateStatus(oCert, true))
-                                    throw new InvalidOperationException("The certificate for '" + oUser.Name +
-                                        "' is not valid for encryption. Review the sharing list " +
-                                        "and certificate settings.");
-                            }
-                        }
-
                         // error if there are no selected users
                         if (UserListSelected.Count == 0 && RecoveryPolicy.Read().Certificate == null)
                             throw new InvalidOperationException("Select at least one recipient using Share With.");
@@ -241,9 +294,28 @@ namespace Crypture
                     };
                     try
                     {
-                        // commit changes to database
-                        await Task.Run(() => DatabaseOperations.SaveItem(
-                            ThisItem, oPlainText, oRecipients, sDescriptor));
+                        // verify the selected users
+                        await Task.Run(() =>
+                        {
+                            if (sDescriptor == null)
+                            {
+                                foreach (User oUser in oRecipients)
+                                {
+                                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(
+                                        oUser.Certificate))
+                                    {
+                                        CertificateKeyProtection.ValidateForEncryption(oCert);
+                                        if (!CertificateOperations.CheckCertificateStatus(oCert, true))
+                                            throw new InvalidOperationException("The certificate for '" + oUser.Name +
+                                                "' is not valid for encryption. Review the sharing list " +
+                                                "and certificate settings.");
+                                    }
+                                }
+                            }
+
+                            // commit changes to database
+                            DatabaseOperations.SaveItem(ThisItem, oPlainText, oRecipients, sDescriptor);
+                        });
                     }
                     finally
                     {
@@ -265,36 +337,32 @@ namespace Crypture
 
         private X509Certificate2 GetUserKey(IEnumerable<User> SourceUserList)
         {
-            // open our local certificate store
-            using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+            // Open the user and computer personal certificate stores.
+            X509Certificate2Collection oStoreCertificates = CertificateOperations.GetPersonalCertificates();
+            try
             {
-                oStore.Open(OpenFlags.ReadOnly);
-                X509Certificate2Collection oStoreCertificates = oStore.Certificates;
-                try
+                // collate the database certificates to those locally available
+                X509Certificate2Collection oMyCertCollection = new X509Certificate2Collection();
+                foreach (X509Certificate2 oStoreUser in oStoreCertificates)
                 {
-                    // collate the database certificates to those locally available
-                    X509Certificate2Collection oMyCertCollection = new X509Certificate2Collection();
-                    foreach (X509Certificate2 oStoreUser in oStoreCertificates)
-                    {
-                        if (oStoreUser.HasPrivateKey && SourceUserList.Any(u =>
-                            u.Certificate.SequenceEqual(oStoreUser.RawData))) oMyCertCollection.Add(oStoreUser);
-                    }
-
-                    // error if no valid local certification might be available local certif
-                    if (oMyCertCollection.Count == 0)
-                        throw new InvalidOperationException("No matching private key " +
-                            "was found in your personal certificate store.");
-
-                    // allow the certificate
-                    X509Certificate2Collection oCollection = X509Certificate2UI.SelectFromCollection(oMyCertCollection,
-                        "Select Certificate", "Select Certificate To Decode", X509SelectionFlag.SingleSelection,
-                        new WindowInteropHelper(this).Handle);
-                    return oCollection.Count == 0 ? null : new X509Certificate2(oCollection[0]);
+                    if (oStoreUser.HasPrivateKey && SourceUserList.Any(u =>
+                        u.Certificate.SequenceEqual(oStoreUser.RawData))) oMyCertCollection.Add(oStoreUser);
                 }
-                finally
-                {
-                    foreach (X509Certificate2 oStoreUser in oStoreCertificates) oStoreUser.Dispose();
-                }
+
+                // Report when neither store contains a matching private key.
+                if (oMyCertCollection.Count == 0)
+                    throw new InvalidOperationException("No matching private key was found in the user or " +
+                        "computer personal certificate stores.");
+
+                // allow the certificate
+                X509Certificate2Collection oCollection = X509Certificate2UI.SelectFromCollection(oMyCertCollection,
+                    "Select Certificate", "Select Certificate To Decode", X509SelectionFlag.SingleSelection,
+                    new WindowInteropHelper(this).Handle);
+                return oCollection.Count == 0 ? null : new X509Certificate2(oCollection[0]);
+            }
+            finally
+            {
+                foreach (X509Certificate2 oStoreUser in oStoreCertificates) oStoreUser.Dispose();
             }
         }
 
@@ -407,12 +475,13 @@ namespace Crypture
             bool bPrincipals = oProtectionMode.SelectedIndex == 0;
             bool bCertificates = oProtectionMode.SelectedIndex == 1;
             bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
-            oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled;
+            oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
+                (!bCertificates || !bLoadingCertificates);
             oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
             oProtectionDisabledNotice.Text = !bDpapiNgEnabled && !bCertificatesEnabled
-                ? "All protection methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
-                : "This protection method is disabled in Crypture.exe.config. " +
-                    "Decrypt the item, then select an enabled protection method before saving.";
+                ? "Both encryption methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
+                : "This encryption method is disabled in Crypture.exe.config. " +
+                    "Decrypt the item, then select an enabled encryption method before saving.";
             bool bLocal = oPrincipalScope.SelectedIndex != 0;
             bool bRequiredCertificates = CertificateOperations.GetAutomaticCertificates().Count != 0;
             oRequiredCertificateNotice.Visibility = bRequiredCertificates ? Visibility.Visible : Visibility.Collapsed;
@@ -441,11 +510,12 @@ namespace Crypture
             try
             {
                 RecoveryPolicy oPolicy = RecoveryPolicy.Read();
-                if (oPolicy.Descriptor != null) oDetails.Add("Windows Policy: " + oPolicy.Descriptor);
+                if (oPolicy.Descriptor != null) oDetails.Add("User Based Recovery: " + oPolicy.Descriptor);
                 if (oPolicy.Certificate != null)
                 {
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oPolicy.Certificate))
-                        oDetails.Add("Certificate: " + oCert.GetNameInfo(X509NameType.SimpleName, false));
+                        oDetails.Add("Certificate Based Recovery: " +
+                            oCert.GetNameInfo(X509NameType.SimpleName, false));
                 }
                 if (oDetails.Count != 0) oDetails.Add("Recovery is added automatically on every save. " +
                     "Decrypt and save older items to add it. Recovery recipients can decrypt independently.");
@@ -453,9 +523,9 @@ namespace Crypture
                 {
                     foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(ThisItem.Cipher))
                         if (oEntry.Key != ThisItem.Cipher.ProtectionDescriptor)
-                            oDetails.Add("Saved Windows Recovery: " + oEntry.Key);
+                            oDetails.Add("Saved User Based Recovery: " + oEntry.Key);
                     if (ItemCryptography.UsesWindowsProtection(ThisItem.Cipher) && UserListSelected.Count != 0)
-                        oDetails.Add("Saved Recovery Certificates: " +
+                        oDetails.Add("Saved Certificate Based Recovery: " +
                             String.Join(", ", UserListSelected.Select(u => u.Name)));
                 }
                 oRecoveryNotice.Text = "Emergency Recovery" + Environment.NewLine +
@@ -498,7 +568,7 @@ namespace Crypture
         {
             if (PrincipalList.Any(p => p.Sid == oPrincipal.Sid)) return;
             if (PrincipalList.Count >= PrincipalProtection.MaxPrincipals)
-                throw new InvalidOperationException("An item can have up to 100 Windows principals.");
+                throw new InvalidOperationException("An item can include up to 100 users or groups.");
             PrincipalList.Add(oPrincipal);
             bHasChanges = true;
         }
@@ -525,7 +595,7 @@ namespace Crypture
                 DirectoryAccount[] oNew = oPicker.SelectedAccounts
                     .Where(a => !PrincipalList.Any(p => p.Sid == a.Sid)).ToArray();
                 if (PrincipalList.Count + oNew.Length > PrincipalProtection.MaxPrincipals)
-                    throw new InvalidOperationException("An item can have up to 100 Windows principals.");
+                    throw new InvalidOperationException("An item can include up to 100 users or groups.");
                 foreach (DirectoryAccount oAccount in oNew)
                     AddPrincipal(new ProtectionPrincipal(oAccount.Sid, oAccount.Account));
             });
@@ -616,11 +686,6 @@ namespace Crypture
             SetEditingControls(false);
             bHasChanges = false;
             bLoading = false;
-        }
-
-        private void oCopyValue_Click(object sender, RoutedEventArgs e)
-        {
-            Utilities.CopyButtonValue(sender as Button);
         }
 
         private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)

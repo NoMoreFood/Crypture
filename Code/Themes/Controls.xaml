@@ -734,16 +734,6 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <Style x:Key="Crypture.CopyValueButton" TargetType="Button" BasedOn="{StaticResource Crypture.CopyButton}">
-        <Style.Triggers>
-            <Trigger Property="Tag" Value="{x:Null}">
-                <Setter Property="IsEnabled" Value="False" />
-            </Trigger>
-            <Trigger Property="Tag" Value="">
-                <Setter Property="IsEnabled" Value="False" />
-            </Trigger>
-        </Style.Triggers>
-    </Style>
     <Style x:Key="Crypture.GlyphTab" TargetType="TabItem" BasedOn="{StaticResource {x:Type TabItem}}">
         <Setter Property="HeaderTemplate" Value="{StaticResource Crypture.GlyphContent}" />
     </Style>

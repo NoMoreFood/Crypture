@@ -5,12 +5,9 @@ with Windows users and security groups (CNG DPAPI-NG), certificates, or local Wi
 
 ## Getting Started
 
-Requires Windows with **.NET Framework 4.8 or later**.
-
-Install an MSI package, or extract **Crypture-2.0.0-portable.zip** and run `Crypture.exe`. Keep all extracted files,
-including the `x86` and `x64` folders. The ZIP includes the signed executable and dependencies for both
-architectures; no installer or 7-Zip utility is needed. Application preferences are stored in your Windows user
-profile.
+Extract **Crypture-2.0.0-portable.zip** and run `Crypture.exe` from the folder matching your Windows computer:
+**x64** or **arm64**. Each executable includes the .NET 10 runtime and its dependencies. Application preferences
+are stored in your Windows user profile.
 
 1. Choose **Home → New** and select a location for your Vault. The new-item dialog opens automatically.
 2. Enter an **Item Label** and the content to protect, then select a protection mode below. Use **Add New Item**
@@ -48,7 +45,9 @@ scopes](https://learn.microsoft.com/en-us/windows/win32/seccng/cng-dpapi-constan
 
 Add public certificates using **Certificates → Store** or the certificate import workflow. Choose **Certificates
 (RSA, ECC, ML-KEM)** in the item editor and select recipients with **Share With...**. Certificates with a matching
-local private key are selected for new items. Each selected certificate can independently decrypt the item.
+local private key are selected for new items. Crypture searches both the current user's and the computer's Personal
+certificate stores; the Windows account must have permission to use the private key. Each selected certificate can
+independently decrypt the item.
 
 Supported algorithms:
 
@@ -121,8 +120,9 @@ settings. Lookups run in the background and can be cancelled between requests.
   recovery infrastructure separately: Vault backups do not include them. New Vaults and backups require unused
   filenames.
 * **Hide Missing Certificate Keys** filters certificate items only; Windows access is checked when decrypting.
-* A certificate cannot be removed if it is an item's last recipient. File uploads and expanded downloads are limited
-  to 64 MB.
+* A certificate cannot be removed if it is a certificate item's last recipient or is configured for emergency
+  recovery. Optional recovery certificates can be removed from items that retain primary Windows access.
+  File uploads and expanded downloads are limited to 64 MB.
 
 ## Encryption and Privacy
 
@@ -139,33 +139,36 @@ not prevent deleting or replaying an entire Vault snapshot, so retain filesystem
 
 ## Building and Packaging
 
-For development, restore `Code\packages.config` into `Code\packages` and build `Code\Crypture.sln` with Visual
-Studio/MSBuild. Required components are .NET desktop build tools, the **.NET Framework 4.8 targeting pack**, and
-Windows certificate enrollment COM support. Package restore requires MSBuild 16.5 or later.
+Build on Windows with the **.NET 10 SDK** selected by `global.json`. From the repository root, run
+`dotnet build Code\Crypture.sln`; the SDK restores NuGet dependencies automatically. The project uses WPF and
+Windows certificate enrollment COM support.
 
-Run `Code\Build\Build.cmd` to restore dependencies, rebuild Release, and create **x86/x64 MSIs and a portable ZIP**
-in `Binaries`. Packaging also requires a current .NET SDK, Windows SDK signing tools, internet access to NuGet and
-the timestamp service, and a valid code-signing certificate with an accessible private key.
+Run `Code\Build\Build.cmd` to restore dependencies and publish self-contained, single-file executables for
+**win-x64** and **win-arm64**. The default package is `Binaries\Crypture-2.0.0-portable.zip`, containing `x64` and
+`arm64` folders with one `Crypture.exe` each. To package a single architecture, pass `-RuntimeIdentifier win-x64`,
+`-RuntimeIdentifier win-arm64`, or `-RuntimeIdentifier win-x86`. Each executable includes its architecture's runtime,
+native dependencies, and license notices; licenses are available in **About**.
 
-The script installs/updates a private copy of the latest stable WiX and matching extensions, uses the newest
-installed Windows SDK SignTool, and selects an eligible certificate from the current user's Personal store (falling
-back to the local machine's store when no candidate is present). It signs and timestamps the staged executable and
-installers, verifies their signatures, and validates both MSIs before publishing. Failures stop packaging; unsigned
-releases are not produced.
+Signed packaging requires Windows SDK signing tools, internet access to NuGet and the timestamp service, and a
+trusted, valid code-signing certificate with an accessible private key. The script uses the newest installed SDK
+SignTool and selects a certificate from the current user's Personal store, falling back to the computer's store.
+It signs, timestamps, and verifies the staged executable before publishing. Pass `-SkipSigning` to produce an
+unsigned build for local testing.
 
-WiX 7 requires acceptance of its [EULA](https://docs.firegiant.com/wix/osmf/). After reviewing it, run
-`Code\Build\.tools\wix.exe eula accept wix7`; the script does not accept it automatically.
+The package version comes from `Code\Crypture.csproj`. Keep it aligned with `Code\Properties\AssemblyInfo.cs` and
+the application manifest: package `2.0.0` corresponds to assembly/file version `2.0.0.0`. Each run uses a fresh
+subdirectory under `Code\Build\PackageStage`; existing release packages are not overwritten. Move an existing
+package before building the same version again.
 
-Versions come from `Code\Properties\AssemblyInfo.cs`: Crypture 2.0 uses `2.0.0.0` for assemblies and `2.0.0` for
-packages. Use `Major.Minor.Build.0` and keep assembly, manifest, and publish versions aligned. Existing packages are
-not overwritten; move or remove `Code\Build\PackageStage` before another run. Signing uses staged copies; the ZIP
-contains the signed runtime payload, dependencies, and licenses, while the ZIP archive itself is unsigned.
+The portable executable uses built-in configuration defaults. To customize application settings or recovery,
+place a `Crypture.exe.config` beside it, using `Code\App.config` as the starting point.
 
 ### Validation
 
-Build `Tests\Crypture.Tests.csproj` and run `Tests\bin\Debug\Crypture.Tests.exe`. The suite covers encryption,
-tampering, protection conversion, Vault recovery, password policies, clipboard expiration, and WPF controls using
-temporary Vaults/keys.
+From the repository root, run `dotnet build Tests\Crypture.Tests.csproj`, then
+`Tests\bin\Debug\net10.0-windows\Crypture.Tests.exe`. The suite covers encryption, tampering, protection conversion,
+Vault recovery, concurrent Vault access, password policies, clipboard expiration, and WPF controls using temporary
+Vaults and keys. Computer-store private-key round trips require an elevated test process.
 
 * Set `CRYPTURE_TEST_DOMAIN_SIDS` to semicolon-separated SIDs or account names granting the test account access to
   enable domain authorization tests. These require a domain-connected machine with AD key distribution; otherwise

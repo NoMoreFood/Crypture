@@ -18,6 +18,9 @@ namespace Crypture
     {
         internal const int MaxItemSize = 64 * 1024 * 1024;
 
+        // Reserve bounded space for gzip headers and incompressible blocks.
+        internal const int MaxCompressedItemSize = MaxItemSize + 1024 * 1024;
+
         internal static void EnableClipboardTimeout(TextBox oTextBox, Func<string, bool> oCopy = null)
         {
             oCopy = oCopy ?? (s => TryOperation(Window.GetWindow(oTextBox), () => App.CopyProtectedText(s)));
@@ -44,22 +47,6 @@ namespace Crypture
             oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
             oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
             oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
-        }
-
-        internal static bool CopyButtonValue(Button oButton, Func<string, bool> oCopy = null)
-        {
-            if (oButton?.IsEnabled != true) return false;
-
-            // Public certificates use DER Base64 so they can be pasted into recovery configuration.
-            string sText = oButton.Tag switch
-            {
-                byte[] oCertificate => Convert.ToBase64String(oCertificate),
-                string sValue => sValue,
-                _ => null
-            };
-            if (String.IsNullOrEmpty(sText)) return false;
-            oCopy ??= s => TryOperation(Window.GetWindow(oButton), () => App.CopyProtectedText(s));
-            return oCopy(sText);
         }
 
         internal static bool TryOperation(Window oOwner, Action oAction)

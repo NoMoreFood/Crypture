@@ -1,5 +1,14 @@
 using System;
 using System.IO;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Controls;
+using System.Windows.Controls.Ribbon;
 using System.Configuration;
 using System.Xml;
 using System.Formats.Asn1;
@@ -339,6 +348,288 @@ internal static partial class RegressionTests
         }
     }
 
+    private static void TestPersonalCertificateStores()
+    {
+        using (var oIdentity = WindowsIdentity.GetCurrent())
+        {
+            bool bAdmin = new WindowsPrincipal(oIdentity)
+                .IsInRole(WindowsBuiltInRole.Administrator);
+            foreach (StoreLocation oLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+            {
+                if (oLocation == StoreLocation.LocalMachine && !bAdmin)
+                {
+                    Console.WriteLine("SKIP: Computer-store private-key round trips require elevation.");
+                    continue;
+                }
+                string sKeyName = "Crypture.StoreTest-" + Guid.NewGuid().ToString("N");
+                CngKeyCreationParameters oOptions = new CngKeyCreationParameters
+                {
+                    KeyUsage = CngKeyUsages.Decryption | CngKeyUsages.Signing,
+                    KeyCreationOptions = oLocation == StoreLocation.LocalMachine
+                        ? CngKeyCreationOptions.MachineKey : CngKeyCreationOptions.None
+                };
+                oOptions.Parameters.Add(new CngProperty("Length",
+                    BitConverter.GetBytes(2048), CngPropertyOptions.None));
+                using (CngKey oKey = CngKey.Create(CngAlgorithm.Rsa, sKeyName, oOptions))
+                using (RSA oRsa = new RSACng(oKey))
+                using (X509Certificate2 oOriginal = Certificate(oRsa, sKeyName, DateTimeOffset.Now.AddDays(-1),
+                    DateTimeOffset.Now.AddDays(1)))
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oOriginal.RawData))
+                using (X509Store oStore = new X509Store(StoreName.My, oLocation))
+                {
+                    try
+                    {
+                        // Persist the provider association so discovery must reopen the actual Windows private key.
+                        TestKeyProvider oProvider = new TestKeyProvider
+                        {
+                            Container = sKeyName, Provider = CngProvider.MicrosoftSoftwareKeyStorageProvider.Provider,
+                            Flags = oLocation == StoreLocation.LocalMachine ? 0x20u : 0,
+                            KeySpec = UInt32.MaxValue
+                        };
+                        if (!CertSetCertificateContextProperty(oCert.Handle, 2, 0, ref oProvider))
+                            throw new CryptographicException(Marshal.GetLastWin32Error());
+                        oStore.Open(OpenFlags.ReadWrite);
+                        try
+                        {
+                            oStore.Add(oCert);
+                            Check(CertificateOperations.GetPrivateCertificateData().Contains(
+                                Convert.ToBase64String(oCert.RawData)), oLocation + " private key discovery");
+                            X509Certificate2Collection oChoices = CertificateOperations.GetPersonalCertificates();
+                            try
+                            {
+                                X509Certificate2 oDiscovered = oChoices.Cast<X509Certificate2>().Single(c =>
+                                    c.RawData.SequenceEqual(oCert.RawData) && c.HasPrivateKey);
+                                byte[] oPlain = Encoding.UTF8.GetBytes("Personal-store discovery round trip");
+                                Item oItem = new Item { Label = "Store discovery", ItemType = "text" };
+                                ItemCryptography.Encrypt(oItem, oPlain,
+                                    new[] { new User { UserId = 7, Certificate = oCert.RawData } });
+                                Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Single(), oDiscovered)
+                                    .SequenceEqual(oPlain), oLocation + " discovered private key decrypts an item");
+                            }
+                            finally
+                            {
+                                foreach (X509Certificate2 oChoice in oChoices) oChoice.Dispose();
+                            }
+                        }
+                        finally
+                        {
+                            oStore.Remove(oCert);
+                        }
+                    }
+                    finally
+                    {
+                        oKey.Delete();
+                    }
+                }
+                Check(!CngKey.Exists(sKeyName, CngProvider.MicrosoftSoftwareKeyStorageProvider,
+                    oLocation == StoreLocation.LocalMachine ? CngKeyOpenOptions.MachineKey : CngKeyOpenOptions.None),
+                    oLocation + " temporary private key is removed");
+            }
+        }
+    }
+
+    private static void TestEditorCertificateLoading(string sDirectory)
+    {
+        string sPreviousConnection = CryptureEntities.ConnectionString;
+        Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
+        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
+        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
+        bool bUntrusted = oSettings.ShowUntrustedCertificates;
+        var oAutomatic = oSettings.AutomaticallyAddedCertificatesList;
+        try
+        {
+            oSettings.AllowSelfSignedCertificates = true;
+            oSettings.PerformCertificateRevocationCheck = false;
+            oSettings["ShowUntrustedCertificates"] = true;
+            oSettings["AutomaticallyAddedCertificatesList"] = new System.Collections.Specialized.StringCollection();
+            foreach (string sScenario in new[] { "new", "existing", "save", "close" })
+            {
+                ItemEditor oEditor = null;
+                var oListener = new TcpListener(IPAddress.Loopback, 0);
+                oListener.Start();
+                using (var oCancellation = new CancellationTokenSource())
+                using (RSA oIssuerKey = new RSACng(2048))
+                using (RSA oLeafKey = new RSACng(2048))
+                using (X509Certificate2 oWarm = Certificate(oLeafKey, "Warm editor", DateTimeOffset.Now.AddDays(-1),
+                    DateTimeOffset.Now.AddDays(1)))
+                {
+                    var oRequested = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    var oRelease = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    var oIssuerRequest = new CertificateRequest("CN=Editor issuer " + Guid.NewGuid().ToString("N"),
+                        oIssuerKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    oIssuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+                    oIssuerRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign,
+                        true));
+                    using (X509Certificate2 oIssuer = oIssuerRequest.CreateSelfSigned(DateTimeOffset.Now.AddDays(-2),
+                        DateTimeOffset.Now.AddDays(2)))
+                    {
+                        byte[] oIssuerData = oIssuer.RawData;
+                        var oServer = Task.Run(async () =>
+                        {
+                            using (var oClient = await oListener.AcceptTcpClientAsync(oCancellation.Token))
+                            using (var oStream = oClient.GetStream())
+                            {
+                                int nRead = await oStream.ReadAsync(new byte[8192], oCancellation.Token);
+                                if (nRead == 0) throw new IOException("The issuer request ended before its headers.");
+                                oRequested.SetResult(true);
+                                await oRelease.Task;
+                                byte[] oHeader = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n" +
+                                    "Content-Type: application/pkix-cert\r\nContent-Length: " + oIssuerData.Length +
+                                    "\r\nConnection: close\r\n\r\n");
+                                await oStream.WriteAsync(oHeader, oCancellation.Token);
+                                await oStream.WriteAsync(oIssuerData, oCancellation.Token);
+                            }
+                        });
+                        try
+                        {
+                            // Hold a real issuer download until dispatcher responsiveness has been observed.
+                            string sUrl = "http://127.0.0.1:" +
+                                ((IPEndPoint)oListener.LocalEndpoint).Port + "/issuer.cer";
+                            AsnWriter oAia = new AsnWriter(AsnEncodingRules.DER);
+                            oAia.PushSequence();
+                            oAia.PushSequence();
+                            oAia.WriteObjectIdentifier("1.3.6.1.5.5.7.48.2");
+                            oAia.WriteCharacterString(UniversalTagNumber.IA5String, sUrl,
+                                new Asn1Tag(TagClass.ContextSpecific, 6));
+                            oAia.PopSequence();
+                            oAia.PopSequence();
+                            var oLeafRequest = new CertificateRequest("CN=Slow editor " + sScenario, oLeafKey,
+                                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                            oLeafRequest.CertificateExtensions.Add(new X509KeyUsageExtension(
+                                X509KeyUsageFlags.KeyEncipherment, true));
+                            oLeafRequest.CertificateExtensions.Add(new X509Extension("1.3.6.1.5.5.7.1.1",
+                                oAia.Encode(), false));
+                            using (X509Certificate2 oPublic = oLeafRequest.Create(oIssuer,
+                                DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1),
+                                RandomNumberGenerator.GetBytes(16)))
+                            using (X509Certificate2 oLeaf = oPublic.CopyWithPrivateKey(oLeafKey))
+                            {
+                                string sPath = Path.Combine(sDirectory, "editor-" + sScenario + ".cryptdb");
+                                DatabaseOperations.CreateDatabase(sPath,
+                                    File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
+                                CryptureEntities.DatabasePath = sPath;
+                                User oUser = new User { Certificate = sScenario == "save" ? oWarm.RawData : oLeaf.RawData };
+                                using (CryptureEntities oContext = new CryptureEntities())
+                                {
+                                    oContext.Users.Add(oUser);
+                                    oContext.SaveChanges();
+                                }
+                                Item oStored = null;
+                                if (sScenario == "existing")
+                                {
+                                    DatabaseOperations.SaveItem(
+                                        new Item { Label = "Windows editor", ItemType = "text" },
+                                        Encoding.Unicode.GetBytes("Stored Windows content"), null,
+                                        PrincipalProtection.LocalUserDescriptor);
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                        oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                                }
+                                var oWatch = Stopwatch.StartNew();
+                                oEditor = oStored == null ? new ItemEditor() : new ItemEditor(oStored);
+                                Check(oWatch.Elapsed < TimeSpan.FromSeconds(3),
+                                    sScenario + " editor construction does not wait for certificate network lookups");
+                                oEditor.SetEditingControls(true);
+                                var oMode = (ComboBox)oEditor.FindName("oProtectionMode");
+                                var oSave = (RibbonButton)oEditor.FindName("oSaveItemButton");
+                                var oShare = (RibbonMenuButton)oEditor.FindName(
+                                    "oAddCertDropDown");
+                                if (sScenario == "save")
+                                {
+                                    PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
+                                    oEditor.CertificateLoading.GetAwaiter().GetResult();
+                                    oEditor.UserList.Single().Certificate = oLeaf.RawData;
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                    {
+                                        oContext.Users.Find(oUser.UserId).Certificate = oLeaf.RawData;
+                                        oContext.SaveChanges();
+                                    }
+                                    oEditor.UserListSelected.Add(oEditor.UserList.Single());
+                                    oMode.SelectedIndex = 1;
+                                    ((TextBox)oEditor.FindName("oItemData")).Text = "Saved content";
+                                    var oSaveEvent = oEditor.Dispatcher.InvokeAsync(() =>
+                                    {
+                                        oWatch.Restart();
+                                        typeof(ItemEditor).GetMethod("oSaveItemButton_Click",
+                                            BindingFlags.Instance | BindingFlags.NonPublic)
+                                            .Invoke(oEditor, new object[] { null, null });
+                                        Check(oWatch.Elapsed < TimeSpan.FromSeconds(3),
+                                            "Saving returns control while recipient validation downloads an issuer");
+                                    });
+                                    PumpUntil(() => oSaveEvent.Task.IsCompleted);
+                                    oSaveEvent.Task.GetAwaiter().GetResult();
+                                }
+                                else
+                                {
+                                    Check(oSave.IsEnabled, "Windows saving remains available while certificates load");
+                                    oMode.SelectedIndex = 1;
+                                    Check(!oSave.IsEnabled && !oShare.IsEnabled,
+                                        "Certificate saving and selection wait for completed background validation");
+                                }
+                                PumpUntil(() => oRequested.Task.IsCompleted);
+                                bool bDispatched = false;
+                                oEditor.Dispatcher.BeginInvoke(new Action(() => bDispatched = true));
+                                PumpUntil(() => bDispatched);
+                                Check(!oRelease.Task.IsCompleted,
+                                    sScenario + " dispatcher runs while a certificate issuer response is pending");
+                                if (sScenario == "close")
+                                {
+                                    typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance |
+                                        BindingFlags.NonPublic).SetValue(oEditor, false);
+                                    oEditor.Close();
+                                }
+                                oRelease.SetResult(true);
+                                if (sScenario == "save")
+                                {
+                                    PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted",
+                                        BindingFlags.Instance | BindingFlags.NonPublic)
+                                        .GetValue(oEditor));
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                        oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                                    Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
+                                        oStored.Instances.Single(), oLeaf)) == "Saved content",
+                                        "Saving completes after background certificate validation " +
+                                        "and preserves content");
+                                }
+                                else
+                                {
+                                    PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
+                                    oEditor.CertificateLoading.GetAwaiter().GetResult();
+                                    Check(sScenario == "close" ? oShare.Items.Count == 0 :
+                                        oShare.Items.Count == 1 && oShare.IsEnabled && oSave.IsEnabled,
+                                        sScenario + " certificate results respect the editor lifecycle");
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            if (oEditor != null)
+                            {
+                                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance |
+                                    BindingFlags.NonPublic).SetValue(oEditor, false);
+                                oEditor.Close();
+                            }
+                            oRelease.TrySetResult(true);
+                            oCancellation.Cancel();
+                            oListener.Stop();
+                            try { oServer.GetAwaiter().GetResult(); }
+                            catch (OperationCanceledException) { }
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            CryptureEntities.ConnectionString = sPreviousConnection;
+            oSettings.AllowSelfSignedCertificates = bSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bRevocation;
+            oSettings["ShowUntrustedCertificates"] = bUntrusted;
+            oSettings["AutomaticallyAddedCertificatesList"] = oAutomatic;
+        }
+    }
+
     private static X509Certificate2 EccCertificate(CngKey oKey,
         X509KeyUsageFlags oUsage = X509KeyUsageFlags.KeyAgreement)
     {
@@ -615,7 +906,7 @@ internal static partial class RegressionTests
         long nId;
         using (CryptureEntities oContent = new CryptureEntities()) nId = oContent.Items.Single().ItemId;
         Item oStored = DatabaseOperations.LoadItem(nId);
-        Check(oStored.ProtectionDisplay == "Certificates" &&
+        Check(oStored.Cipher.CipherParams == ItemCryptography.CertificateFormat &&
             ItemCryptography.Decrypt(oStored, oStored.Instances.Single(), oCert).SequenceEqual(oPlain),
             sName + " Vault save and reload");
         DatabaseOperations.SaveItem(oStored, oPlain, null, PrincipalProtection.LocalUserDescriptor);

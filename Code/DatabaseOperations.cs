@@ -203,7 +203,8 @@ namespace Crypture
             using (var oTransaction = oContent.Database.BeginTransaction())
             {
                 if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
-                    !i.Instances.Any(j => j.UserId != nUserId)))
+                    !i.Instances.Any(j => j.UserId != nUserId) && (i.Cipher == null ||
+                    i.Cipher.CipherParams != ItemCryptography.RecoveryFormat || i.Cipher.ProtectionDescriptor == null)))
                     throw new InvalidOperationException("This certificate is the only recipient " +
                         "for one or more items. Share those items with another certificate before removing it.");
 

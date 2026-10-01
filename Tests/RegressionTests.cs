@@ -77,8 +77,9 @@ internal static partial class RegressionTests
                 TestCertificates(oKey, oCert);
                 TestCertificateVisibility(oKey);
                 TestCertificateAlgorithms(sDirectory, oCert);
+                TestPersonalCertificateStores();
                 TestCertificateUsageFilters(oKey);
-                TestCompression();
+                TestCompression(sDirectory);
                 TestHealthChecks(sDirectory, oKey, oCert);
                 TestRecovery(sDirectory, oCert, oOtherCert);
                 TestDatabase(sDirectory, oCert, oOtherCert);
@@ -403,7 +404,7 @@ internal static partial class RegressionTests
             "Keep custom symbols disjoint from letters and digits");
     }
 
-    private static void TestCompression()
+    private static void TestCompression(string sDirectory)
     {
         byte[] oInput = Encoding.UTF8.GetBytes("File content with unicode \u2603");
         Check(Utilities.Decompress(Utilities.Compress(oInput)).SequenceEqual(oInput), "File compression round trip");
@@ -416,6 +417,36 @@ internal static partial class RegressionTests
             using (System.IO.Compression.GZipStream oZip = new System.IO.Compression.GZipStream(oMemory,
                 System.IO.Compression.CompressionMode.Compress, true)) oZip.Write(oOversized, 0, oOversized.Length);
             Reject(() => Utilities.Decompress(oMemory.ToArray()), "Bound expanded file size");
+        }
+        foreach (string sType in new[] { "text", "totp" })
+            Reject(() => ItemCryptography.Encrypt(new Item { ItemType = sType }, oOversized, null,
+                PrincipalProtection.LocalUserDescriptor), "Preserve the uncompressed size limit for " + sType);
+        Reject(() => ItemCryptography.Encrypt(new Item { ItemType = ".bin" },
+            new byte[Utilities.MaxCompressedItemSize + 1], null, PrincipalProtection.LocalUserDescriptor),
+            "Bound stored attachment size including compression overhead");
+
+        // Exercise an accepted upload through compression, Vault storage, decryption, and download expansion.
+        string sPreviousConnection = CryptureEntities.ConnectionString;
+        string sPath = Path.Combine(sDirectory, "maximum-attachment.cryptdb");
+        byte[] oFile = RandomNumberGenerator.GetBytes(Utilities.MaxItemSize);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(sDirectory, "maximum-upload.bin"), oFile);
+            byte[] oCompressed = Utilities.Compress(Utilities.ReadFile(Path.Combine(sDirectory, "maximum-upload.bin")));
+            Check(oCompressed.Length > Utilities.MaxItemSize, "An incompressible 64 MiB upload expands during gzip");
+            DatabaseOperations.CreateDatabase(sPath,
+                File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
+            CryptureEntities.DatabasePath = sPath;
+            DatabaseOperations.SaveItem(new Item { Label = "Maximum attachment", ItemType = ".bin" },
+                oCompressed, null, PrincipalProtection.LocalUserDescriptor);
+            long nItemId;
+            using (CryptureEntities oContext = new CryptureEntities()) nItemId = oContext.Items.Single().ItemId;
+            byte[] oDownloaded = Utilities.Decompress(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(nItemId)));
+            Check(oDownloaded.SequenceEqual(oFile), "A 64 MiB incompressible attachment survives a Vault round trip");
+        }
+        finally
+        {
+            CryptureEntities.ConnectionString = sPreviousConnection;
         }
     }
 
@@ -647,6 +678,7 @@ internal static partial class RegressionTests
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestTotpVault(sDirectory);
             TestCertificateUsageConfiguration(oBrowser, oItem);
+            TestEditorCertificateLoading(sDirectory);
         }
         finally
         {

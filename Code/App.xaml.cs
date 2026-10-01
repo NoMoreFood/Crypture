@@ -5,6 +5,7 @@ using System.IO;
 using System.Security;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -33,6 +34,12 @@ namespace Crypture
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
             ApplyThemePreference();
             base.OnStartup(e);
+        }
+
+        private void oImage_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Ribbon templates force nearest-neighbor scaling; override it after the image loads.
+            RenderOptions.SetBitmapScalingMode((Image)sender, BitmapScalingMode.HighQuality);
         }
 
         internal static void CopyProtectedText(string sText)

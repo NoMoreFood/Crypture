@@ -88,21 +88,41 @@ namespace Crypture
                     oCert.Handle, 0, IntPtr.Zero);
         }
 
-        internal static HashSet<string> GetPrivateCertificateData()
+        internal static X509Certificate2Collection GetPersonalCertificates()
         {
-            HashSet<string> oResult = new HashSet<string>();
-            using (X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+            // The caller owns the certificate contexts from both personal stores.
+            X509Certificate2Collection oCertificates = new X509Certificate2Collection();
+            try
             {
-                oStore.Open(OpenFlags.ReadOnly);
-                foreach (X509Certificate2 oCert in oStore.Certificates)
+                foreach (StoreLocation oLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
                 {
-                    using (oCert)
+                    using (X509Store oStore = new X509Store(StoreName.My, oLocation))
                     {
-                        if (oCert.HasPrivateKey) oResult.Add(Convert.ToBase64String(oCert.RawData));
+                        oStore.Open(OpenFlags.ReadOnly);
+                        oCertificates.AddRange(oStore.Certificates);
                     }
                 }
+                return oCertificates;
             }
-            return oResult;
+            catch
+            {
+                foreach (X509Certificate2 oCert in oCertificates) oCert.Dispose();
+                throw;
+            }
+        }
+
+        internal static HashSet<string> GetPrivateCertificateData()
+        {
+            X509Certificate2Collection oCertificates = GetPersonalCertificates();
+            try
+            {
+                return oCertificates.Cast<X509Certificate2>().Where(c => c.HasPrivateKey)
+                    .Select(c => Convert.ToBase64String(c.RawData)).ToHashSet();
+            }
+            finally
+            {
+                foreach (X509Certificate2 oCert in oCertificates) oCert.Dispose();
+            }
         }
 
         internal static List<byte[]> GetAutomaticCertificates()
