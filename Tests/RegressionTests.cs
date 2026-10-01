@@ -1,8 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Configuration;
-using System.Xml;
-using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using System.IO;
@@ -13,8 +9,6 @@ using System.Text;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -54,6 +48,8 @@ internal static partial class RegressionTests
     [STAThread]
     private static int Main()
     {
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ROLE") is string sRole)
+            return RunConcurrencyWorker(sRole);
         string sDirectory = Path.Combine(Path.GetTempPath(), "Crypture.Tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(sDirectory);
         try
@@ -70,11 +66,16 @@ internal static partial class RegressionTests
             using (X509Certificate2 oOtherCert = Certificate(oOtherKey, "Other", DateTimeOffset.Now.AddDays(-1),
                 DateTimeOffset.Now.AddDays(1)))
             {
+                TestConcurrentDatabase(sDirectory, oCert, oOtherCert);
+                if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ONLY") == "1") return 0;
                 TestEncryption(oCert, oOtherCert);
                 TestTotpAlgorithms(oCert);
                 TestPrincipalProtection();
                 TestPasswordGeneration();
+                TestClipboardTimeout();
+                TestDirectoryResolution();
                 TestCertificates(oKey, oCert);
+                TestCertificateVisibility(oKey);
                 TestCertificateAlgorithms(sDirectory, oCert);
                 TestCertificateUsageFilters(oKey);
                 TestCompression();
@@ -602,8 +603,7 @@ internal static partial class RegressionTests
             "Certificate conversion removes previous Windows policy and wrapped keys");
         Check(ItemCryptography.Decrypt(oConverted, oConverted.Instances.Single(), oCert).SequenceEqual(oPlainText),
             "Converted certificate item remains readable");
-        DatabaseOperations.SavePasswordOptions(new PasswordOptions());
-        TestWindows(oConverted, sDirectory);
+        TestVaultIntegration(oConverted, sDirectory);
 
         string sMissing = Path.Combine(sDirectory, "missing.cryptdb");
         CryptureEntities.DatabasePath = sMissing;
@@ -612,297 +612,53 @@ internal static partial class RegressionTests
         Check(!File.Exists(sMissing), "Opening a missing path does not create a Vault");
     }
 
-    private static void TestWindows(Item oItem, string sDirectory)
+    private static void TestVaultIntegration(Item oItem, string sDirectory)
     {
         Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         oApplication.Resources = new ResourceDictionary
         {
             Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
         };
-        App.ApplyTheme(false);
-        TestClipboardTimeout();
-        TestDirectoryPicker();
-        ItemEditor oEditor = new ItemEditor(oItem);
-        Check(!((System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton")).IsEnabled,
-            "Password insertion is disabled for locked items");
-        TextBox oContent = (TextBox)oEditor.FindName("oItemData");
-        TextBox oLabel = (TextBox)oEditor.FindName("oItemLabel");
-        Check(oLabel.IsReadOnly && !oContent.IsEnabled, "Existing editor starts locked");
-        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oContent) &&
-            System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oLabel),
-            "Locked editors allow label copying without exposing content");
-        oEditor.SetEditingControls(true);
-        if (!PrincipalProtection.IsDomainJoined)
-        {
-            ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = 0;
-            Check(((ComboBox)oEditor.FindName("oPrincipalScope")).SelectedIndex == 1,
-                "Converting a certificate item on a standalone computer defaults to the local profile");
-            ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = 1;
-        }
-        oContent.Text = "Sensitive text shown only in the test editor";
-        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oContent),
-            "Unlocked text can be copied without first selecting it");
-        Check((bool)typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oEditor), "Track edits to decrypted content");
-        typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-            .SetValue(oEditor, false);
-        oEditor.BinaryItemData = new byte[] { 1, 2, 3, 4 };
-        byte[] oBuffer = oEditor.BinaryItemData;
-        CryptureEntities.DatabasePath = Path.Combine(sDirectory, "offline.cryptdb");
-        typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oEditor, new object[] { null, null });
-        Check(oContent.Text.Length == 0 && oEditor.BinaryItemData == null && oBuffer.All(b => b == 0),
-            "Lock clears text and binary buffers while Vault is unavailable");
-        Check(oLabel.IsReadOnly && !oContent.IsEnabled, "Lock restores protected editor state");
-        RenderWindow(oEditor, "editor-locked.png");
-        oEditor.Close();
-
-        TestCertificateWizard();
-
-        ItemBrowser oBrowser = new ItemBrowser();
         string sDatabase = Path.Combine(sDirectory, "Vault ; \u00e9.cryptdb");
-        typeof(ItemBrowser).GetMethod("LoadDatabase", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oBrowser, new object[] { sDatabase, true });
-        DataGrid oGrid = (DataGrid)oBrowser.FindName("oItemDataGrid");
-        TextBox oSearch = (TextBox)oBrowser.FindName("oSearchTextBox");
-        Check(oGrid.Items.Count == 1, "Browser loads persisted items");
-        oSearch.Text = "not present";
-        Check(oGrid.Items.Count == 0, "Search hides nonmatching items");
-        oSearch.Text = "UPDATED";
-        Check(oGrid.Items.Count == 1, "Search matches labels without case sensitivity");
-        oSearch.Clear();
-        ItemEditor oNewEditor = new ItemEditor();
-        Check(((ComboBox)oNewEditor.FindName("oProtectionMode")).SelectedIndex == 0,
-            "New items default to Windows protection");
-        if (!PrincipalProtection.IsDomainJoined)
-            Check(((ComboBox)oNewEditor.FindName("oPrincipalScope")).SelectedIndex == 1 &&
-                !((ComboBoxItem)oNewEditor.FindName("oDomainScope")).IsEnabled &&
-                ((TextBlock)oNewEditor.FindName("oDomainNotice")).Visibility == Visibility.Visible,
-                "Standalone editor defaults to local profile and explains disabled domain sharing");
-        RenderWindow(oNewEditor, "editor-local-profile.png");
-        ((ComboBox)oNewEditor.FindName("oPrincipalScope")).SelectedIndex = 0;
-        ListBox oPrincipals = (ListBox)oNewEditor.FindName("oPrincipalList");
-        int nPrincipals = oPrincipals.Items.Count;
-        typeof(ItemEditor).GetMethod("oAddCurrentPrincipal_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oNewEditor, new object[] { null, null });
-        Check(oPrincipals.Items.Count == nPrincipals, "Add Me does not duplicate a recipient");
-        Check(((FrameworkElement)oNewEditor.FindName("oCertificatePanel")).Visibility == Visibility.Collapsed,
-            "Windows protection shows principal controls instead of certificate controls");
-        ((TextBox)oNewEditor.FindName("oItemLabel")).Text = "Windows example";
-        ((TextBox)oNewEditor.FindName("oItemData")).Text = "Protected with a Windows access policy.";
-        RenderWindow(oNewEditor, "editor-principals.png");
-        ((ComboBox)oNewEditor.FindName("oPrincipalScope")).SelectedIndex = 1;
-        System.Threading.SynchronizationContext.SetSynchronizationContext(
-            new System.Windows.Threading.DispatcherSynchronizationContext());
-        typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oNewEditor, new object[] { null, null });
-        PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oNewEditor));
-        Check(true, "Save a new DPAPI item from the editor without a certificate");
-        Item oWindowsItem;
-        using (CryptureEntities oContext = new CryptureEntities())
-            oWindowsItem = oContext.Items.Single(i => i.Label == "Windows example");
-        ItemEditor oWindowsEditor = new ItemEditor(oWindowsItem);
-        Check(((ComboBox)oWindowsEditor.FindName("oProtectionMode")).SelectedIndex == 0 &&
-            ((ComboBox)oWindowsEditor.FindName("oPrincipalScope")).SelectedIndex == 1 &&
-            !((ComboBox)oWindowsEditor.FindName("oProtectionMode")).IsEnabled,
-            "Reopen DPAPI item with its original policy locked");
-        typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oWindowsEditor, new object[] { null, null });
-        PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oWindowsEditor));
-        Check(((TextBox)oWindowsEditor.FindName("oItemData")).Text == "Protected with a Windows access policy.",
-            "Decrypt through the Windows editor flow without certificate selection");
-        ((ComboBox)oWindowsEditor.FindName("oProtectionMode")).SelectedIndex = 1;
-        typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-            .SetValue(oWindowsEditor, false);
-        typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oWindowsEditor, new object[] { null, null });
-        Check(((ComboBox)oWindowsEditor.FindName("oProtectionMode")).SelectedIndex == 0 &&
-            ((TextBox)oWindowsEditor.FindName("oItemData")).Text == "",
-            "Lock restores the saved protection mode and clears DPAPI plaintext");
-        RenderWindow(oWindowsEditor, "editor-windows-locked.png");
-        oWindowsEditor.Close();
-
-        ItemEditor oMachineEditor = new ItemEditor(oWindowsItem);
-        typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oMachineEditor, new object[] { null, null });
-        PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oMachineEditor));
-        ((ComboBox)oMachineEditor.FindName("oPrincipalScope")).SelectedIndex = 2;
-        Check(((FrameworkElement)oMachineEditor.FindName("oPrincipalTargets")).Visibility == Visibility.Collapsed &&
-            ((TextBlock)oMachineEditor.FindName("oPrincipalHint")).Text.Contains("Every user on the computer"),
-            "Computer scope hides selected recipients and clearly states access for every local user");
-        RenderWindow(oMachineEditor, "editor-local-computer.png");
-        typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oMachineEditor, new object[] { null, null });
-        PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oMachineEditor));
-        Item oMachineItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
-        Check(oMachineItem.Cipher.ProtectionDescriptor == PrincipalProtection.LocalMachineDescriptor &&
-            Encoding.Unicode.GetString(ItemCryptography.Decrypt(oMachineItem)) ==
-                "Protected with a Windows access policy.",
-            "Explicit computer scope survives editor save and Vault reload");
-        ItemEditor oMachineReloaded = new ItemEditor(oMachineItem);
-        Check(((ComboBox)oMachineReloaded.FindName("oPrincipalScope")).SelectedIndex == 2 &&
-            !((ComboBox)oMachineReloaded.FindName("oPrincipalScope")).IsEnabled,
-            "Reopened computer-protected item displays its saved scope while locked");
-        typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oMachineReloaded, new object[] { null, null });
-        PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oMachineReloaded));
-        Check(((TextBox)oMachineReloaded.FindName("oItemData")).Text == "Protected with a Windows access policy.",
-            "Decrypt computer-protected content through the editor");
-        ((ComboBox)oMachineReloaded.FindName("oPrincipalScope")).SelectedIndex = 1;
-        typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-            .SetValue(oMachineReloaded, false);
-        typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oMachineReloaded, new object[] { null, null });
-        Check(((ComboBox)oMachineReloaded.FindName("oPrincipalScope")).SelectedIndex == 2,
-            "Lock restores the saved computer scope instead of changing recipients");
-        oMachineReloaded.Close();
-        typeof(ItemBrowser).GetMethod("RefreshData", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oBrowser, null);
-        Check(oGrid.Items.Count == 2, "Browser displays mixed protection models");
-        oSearch.Text = "DPAPI";
-        Check(oGrid.Items.Count == 1, "Search includes protection model");
-        oSearch.Clear();
-        CheckBox oHide = (CheckBox)oBrowser.FindName("oHideAccessible");
-        oHide.IsChecked = true;
-        typeof(ItemBrowser).GetMethod("ApplyFilter", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oBrowser, null);
-        Check(oGrid.Items.Count == 1 && ((Item)oGrid.Items[0]).Label == "Windows example",
-            "Certificate availability filtering keeps Windows-protected items visible");
-        oHide.IsChecked = false;
-        typeof(ItemBrowser).GetMethod("ApplyFilter", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oBrowser, null);
-        TestPasswordGeneratorWindow();
-        RenderWindow(oBrowser, "item-browser.png");
-        TestAppearance(oBrowser);
-        TestSecretFonts(oBrowser);
-        TestTotpWindow(oBrowser);
-        TestProtectionConfiguration(sDatabase, oItem, oWindowsItem);
-        TestCertificateUsageConfiguration(oBrowser, oItem);
-        TestRecoveryEditor(sDirectory);
-        TestHealthCheckWindow(sDirectory, oBrowser);
-        oBrowser.Closing -= (System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(
-            typeof(System.ComponentModel.CancelEventHandler), oBrowser, "oItemBrowser_Closing");
-        oBrowser.Close();
-        oApplication.Shutdown();
-    }
-
-    private static void TestProtectionConfiguration(string sDatabase, Item oCertificateItem, Item oWindowsItem)
-    {
-        const string sSection = "applicationSettings/Crypture.Properties.Settings";
-        string sConfigPath = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).FilePath;
-        byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
-        var oSettings = Crypture.Properties.Settings.Default;
-        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
-        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
-        string sTheme = oSettings.ThemeMode;
-        Check((string)oSettings.Properties["EnableDpapiNgProtection"].DefaultValue == "True" &&
-            (string)oSettings.Properties["EnableCertificateProtection"].DefaultValue == "True",
-            "Both UI protection methods default to enabled without an adjacent config");
+        ItemEditor oEditor = null;
+        ItemBrowser oBrowser = null;
         try
         {
-            foreach (var (bWindows, bCertificates) in new[] { (true, true), (true, false), (false, true), (false, false) })
-            {
-                // Reload actual configuration so the UI tests cover the deployed setting names and values.
-                XmlDocument oConfig = new XmlDocument { PreserveWhitespace = true };
-                oConfig.LoadXml(Encoding.UTF8.GetString(oOriginalConfig).TrimStart('\uFEFF'));
-                oConfig.SelectSingleNode("//setting[@name='EnableDpapiNgProtection']/value").InnerText =
-                    bWindows.ToString();
-                oConfig.SelectSingleNode("//setting[@name='EnableCertificateProtection']/value").InnerText =
-                    bCertificates.ToString();
-                File.WriteAllText(sConfigPath, oConfig.OuterXml, new UTF8Encoding(false));
-                ConfigurationManager.RefreshSection(sSection);
-                oSettings.Reload();
-                oSettings.AllowSelfSignedCertificates = bSelfSigned;
-                oSettings.PerformCertificateRevocationCheck = bRevocation;
-                oSettings.ThemeMode = sTheme;
-                string sCase = " (DPAPI-NG=" + bWindows + ", Certificates=" + bCertificates + ")";
-                Check(oSettings.EnableDpapiNgProtection == bWindows &&
-                    oSettings.EnableCertificateProtection == bCertificates, "Read UI switches from config" + sCase);
+            // Locking must clear secrets even when the Vault cannot be opened.
+            oEditor = new ItemEditor(oItem);
+            oEditor.SetEditingControls(true);
+            TextBox oContent = (TextBox)oEditor.FindName("oItemData");
+            oContent.Text = "Sensitive text shown only in the test editor";
+            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(oEditor, false);
+            oEditor.BinaryItemData = new byte[] { 1, 2, 3, 4 };
+            byte[] oBuffer = oEditor.BinaryItemData;
+            CryptureEntities.DatabasePath = Path.Combine(sDirectory, "offline.cryptdb");
+            typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(oEditor, new object[] { null, null });
+            Check(oContent.Text.Length == 0 && oEditor.BinaryItemData == null && oBuffer.All(b => b == 0),
+                "Lock clears text and binary buffers while Vault is unavailable");
+            oEditor.Close();
+            oEditor = null;
+            CryptureEntities.DatabasePath = sDatabase;
 
-                ItemBrowser oBrowser = new ItemBrowser();
-                typeof(ItemBrowser).GetMethod("LoadDatabase", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .Invoke(oBrowser, new object[] { sDatabase, true });
-                Check(((FrameworkElement)oBrowser.FindName("oCertificatesTab")).Visibility ==
-                    (bCertificates ? Visibility.Visible : Visibility.Collapsed) &&
-                    ((FrameworkElement)oBrowser.FindName("oCertificateToolsGroupBox")).Visibility ==
-                    (bCertificates && oSettings.ShowCertificateTools ? Visibility.Visible : Visibility.Collapsed),
-                    "Certificate navigation and generator follow the UI switch" + sCase);
-                Check(((System.Windows.Controls.Ribbon.RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled ==
-                    (bWindows || bCertificates), "New items require an enabled protection method" + sCase);
-                oBrowser.Closing -= (System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(
-                    typeof(System.ComponentModel.CancelEventHandler), oBrowser, "oItemBrowser_Closing");
-                oBrowser.Close();
-
-                ItemEditor oNew = new ItemEditor();
-                ComboBox oMode = (ComboBox)oNew.FindName("oProtectionMode");
-                Check(oMode.SelectedIndex == (bWindows ? 0 : bCertificates ? 1 : -1) &&
-                    ((System.Windows.Controls.Ribbon.RibbonButton)oNew.FindName("oSaveItemButton")).IsEnabled ==
-                    (bWindows || bCertificates), "New editor defaults to an available protection method" + sCase);
-                Check(((ComboBoxItem)oNew.FindName("oDpapiNgProtection")).Visibility ==
-                    (bWindows ? Visibility.Visible : Visibility.Collapsed) &&
-                    ((ComboBoxItem)oNew.FindName("oCertificateProtection")).Visibility ==
-                    (bCertificates ? Visibility.Visible : Visibility.Collapsed),
-                    "Disabled modes are absent from the protection selector" + sCase);
-                if (!bWindows || !bCertificates)
-                {
-                    oMode.SelectedIndex = !bWindows ? 0 : 1;
-                    typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                        .Invoke(oNew, new object[] { null, null });
-                    Check(!((System.Windows.Controls.Ribbon.RibbonButton)oNew.FindName("oSaveItemButton")).IsEnabled &&
-                        oNew.ThisItem.ItemId == 0, "Disabled protection cannot be saved through the UI" + sCase);
-                }
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oNew, false);
-                oNew.Close();
-
-                ItemEditor oExisting = new ItemEditor(oWindowsItem);
-                Check(((ComboBox)oExisting.FindName("oProtectionMode")).SelectedIndex == 0 &&
-                    ((System.Windows.Controls.Ribbon.RibbonButton)oExisting.FindName("oLoadItemButton")).IsEnabled,
-                    "Existing Windows items retain their stored mode and can be decrypted" + sCase);
-                typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .Invoke(oExisting, new object[] { null, null });
-                PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .GetValue(oExisting));
-                Check(((TextBox)oExisting.FindName("oItemData")).Text == "Protected with a Windows access policy." &&
-                    ((TextBox)oExisting.FindName("oItemData")).IsEnabled &&
-                    ((System.Windows.Controls.Ribbon.RibbonButton)oExisting.FindName("oSaveItemButton")).IsEnabled ==
-                    bWindows, "Disabling Windows protection preserves decrypted content and blocks its save" + sCase);
-                if (!bWindows && bCertificates)
-                {
-                    ((ComboBox)oExisting.FindName("oProtectionMode")).SelectedIndex = 1;
-                    Check(((System.Windows.Controls.Ribbon.RibbonButton)oExisting.FindName("oSaveItemButton")).IsEnabled,
-                        "Unlocked disabled items can explicitly select an enabled protection method");
-                }
-                RenderWindow(oExisting, "editor-ui-policy-" + bWindows + "-" + bCertificates + ".png");
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oExisting, false);
-                oExisting.Close();
-
-                ItemEditor oCertificate = new ItemEditor(oCertificateItem);
-                Check(((ComboBox)oCertificate.FindName("oProtectionMode")).SelectedIndex == 1 &&
-                    ((System.Windows.Controls.Ribbon.RibbonButton)oCertificate.FindName("oLoadItemButton")).IsEnabled,
-                    "Existing certificate items keep their mode and decryption access" + sCase);
-                oCertificate.SetEditingControls(true);
-                Check(((System.Windows.Controls.Ribbon.RibbonButton)oCertificate.FindName("oSaveItemButton")).IsEnabled ==
-                    bCertificates && ((FrameworkElement)oCertificate.FindName("oCertificateSharingGroup")).Visibility ==
-                    (bCertificates ? Visibility.Visible : Visibility.Collapsed),
-                    "Certificate saving and sharing follow the UI switch" + sCase);
-                oCertificate.Close();
-            }
+            // Keep persistence and security assertions independently of menu and dialog presentation.
+            oBrowser = new ItemBrowser();
+            TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
+            TestTotpVault(sDirectory);
+            TestCertificateUsageConfiguration(oBrowser, oItem);
         }
         finally
         {
-            File.WriteAllBytes(sConfigPath, oOriginalConfig);
-            ConfigurationManager.RefreshSection(sSection);
-            oSettings.Reload();
-            oSettings.AllowSelfSignedCertificates = bSelfSigned;
-            oSettings.PerformCertificateRevocationCheck = bRevocation;
-            oSettings.ThemeMode = sTheme;
+            oEditor?.Close();
+            if (oBrowser != null)
+            {
+                oBrowser.Closing -= (System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(
+                    typeof(System.ComponentModel.CancelEventHandler), oBrowser, "oItemBrowser_Closing");
+                oBrowser.Close();
+            }
+            oApplication.Shutdown();
+            CryptureEntities.DatabasePath = sDatabase;
         }
     }
 
@@ -985,444 +741,6 @@ internal static partial class RegressionTests
             nCurrent++;
         }
         Check(nClears == 4, "Application exit preserves content copied afterward");
-
-        string sCopied = null;
-        bool bCopySucceeded = true;
-        TextBox oText = new TextBox { Text = "prefix secret suffix" };
-        Utilities.EnableClipboardTimeout(oText, sText =>
-        {
-            sCopied = sText;
-            return bCopySucceeded;
-        });
-        oText.Select(7, 6);
-        System.Windows.Input.ApplicationCommands.Copy.Execute(null, oText);
-        Check(sCopied == "secret" && oText.Text == "prefix secret suffix",
-            "Copy commands route only the selected protected text through clipboard protection");
-        System.Windows.Input.ApplicationCommands.Cut.Execute(null, oText);
-        Check(sCopied == "secret" && oText.Text == "prefix  suffix",
-            "Cut commands use clipboard protection and then remove the selection");
-        oText.Text = "keep this";
-        oText.SelectAll();
-        bCopySucceeded = false;
-        System.Windows.Input.ApplicationCommands.Cut.Execute(null, oText);
-        Check(oText.Text == "keep this", "Failed clipboard writes never delete cut text");
-        oText.IsReadOnly = true;
-        Check(!System.Windows.Input.ApplicationCommands.Cut.CanExecute(null, oText) &&
-            System.Windows.Input.ApplicationCommands.Copy.CanExecute(null, oText),
-            "Read-only generated passwords allow Copy but prevent Cut");
-        oText.Select(0, 0);
-        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute(null, oText),
-            "Protected Copy is disabled when there is no selection");
-
-        // Icon copies include the complete field without changing text or selection.
-        bCopySucceeded = true;
-        oText.Select(5, 4);
-        System.Windows.Input.ApplicationCommands.Copy.Execute("All", oText);
-        Check(sCopied == "keep this" && oText.Text == "keep this" && oText.SelectionLength == 4,
-            "Copy icons copy the whole field even when only part is selected");
-        oText.Select(0, 0);
-        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oText),
-            "Read-only fields can be copied without a selection");
-        oText.IsEnabled = false;
-        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oText),
-            "Disabled fields cannot be copied with an icon");
-        oText.IsEnabled = true;
-        oText.Clear();
-        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oText),
-            "Empty fields cannot overwrite the clipboard");
-        Button oCopy = new Button { Tag = "S-1-1-0", Style =
-            (Style)Application.Current.Resources["Crypture.CopyValueButton"] };
-        Func<string, bool> oCapture = s => { sCopied = s; return true; };
-        Check(Utilities.CopyButtonValue(oCopy, oCapture) && sCopied == "S-1-1-0",
-            "Security identifier icons copy the complete identifier");
-        using (RSA oKey = RSA.Create(2048))
-        using (X509Certificate2 oCertificate = Certificate(oKey, "Clipboard", DateTimeOffset.Now.AddDays(-1),
-            DateTimeOffset.Now.AddDays(1)))
-        {
-            oCopy.Tag = oCertificate.RawData;
-            Check(Utilities.CopyButtonValue(oCopy, oCapture) &&
-                Convert.FromBase64String(sCopied).SequenceEqual(oCertificate.RawData),
-                "Public certificate icons preserve the complete DER bytes in Base64");
-            using (X509Certificate2 oCopied = X509CertificateLoader.LoadCertificate(Convert.FromBase64String(sCopied)))
-                Check(!oCopied.HasPrivateKey && oCopied.Thumbprint == oCertificate.Thumbprint,
-                    "Certificate copies preserve certificate identity without exporting a private key");
-        }
-        oCopy.Tag = "";
-        sCopied = "unchanged";
-        Check(!oCopy.IsEnabled && !Utilities.CopyButtonValue(oCopy, oCapture) && sCopied == "unchanged",
-            "Missing security identifiers disable their copy icons and preserve the clipboard");
-        oCopy.Tag = "S-1-1-0";
-        oCopy.IsEnabled = false;
-        Check(!Utilities.CopyButtonValue(oCopy, oCapture) && sCopied == "unchanged",
-            "Disabled value icons do not copy stale data");
-    }
-
-    private static void TestAppearance(ItemBrowser oBrowser)
-    {
-        string sOriginal = Crypture.Properties.Settings.Default.ThemeMode;
-        ItemEditor oEditor = new ItemEditor();
-        TextBox oContent = (TextBox)oEditor.FindName("oItemData");
-        oContent.Text = "An unsaved edit survives changing the appearance.";
-        oContent.Select(3, 7);
-        ShowTestWindow(oEditor);
-        Button oCopyContent = (Button)oEditor.FindName("oCopyContentButton");
-        PumpUntil(() => oCopyContent.IsEnabled);
-        oContent.Clear();
-        PumpUntil(() => !oCopyContent.IsEnabled);
-        Check(!oCopyContent.IsEnabled, "Clearing item text automatically disables its copy icon");
-        oContent.Text = "An unsaved edit survives changing the appearance.";
-        oContent.Select(3, 7);
-        PumpUntil(() => oCopyContent.IsEnabled);
-        ComboBox oTheme = (ComboBox)oBrowser.FindName("oThemeComboBox");
-        MethodInfo oPreferenceChanged = typeof(App).GetMethod("OnUserPreferenceChanged",
-            BindingFlags.Static | BindingFlags.NonPublic);
-        Action oNotifyPreferenceChanged = () =>
-        {
-            Task oNotification = Task.Run(() => oPreferenceChanged.Invoke(null, new object[] { null,
-                new Microsoft.Win32.UserPreferenceChangedEventArgs(Microsoft.Win32.UserPreferenceCategory.General) }));
-            PumpUntil(() => oNotification.IsCompleted);
-            oNotification.GetAwaiter().GetResult();
-            Application.Current.Dispatcher.Invoke(new Action(() => { }),
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-        };
-        try
-        {
-            ShowTestWindow(oBrowser);
-            oBrowser.Dispatcher.Invoke(new Action(() => { }),
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-            ((System.Windows.Controls.Ribbon.RibbonTab)oBrowser.FindName("oAdvancedTab")).IsSelected = true;
-            ((System.Windows.Controls.Ribbon.RibbonTab)oBrowser.FindName("oViewTab")).IsSelected = true;
-            Check(((DataGrid)oBrowser.FindName("oItemDataGrid")).Visibility == Visibility.Visible,
-                "View tab restores the item list after Advanced");
-            PumpUntil(() => oTheme.IsLoaded);
-            Check((string)Crypture.Properties.Settings.Default.Properties["ThemeMode"].DefaultValue == "System",
-                "The default appearance follows Windows");
-            oTheme.SelectedIndex = 1;
-            oTheme.SelectedIndex = 2;
-            Crypture.Properties.Settings oSaved = new Crypture.Properties.Settings();
-            oSaved.Reload();
-            Check(App.IsDarkMode && oSaved.ThemeMode == "Dark",
-                "Dark theme applies immediately and persists outside the Vault");
-            oNotifyPreferenceChanged();
-            Check(App.IsDarkMode && (string)oTheme.SelectedValue == "Dark",
-                "Windows preference notifications preserve the explicit Dark selection");
-            Check(((SolidColorBrush)((System.Windows.Controls.Ribbon.Ribbon)oBrowser.FindName("ribbon")).Background).Color ==
-                    Color.FromRgb(37, 37, 38), "Existing ribbon controls update to the dark palette");
-            Check(((SolidColorBrush)oBrowser.Background).Color == Color.FromRgb(30, 30, 30) &&
-                ((SolidColorBrush)oEditor.Background).Color == Color.FromRgb(30, 30, 30) &&
-                ((SolidColorBrush)oContent.Foreground).Color == Color.FromRgb(241, 241, 241),
-                "Dark colors update both the browser and an already open editor");
-            Check(oContent.Text == "An unsaved edit survives changing the appearance." &&
-                oContent.SelectionStart == 3 && oContent.SelectionLength == 7,
-                "Theme switching preserves unsaved text and selection");
-            var oRibbon = (System.Windows.Controls.Ribbon.Ribbon)oBrowser.FindName("ribbon");
-            var oHome = (System.Windows.Controls.Ribbon.RibbonTab)oBrowser.FindName("ribbonTabHome");
-            oHome.IsSelected = true;
-            oBrowser.UpdateLayout();
-            Check(((System.Windows.Controls.Ribbon.RibbonButton)oBrowser.FindName("oAddItemButton"))
-                .ControlSizeDefinition.ImageSize == System.Windows.Controls.Ribbon.RibbonImageSize.Large &&
-                ((System.Windows.Controls.Ribbon.RibbonButton)oBrowser.FindName("oViewItemButton"))
-                .ControlSizeDefinition.ImageSize == System.Windows.Controls.Ribbon.RibbonImageSize.Small,
-                "Native ribbon keeps Add New Item large and View small");
-            var oHeaders = (System.Windows.Controls.Ribbon.RibbonTabHeaderItemsControl)
-                oRibbon.Template.FindName("TabHeaderItemsControl", oRibbon);
-            Check(oHeaders.Items.Count == 4 && oHeaders.ActualHeight >= 28 && oHeaders.ActualWidth > 200,
-                "Native ribbon displays all navigation tabs");
-            RenderWindow(oBrowser, "browser-home-dark.png");
-            oRibbon.IsMinimized = true;
-            oRibbon.IsDropDownOpen = true;
-            oBrowser.UpdateLayout();
-            var oRibbonPopup = (System.Windows.Controls.Primitives.Popup)
-                oRibbon.Template.FindName("PART_ITEMSPRESENTERPOPUP", oRibbon);
-            Check(oRibbonPopup.IsOpen && oRibbonPopup.Child != null,
-                "Minimized native ribbon opens the selected tab actions");
-            oRibbon.IsDropDownOpen = false;
-            oRibbon.IsMinimized = false;
-            ((System.Windows.Controls.Ribbon.RibbonTab)oBrowser.FindName("oCertificatesTab")).IsSelected = true;
-            RenderWindow(oBrowser, "browser-certificates-dark.png");
-            DataGrid oCertificateGrid = (DataGrid)oBrowser.FindName("oCertDataGrid");
-            User oClipboardUser = (User)oCertificateGrid.Items[0];
-            Check(Equals(oCertificateGrid.Columns[0].OnCopyingCellClipboardContent(oClipboardUser),
-                oClipboardUser.Name) && Equals(oCertificateGrid.Columns[2].OnCopyingCellClipboardContent(oClipboardUser),
-                oClipboardUser.Sid), "Copying certificate rows retains subject names and security identifiers");
-            ((System.Windows.Controls.Ribbon.RibbonTab)oBrowser.FindName("oViewTab")).IsSelected = true;
-            RenderWindow(oBrowser, "browser-dark.png");
-            RenderWindow(oEditor, "editor-dark.png");
-            ComboBox oScope = (ComboBox)oEditor.FindName("oPrincipalScope");
-            oScope.IsDropDownOpen = true;
-            oScope.UpdateLayout();
-            var oScopePopup = (System.Windows.Controls.Primitives.Popup)oScope.Template.FindName("PART_Popup", oScope);
-            Check(oScopePopup.IsOpen && ((SolidColorBrush)((Border)oScopePopup.Child).Background).Color ==
-                Color.FromRgb(45, 45, 48), "Protection scope dropdown uses the active palette");
-            RenderElement((FrameworkElement)oScopePopup.Child, oEditor.Background, "scope-dark.png");
-            oScope.IsDropDownOpen = false;
-            PasswordGenerator oGenerator = new PasswordGenerator();
-            Check(((SolidColorBrush)oGenerator.Background).Color == Color.FromRgb(30, 30, 30),
-                "New dialogs inherit the selected theme");
-            ((Button)oGenerator.FindName("oGenerateButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            RenderWindow(oGenerator, "password-generator-dark.png");
-            oGenerator.Close();
-            AboutBox oAbout = new AboutBox();
-            RenderWindow(oAbout, "about-dark.png");
-            oAbout.Close();
-            CertWizard oWizard = new CertWizard();
-            ShowTestWindow(oWizard);
-            PumpUntil(() => ((Button)oWizard.FindName("oGenerateButton")).IsEnabled);
-            DatePicker oDate = (DatePicker)oWizard.FindName("oValidFromDatePicker");
-            oDate.IsDropDownOpen = true;
-            oDate.UpdateLayout();
-            var oPopup = (System.Windows.Controls.Primitives.Popup)oDate.Template.FindName("PART_Popup", oDate);
-            Calendar oCalendar = (Calendar)oPopup.Child;
-            oCalendar.ApplyTemplate();
-            var oCalendarItem = (System.Windows.Controls.Primitives.CalendarItem)
-                oCalendar.Template.FindName("PART_CalendarItem", oCalendar);
-            oCalendarItem.ApplyTemplate();
-            Grid oDays = (Grid)oCalendarItem.Template.FindName("PART_MonthView", oCalendarItem);
-            Check(oDays.Children.Count == 49, "Themed calendar creates all day headers and date cells");
-            DateTime oPrevious = oCalendar.DisplayDate;
-            ((Button)oCalendarItem.Template.FindName("PART_NextButton", oCalendarItem))
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(oCalendar.DisplayDate.Month == oPrevious.AddMonths(1).Month,
-                "Themed calendar retains month navigation");
-            RenderElement(oCalendar, oWizard.Background, "calendar-dark.png");
-            oDate.IsDropDownOpen = false;
-            RenderWindow(oWizard, "certificate-wizard-dark.png");
-            oWizard.Close();
-            oTheme.SelectedIndex = 1;
-            oNotifyPreferenceChanged();
-            oSaved.Reload();
-            Check(oSaved.ThemeMode == "Light" && (string)oTheme.SelectedValue == "Light",
-                "Explicit Light selection persists across Windows preference notifications");
-            Check(!App.IsDarkMode && ((SolidColorBrush)oEditor.Background).Color == Colors.White &&
-                ((SolidColorBrush)((System.Windows.Controls.Ribbon.Ribbon)oBrowser.FindName("ribbon")).Background).Color == Color.FromRgb(246, 248, 251),
-                "Switching back restores light colors on open windows and the ribbon");
-            RenderWindow(oEditor, "editor-light-restored.png");
-            PasswordGenerator oLightGenerator = new PasswordGenerator();
-            ((Button)oLightGenerator.FindName("oGenerateButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            RenderWindow(oLightGenerator, "password-generator-light.png");
-            oLightGenerator.Close();
-            object oWindowsValue = Microsoft.Win32.Registry.GetValue(
-                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                "AppsUseLightTheme", 1);
-            bool bWindowsDark = oWindowsValue is int nLight && nLight == 0;
-            oTheme.SelectedIndex = 0;
-            oSaved.Reload();
-            Check(App.IsDarkMode == bWindowsDark && oSaved.ThemeMode == "System",
-                "Returning to Windows mode immediately follows and remembers the Windows app color setting");
-            App.ApplyTheme(!bWindowsDark);
-            oNotifyPreferenceChanged();
-            Check(App.IsDarkMode == bWindowsDark && (string)oTheme.SelectedValue == "System" &&
-                ((SolidColorBrush)oEditor.Background).Color == (bWindowsDark ? Color.FromRgb(30, 30, 30) : Colors.White),
-                "Windows notifications refresh open windows from a background thread");
-            Check(oContent.Text == "An unsaved edit survives changing the appearance." &&
-                oContent.SelectionStart == 3 && oContent.SelectionLength == 7,
-                "Following Windows preserves unsaved text and selection");
-            Brush oBackground = oEditor.Background;
-            oNotifyPreferenceChanged();
-            Check(ReferenceEquals(oBackground, oEditor.Background),
-                "Unchanged Windows preferences do not rebuild the theme");
-        }
-        finally
-        {
-            Crypture.Properties.Settings.Default.ThemeMode = sOriginal;
-            Crypture.Properties.Settings.Default.Save();
-            App.ApplyTheme(false);
-            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(oEditor, false);
-            oEditor.Close();
-        }
-    }
-
-    private static void TestCertificateWizard()
-    {
-        string sDefault = "Microsoft Software Key Storage Provider";
-        var oWatch = System.Diagnostics.Stopwatch.StartNew();
-        CertWizard oWizard = new CertWizard();
-        Console.WriteLine("Wizard constructor: " + oWatch.ElapsedMilliseconds + " ms");
-        ShowTestWindow(oWizard);
-        PumpUntil(() => ((Button)oWizard.FindName("oGenerateButton")).IsEnabled ||
-            ((Button)oWizard.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(((Button)oWizard.FindName("oGenerateButton")).IsEnabled,
-            "Real software provider becomes usable without waiting for all providers");
-        Console.WriteLine("Wizard software provider ready: " + oWatch.ElapsedMilliseconds + " ms");
-        Check((string)((ComboBox)oWizard.FindName("oSignatureComboBox")).SelectedItem == "RSA",
-            "Certificate wizard defaults to RSA");
-        Check((string)((ComboBox)oWizard.FindName("oHashComboBox")).SelectedItem == "SHA256",
-            "Certificate wizard defaults to SHA256");
-        Check(oWizard.KeyUsages.Single(u => u.Oid == "KeyEncipherment").Selected,
-            "Certificate wizard defaults to encryption key usage");
-        ComboBox oAlgorithmList = (ComboBox)oWizard.FindName("oSignatureComboBox");
-        string sEcdh = oAlgorithmList.Items.Cast<string>().FirstOrDefault(s => s.StartsWith("ECDH"));
-        Check(sEcdh != null, "Certificate wizard offers native ECDH algorithms");
-        Check(oAlgorithmList.Items.Cast<string>().Where(s => s.StartsWith("ECDH")).OrderBy(s => s)
-            .SequenceEqual(new[] { "ECDH_P256", "ECDH_P384", "ECDH_P521" }),
-            "Certificate wizard offers only the three supported ECDH curves");
-        oAlgorithmList.SelectedItem = sEcdh;
-        Check(oWizard.KeyUsages.Single(u => u.Selected).Oid == nameof(X509KeyUsageFlags.KeyAgreement),
-            "Selecting ECDH defaults to Key Agreement permission");
-        oAlgorithmList.SelectedItem = "RSA";
-        CertWizard.ProviderDetails oNativeDefault = oWizard.ProviderOptions[sDefault];
-        PumpUntil(() => ((Button)oWizard.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(((TextBlock)oWizard.FindName("oProviderStatus")).Text == "Ready." &&
-            oWizard.ProviderOptions.Count > 1,
-            "Native background discovery completes and publishes additional provider capabilities");
-        oWizard.Close();
-        oWatch.Restart();
-        CertWizard oReopened = new CertWizard();
-        ShowTestWindow(oReopened);
-        PumpUntil(() => ((Button)oReopened.FindName("oGenerateButton")).IsEnabled);
-        Check(ReferenceEquals(oNativeDefault, oReopened.ProviderOptions[sDefault]),
-            "Reopening the certificate wizard reuses managed provider capabilities");
-        Console.WriteLine("Reopened wizard ready: " + oWatch.ElapsedMilliseconds + " ms");
-        RenderWindow(oReopened, "certificate-wizard.png");
-        oReopened.Close();
-
-        var oDefault = new CertWizard.ProviderDetails
-        {
-            SignatureAlgorithmns = new List<string> { "RSA" },
-            HashAlgorithmns = new List<string> { "SHA256", "SHA384" },
-            SignatureMinLengths = new Dictionary<string, int> { { "RSA", 2048 } },
-            SignatureMaxLengths = new Dictionary<string, int> { { "RSA", 8192 } }
-        };
-        var oHardware = new CertWizard.ProviderDetails
-        {
-            IsHardware = true,
-            SignatureAlgorithmns = new List<string> { "RSA" },
-            HashAlgorithmns = new List<string> { "SHA256" },
-            SignatureMinLengths = new Dictionary<string, int> { { "RSA", 2048 } },
-            SignatureMaxLengths = new Dictionary<string, int> { { "RSA", 4096 } }
-        };
-        var oProviders = new Dictionary<string, CertWizard.ProviderDetails>
-        {
-            { sDefault, oDefault }, { "Test Hardware", oHardware },
-            { "Test Legacy", new CertWizard.ProviderDetails { IsLegacy = true } }
-        };
-        var oDefaultPending = new TaskCompletionSource<CertWizard.ProviderDetails>();
-        var oProvidersPending = new TaskCompletionSource<Dictionary<string, CertWizard.ProviderDetails>>();
-        int nDefaultCalls = 0;
-        int nProviderCalls = 0;
-        CertWizard oDelayed = new CertWizard(b => { nDefaultCalls++; return oDefaultPending.Task; },
-            b => { nProviderCalls++; return oProvidersPending.Task; });
-        Check(nDefaultCalls == 0 && nProviderCalls == 0,
-            "Constructing the wizard does not query cryptographic providers");
-        ShowTestWindow(oDelayed);
-        TextBox oSubject = (TextBox)oDelayed.FindName("oSubjectTextBox");
-        oSubject.Text = "Keep entered subject";
-        Check(!((Button)oDelayed.FindName("oGenerateButton")).IsEnabled && oSubject.IsEnabled &&
-            nDefaultCalls == 1 && nProviderCalls == 0,
-            "Slow provider initialization leaves the form responsive and generation disabled");
-        RenderWindow(oDelayed, "certificate-wizard-loading.png");
-        oDefaultPending.SetResult(oDefault);
-        PumpUntil(() => ((Button)oDelayed.FindName("oGenerateButton")).IsEnabled);
-        Check(nProviderCalls == 1 && !oProvidersPending.Task.IsCompleted,
-            "Default provider is ready while additional provider discovery is still pending");
-        ((ComboBox)oDelayed.FindName("oHashComboBox")).SelectedItem = "SHA384";
-        ((TextBox)oDelayed.FindName("oKeyLengthTextBox")).Text = "3072";
-        oProvidersPending.SetResult(oProviders);
-        PumpUntil(() => ((Button)oDelayed.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(oDelayed.SelectedProvider == sDefault && oSubject.Text == "Keep entered subject" &&
-            (string)((ComboBox)oDelayed.FindName("oHashComboBox")).SelectedItem == "SHA384" &&
-            ((TextBox)oDelayed.FindName("oKeyLengthTextBox")).Text == "3072",
-            "Background discovery preserves provider, hash, key length, and entered subject");
-        ComboBox oProviderList = (ComboBox)oDelayed.FindName("oProviderComboBox");
-        Check(oProviderList.Items.Count == 2, "Legacy providers remain hidden by default");
-        ((CheckBox)oDelayed.FindName("oShowLegacyCheckbox")).IsChecked = true;
-        Check(oProviderList.Items.Count == 3, "Legacy filter exposes discovered legacy providers");
-        ((CheckBox)oDelayed.FindName("oSoftwareCheckbox")).IsChecked = false;
-        Check(oProviderList.Items.Count == 1 && oDelayed.SelectedProvider == "Test Hardware",
-            "Hardware filtering selects a matching provider after asynchronous discovery");
-        ((CheckBox)oDelayed.FindName("oHardwareCheckbox")).IsChecked = false;
-        Check(oProviderList.Items.Count == 0 && !((Button)oDelayed.FindName("oGenerateButton")).IsEnabled,
-            "Empty provider filters clear algorithms and disable generation");
-        oDelayed.Close();
-
-        var oUnavailable = new TaskCompletionSource<Dictionary<string, CertWizard.ProviderDetails>>();
-        bool bRefreshed = false;
-        CertWizard oRetry = new CertWizard(b => Task.FromResult(oDefault), b =>
-        {
-            bRefreshed = b;
-            return b ? Task.FromResult(oProviders) : oUnavailable.Task;
-        });
-        ShowTestWindow(oRetry);
-        oUnavailable.SetException(new InvalidOperationException("Test provider unavailable"));
-        PumpUntil(() => ((Button)oRetry.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(((Button)oRetry.FindName("oGenerateButton")).IsEnabled &&
-            ((TextBlock)oRetry.FindName("oProviderStatus")).Text.Contains("could not be loaded"),
-            "Additional provider failure keeps the software provider usable and offers retry");
-        ((Button)oRetry.FindName("oRefreshProvidersButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        PumpUntil(() => ((Button)oRetry.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(bRefreshed && oRetry.ProviderOptions.Count == 3 &&
-            ((TextBlock)oRetry.FindName("oProviderStatus")).Text == "Ready.",
-            "Refresh recovers a failed scan and publishes the newly available providers");
-        oRetry.Close();
-
-        CertWizard oFailedDefault = new CertWizard(b => b ? Task.FromResult(oDefault)
-            : Task.FromException<CertWizard.ProviderDetails>(new InvalidOperationException("Test default failure")),
-            b => Task.FromResult(oProviders));
-        ShowTestWindow(oFailedDefault);
-        PumpUntil(() => ((Button)oFailedDefault.FindName("oRefreshProvidersButton")).IsEnabled);
-        Check(!((Button)oFailedDefault.FindName("oGenerateButton")).IsEnabled,
-            "Failed default provider initialization does not enable generation");
-        ((Button)oFailedDefault.FindName("oRefreshProvidersButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        PumpUntil(() => ((Button)oFailedDefault.FindName("oGenerateButton")).IsEnabled);
-        Check(oFailedDefault.ProviderOptions.Count == 3, "Default provider initialization can be retried");
-        oFailedDefault.Close();
-
-        var oAfterClose = new TaskCompletionSource<Dictionary<string, CertWizard.ProviderDetails>>();
-        CertWizard oClosing = new CertWizard(b => Task.FromResult(oDefault), b => oAfterClose.Task);
-        ShowTestWindow(oClosing);
-        oClosing.Close();
-        oAfterClose.SetResult(oProviders);
-        PumpUntil(() => !(bool)typeof(CertWizard).GetField("bLoadingProviders",
-            BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oClosing));
-        Check(oClosing.ProviderOptions.Count == 1,
-            "Closing during provider discovery ignores the result without updating the closed window");
-    }
-
-    private static void TestPasswordGeneratorWindow()
-    {
-        PasswordGenerator oGenerator = new PasswordGenerator(true);
-        TextBox oMin = (TextBox)oGenerator.FindName("oMinimumLength");
-        TextBox oMax = (TextBox)oGenerator.FindName("oMaximumLength");
-        TextBox oOutput = (TextBox)oGenerator.FindName("oGeneratedPassword");
-        Button oGenerate = (Button)oGenerator.FindName("oGenerateButton");
-        Button oInsert = (Button)oGenerator.FindName("oInsertButton");
-        Button oCopy = (Button)oGenerator.FindName("oCopyButton");
-        Check(!oCopy.IsEnabled, "Password copy icon starts disabled until a password is generated");
-        Check(oMin.Text == "20" && oMax.Text == "24" && oOutput.Text.Length == 0,
-            "Generator loads Vault options without generating or storing a password");
-        oMin.Text = "invalid";
-        Check(!oGenerate.IsEnabled, "Invalid numeric input cannot silently reuse an old length");
-        oMin.Text = "18";
-        oMax.Text = "18";
-        typeof(PasswordGenerator).GetMethod("oGenerateButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(oGenerator, new object[] { null, null });
-        Check(oOutput.Text.Length == 18 && oInsert.IsEnabled && oCopy.IsEnabled &&
-            DatabaseOperations.LoadPasswordOptions().MinimumLength == 18,
-            "Generating a password saves the selected Vault options");
-        RenderWindow(oGenerator, "password-generator.png");
-        oMax.Text = "19";
-        Check(oOutput.Text.Length == 0 && !oInsert.IsEnabled && !oCopy.IsEnabled,
-            "Changing generator options invalidates the previous password preview");
-        oGenerator.Close();
-        Check(oOutput.Text.Length == 0, "Closing the generator clears its preview");
-        PasswordGenerator oReopened = new PasswordGenerator();
-        Check(((TextBox)oReopened.FindName("oMaximumLength")).Text == "18" &&
-            ((Button)oReopened.FindName("oInsertButton")).Visibility == Visibility.Collapsed,
-            "Reopening remembers the last generated settings and supports standalone use");
-        oReopened.Close();
-
-        ItemEditor oEditor = new ItemEditor();
-        oEditor.SetEditingControls(true);
-        Check(((System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton")).IsEnabled,
-            "Password insertion is available for unlocked text items");
-        oEditor.ThisItem.ItemType = ".bin";
-        oEditor.SetEditingControls(true);
-        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All",
-            (TextBox)oEditor.FindName("oItemData")), "Attached binary files never enable text copy icons");
-        Check(!((System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton")).IsEnabled,
-            "Password insertion does not replace an attached binary file");
-        oEditor.Close();
     }
 
     private static void PumpUntil(Func<bool> oCompleted)
@@ -1446,48 +764,6 @@ internal static partial class RegressionTests
         {
             oTimer.Stop();
         }
-        if (!oCompleted()) throw new TimeoutException("The editor operation did not finish.");
-    }
-
-    private static void ShowTestWindow(Window oWindow)
-    {
-        oWindow.WindowStartupLocation = WindowStartupLocation.Manual;
-        oWindow.Left = -10000;
-        oWindow.Top = -10000;
-        oWindow.ShowActivated = false;
-        oWindow.ShowInTaskbar = false;
-        oWindow.Show();
-    }
-
-    private static void RenderWindow(Window oWindow, string sFileName)
-    {
-        string sOutput = Environment.GetEnvironmentVariable("CRYPTURE_TEST_RENDER_DIR");
-        if (String.IsNullOrEmpty(sOutput)) return;
-        Directory.CreateDirectory(sOutput);
-        Console.WriteLine("Rendering " + sFileName);
-        ShowTestWindow(oWindow);
-        oWindow.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
-        oWindow.UpdateLayout();
-        RenderElement((FrameworkElement)oWindow.Content, oWindow.Background, sFileName);
-    }
-
-    private static void RenderElement(FrameworkElement oContent, Brush oBackground, string sFileName)
-    {
-        string sOutput = Environment.GetEnvironmentVariable("CRYPTURE_TEST_RENDER_DIR");
-        if (String.IsNullOrEmpty(sOutput)) return;
-        oContent.UpdateLayout();
-        Size oSize = new Size(oContent.ActualWidth, oContent.ActualHeight);
-        RenderTargetBitmap oBitmap = new RenderTargetBitmap(
-            (int)oSize.Width, (int)oSize.Height, 96, 96, PixelFormats.Pbgra32);
-        DrawingVisual oVisual = new DrawingVisual();
-        using (DrawingContext oDrawing = oVisual.RenderOpen())
-        {
-            oDrawing.DrawRectangle(oBackground, null, new Rect(oSize));
-            oDrawing.DrawRectangle(new VisualBrush(oContent), null, new Rect(oSize));
-        }
-        oBitmap.Render(oVisual);
-        PngBitmapEncoder oEncoder = new PngBitmapEncoder();
-        oEncoder.Frames.Add(BitmapFrame.Create(oBitmap));
-        using (FileStream oFile = File.Create(Path.Combine(sOutput, sFileName))) oEncoder.Save(oFile);
+        if (!oCompleted()) throw new TimeoutException("The asynchronous operation did not finish.");
     }
 }

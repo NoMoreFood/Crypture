@@ -41,6 +41,19 @@ namespace Crypture.Properties {
             }
         }
 
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("<?xml version=\"1.0\" encoding=\"utf-16\"?>\r\n<ArrayOfString xmlns:xsd=\"http://www.w3." +
+            "org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" />")]
+        public global::System.Collections.Specialized.StringCollection RecentVaults {
+            get {
+                return ((global::System.Collections.Specialized.StringCollection)(this["RecentVaults"]));
+            }
+            set {
+                this["RecentVaults"] = value;
+            }
+        }
+
         public static Settings Default {
             get {
                 return defaultInstance;
@@ -80,6 +93,24 @@ namespace Crypture.Properties {
         public bool EnableCertificateProtection {
             get {
                 return ((bool)(this["EnableCertificateProtection"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ShowExpiredCertificates {
+            get {
+                return ((bool)(this["ShowExpiredCertificates"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ShowUntrustedCertificates {
+            get {
+                return ((bool)(this["ShowUntrustedCertificates"]));
             }
         }
 

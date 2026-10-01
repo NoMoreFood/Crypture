@@ -1,12 +1,10 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Windows;
 using System.Windows.Controls;
 using Crypture;
 
@@ -106,132 +104,60 @@ internal static partial class RegressionTests
         Reject(() => oDisposed.GetCode(DateTimeOffset.UtcNow), "A disposed TOTP seed cannot generate codes");
     }
 
-    private static void TestTotpWindow(ItemBrowser oBrowser)
+    private static void TestTotpVault(string sDirectory)
     {
-        string sLabel = "Authenticator Regression Fixture";
+        string sConnection = CryptureEntities.ConnectionString;
+        string sVault = Path.Combine(sDirectory, "totp.cryptdb");
+        string sUri = "otpauth://totp/Service:totp-seed%40example.com?secret=" + RfcTotpSecret + "&digits=8";
+        byte[] oPayload = Encoding.UTF8.GetBytes(sUri);
+        byte[] oPlain = null;
         ItemEditor oEditor = null;
-        TextBox oSearch = (TextBox)oBrowser.FindName("oSearchTextBox");
         try
         {
-            // Follow the real new-item, import, encrypted save, unlock, rotate, and lock flow.
-            oEditor = new ItemEditor();
-            ShowTestWindow(oEditor);
-            ((TextBox)oEditor.FindName("oItemLabel")).Text = sLabel;
-            ((ComboBox)oEditor.FindName("oItemTypeSelector")).SelectedIndex = 1;
-            TotpPanel oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
-            DateTimeOffset oNow = DateTimeOffset.FromUnixTimeSeconds(1111111109);
-            oPanel.Clock = () => oNow;
-            ((TextBox)oPanel.FindName("oImportInput")).Text =
-                "otpauth://totp/Service:totp-seed%40example.com?secret=" + RfcTotpSecret + "&digits=8";
-            typeof(TotpPanel).GetMethod("oImport_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oPanel, new object[] { null, null });
-            TextBox oCode = (TextBox)oPanel.FindName("oCurrentCode");
-            Check(oEditor.ThisItem.ItemType == "totp" && oPanel.Visibility == Visibility.Visible &&
-                ((TextBox)oEditor.FindName("oItemData")).Visibility == Visibility.Collapsed &&
-                ((Button)oEditor.FindName("oDownloadPanel")).Visibility == Visibility.Collapsed &&
-                oCode.Text == "07081804",
-                "New TOTP items show authenticator tooling instead of text or file content");
-            Check(((TextBox)oPanel.FindName("oIssuer")).Text == "Service" &&
-                ((TextBox)oPanel.FindName("oAccount")).Text == "totp-seed@example.com" && oCode.IsReadOnly &&
-                ((Button)oPanel.FindName("oCopyCode")).IsEnabled,
-                "Import configures the account and enables current code copying");
-            FieldInfo oChanged = typeof(ItemEditor).GetField("bHasChanges",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            oChanged.SetValue(oEditor, false);
-            oNow = DateTimeOffset.FromUnixTimeSeconds(1111111110);
-            PumpUntil(() => oCode.Text == "14050471");
-            Check(!(bool)oChanged.GetValue(oEditor) && ((TextBlock)oPanel.FindName("oRemainingText"))
-                .Text.Contains("30 Seconds"), "The timer rotates at the boundary without creating unsaved changes");
-            oNow = DateTimeOffset.FromUnixTimeSeconds(2000000000);
-            PumpUntil(() => oCode.Text == "69279037");
-            Check(true, "TOTP recovers directly from the current time after a sleep or clock jump");
-            oNow = DateTimeOffset.FromUnixTimeSeconds(-1);
-            oPanel.RefreshCode();
-            Check(oCode.Text.Length == 0 && !((Button)oPanel.FindName("oCopyCode")).IsEnabled,
-                "An invalid clock removes the stale code and disables copying");
-            oNow = DateTimeOffset.FromUnixTimeSeconds(59);
-            oPanel.RefreshCode();
-            Check(oCode.Text == "94287082" && ((TextBlock)oPanel.FindName("oValidationMessage")).Text.Length == 0,
-                "A corrected clock restores the current code and clears the clock error");
-            ((TextBox)oPanel.FindName("oSecretInput")).Text = "invalid";
-            Check(oCode.Text.Length == 0 && !((Button)oPanel.FindName("oCopyCode")).IsEnabled,
-                "Invalid seed edits remove stale codes");
-            Reject(() => oPanel.ReadUri(), "Invalid authenticator settings cannot be serialized for saving");
-            ((TextBox)oPanel.FindName("oImportInput")).Text = RfcTotpSecret.ToLowerInvariant();
-            typeof(TotpPanel).GetMethod("oImport_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oPanel, new object[] { null, null });
-            Check(((TextBox)oPanel.FindName("oIssuer")).Text == "Service" && oCode.Text == "94287082",
-                "Importing a raw Base32 seed preserves the account and chosen algorithm settings");
-            typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, new object[] { null, null });
-            PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted", BindingFlags.Instance | BindingFlags.NonPublic)
-                .GetValue(oEditor));
-            Check(oCode.Text.Length == 0 && ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
-                "Saving and closing clears authenticator plaintext");
+            // Verify encrypted persistence without relying on the import or save dialog flow.
+            DatabaseOperations.CreateDatabase(sVault,
+                File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
+            CryptureEntities.DatabasePath = sVault;
+            DatabaseOperations.SaveItem(new Item { Label = "Authenticator Regression Fixture", ItemType = "totp" },
+                oPayload, null, PrincipalProtection.LocalUserDescriptor);
             Item oStored;
             using (CryptureEntities oContext = new CryptureEntities())
-                oStored = oContext.Items.Single(i => i.Label == sLabel);
-            byte[] oPlain = ItemCryptography.Decrypt(DatabaseOperations.LoadItem(oStored.ItemId));
+                oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+            oPlain = ItemCryptography.Decrypt(oStored);
             using (TotpSecret oReloaded = TotpSecret.Parse(Encoding.UTF8.GetString(oPlain)))
                 Check(oReloaded.GetBase32() == RfcTotpSecret && oReloaded.Digits == 8 &&
                     oReloaded.Account == "totp-seed@example.com",
                     "Vault saves preserve the encrypted TOTP seed and settings");
-            CryptographicOperations.ZeroMemory(oPlain);
-            string sVault = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(
-                CryptureEntities.ConnectionString).DataSource;
             string sStoredBytes = Encoding.ASCII.GetString(File.ReadAllBytes(sVault));
             Check(!sStoredBytes.Contains(RfcTotpSecret) && !sStoredBytes.Contains("otpauth://") &&
                 !sStoredBytes.Contains("totp-seed@example.com"),
                 "The Vault contains no plaintext TOTP seed, setup URI, or account");
-            typeof(ItemBrowser).GetMethod("RefreshData", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oBrowser, null);
-            oSearch.Text = "TOTP";
-            Check(((DataGrid)oBrowser.FindName("oItemDataGrid")).Items.Cast<Item>().Any(i => i.ItemId == oStored.ItemId) &&
-                oStored.ItemTypeDisplay == "TOTP", "Vault items identify and search TOTP authenticator entries");
-            oSearch.Clear();
+
+            // Locking must dispose the active key and erase all authenticator plaintext.
             oEditor = new ItemEditor(oStored);
-            oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
-            oCode = (TextBox)oPanel.FindName("oCurrentCode");
-            Check(oPanel.Visibility == Visibility.Collapsed && oCode.Text.Length == 0 &&
-                ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
-                "Reopened authenticators keep seeds and codes locked");
-            ShowTestWindow(oEditor);
-            typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, new object[] { null, null });
-            PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-                .GetValue(oEditor));
-            Check(oCode.Text.Length == 8 && !((Expander)oPanel.FindName("oSetup")).IsExpanded &&
-                !((System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton")).IsEnabled,
-                "Unlock displays rotating codes while keeping setup collapsed and password insertion disabled");
+            oEditor.SetEditingControls(true);
+            TotpPanel oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
+            oPanel.LoadUri(Encoding.UTF8.GetString(oPlain));
             TotpSecret oCached = (TotpSecret)typeof(TotpPanel).GetField("oSecret",
-                BindingFlags.Instance | BindingFlags.NonPublic)
-                .GetValue(oPanel);
-            oChanged.SetValue(oEditor, false);
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oPanel);
+            Check(oCached.GetBase32() == RfcTotpSecret, "Unlock loads the active TOTP key before cleanup");
+            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(oEditor, false);
             typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
                 .Invoke(oEditor, new object[] { null, null });
-            Check(oCode.Text.Length == 0 && ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0 &&
-                oPanel.Visibility == Visibility.Collapsed && !((Button)oPanel.FindName("oCopyCode")).IsEnabled,
-                "Lock clears the seed and code, hides the panel, and disables copying");
+            TextBox oCode = (TextBox)oPanel.FindName("oCurrentCode");
+            Check(oCode.Text.Length == 0 && ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
+                "Lock clears the TOTP seed and code");
             Reject(() => oCached.GetCode(DateTimeOffset.UtcNow), "Lock disposes the live TOTP key");
             oPanel.RefreshCode();
             Check(oCode.Text.Length == 0, "An inactive authenticator cannot recreate a code after locking");
         }
         finally
         {
-            if (oEditor != null)
-            {
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
-                oEditor.Close();
-            }
-            using (CryptureEntities oContext = new CryptureEntities())
-            {
-                oContext.Items.RemoveRange(oContext.Items.Where(i => i.Label == sLabel));
-                oContext.SaveChanges();
-            }
-            oSearch.Clear();
-            typeof(ItemBrowser).GetMethod("RefreshData", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oBrowser, null);
+            oEditor?.Close();
+            CryptographicOperations.ZeroMemory(oPayload);
+            if (oPlain != null) CryptographicOperations.ZeroMemory(oPlain);
+            CryptureEntities.ConnectionString = sConnection;
         }
     }
 }

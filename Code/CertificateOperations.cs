@@ -22,7 +22,7 @@ namespace Crypture
             }
         }
 
-        internal static bool CheckCertificateStatus(X509Certificate2 oCert)
+        internal static bool CheckCertificateStatus(X509Certificate2 oCert, bool bForSelection = false)
         {
             try
             {
@@ -35,7 +35,9 @@ namespace Crypture
 
             using (X509Chain oChain = new X509Chain())
             {
-                oChain.ChainPolicy.RevocationMode = Properties.Settings.Default.PerformCertificateRevocationCheck
+                Properties.Settings oSettings = Properties.Settings.Default;
+                oChain.ChainPolicy.TrustMode = X509ChainTrustMode.System;
+                oChain.ChainPolicy.RevocationMode = oSettings.PerformCertificateRevocationCheck
                     ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
                 oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
                 oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(10);
@@ -43,10 +45,39 @@ namespace Crypture
                 // build the chain based on the specified policy
                 if (oChain.Build(oCert)) return true;
 
+                // Selection settings waive only expiry and missing trust anchors, never future validity.
+                X509ChainStatusFlags oAllowed = X509ChainStatusFlags.NoError;
+                if (bForSelection && oSettings.ShowExpiredCertificates &&
+                    oChain.ChainElements.Cast<X509ChainElement>().All(e =>
+                    e.Certificate.NotBefore <= oChain.ChainPolicy.VerificationTime))
+                    oAllowed |= X509ChainStatusFlags.NotTimeValid;
+
                 // check for self signed
-                return Properties.Settings.Default.AllowSelfSignedCertificates && IsSelfSigned(oCert) &&
-                    oChain.ChainElements.Count == 1 && oChain.ChainStatus.All(s =>
-                    (s.Status & ~X509ChainStatusFlags.UntrustedRoot) == X509ChainStatusFlags.NoError);
+                bool bSelfSigned = IsSelfSigned(oCert);
+                if (bForSelection && oSettings.ShowUntrustedCertificates)
+                {
+                    if (oCert.SubjectName.RawData.SequenceEqual(oCert.IssuerName.RawData) && !bSelfSigned)
+                        return false;
+                    oAllowed |= X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain;
+                }
+                else if (oSettings.AllowSelfSignedCertificates && bSelfSigned && oChain.ChainElements.Count == 1)
+                    oAllowed |= X509ChainStatusFlags.UntrustedRoot;
+                return oAllowed != X509ChainStatusFlags.NoError && oChain.ChainStatus.All(s =>
+                    (s.Status & ~oAllowed) == X509ChainStatusFlags.NoError);
+            }
+        }
+
+        internal static bool CanSelectCertificate(byte[] oData, CertificateUsageFilter oUsageFilter)
+        {
+            if (oUsageFilter == null || oData == null || oData.Length == 0) return false;
+            try
+            {
+                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oData))
+                    return oUsageFilter.Matches(oCert) && CheckCertificateStatus(oCert, true);
+            }
+            catch (CryptographicException)
+            {
+                return false;
             }
         }
 

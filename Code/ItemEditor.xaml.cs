@@ -120,7 +120,8 @@ namespace Crypture
                 oCertificateUsageNotice.Text = oError.Message;
                 oCertificateUsageNotice.Visibility = Visibility.Visible;
             }
-            HashSet<long> oAvailable = UserList.Where(u => oUsageFilter?.Matches(u.Certificate) == true ||
+            HashSet<long> oAvailable = UserList.Where(u =>
+                CertificateOperations.CanSelectCertificate(u.Certificate, oUsageFilter) ||
                 oAutomatic.Any(c => c.SequenceEqual(u.Certificate))).Select(u => u.UserId).ToHashSet();
             UserListSelected = new ObservableCollection<User>(UserList.Where(u => bNewItem
                 ? oAvailable.Contains(u.UserId) && (oAutomatic.Any(c => c.SequenceEqual(u.Certificate)) ||
@@ -220,7 +221,7 @@ namespace Crypture
                             using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
                             {
                                 CertificateKeyProtection.ValidateForEncryption(oCert);
-                                if (!CertificateOperations.CheckCertificateStatus(oCert))
+                                if (!CertificateOperations.CheckCertificateStatus(oCert, true))
                                     throw new InvalidOperationException("The certificate for '" + oUser.Name +
                                         "' is not valid for encryption. Review the sharing list " +
                                         "and certificate settings.");
@@ -624,7 +625,13 @@ namespace Crypture
 
         private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1)) return;
+            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1 or 2)) return;
+            if (oItemTypeSelector.SelectedIndex == 2)
+            {
+                SetEditingControls(true);
+                oUploadAFile_Click(sender, e);
+                return;
+            }
             ThisItem.ItemType = oItemTypeSelector.SelectedIndex == 1 ? "totp" : "text";
             SetEditingControls(true);
             bHasChanges = true;

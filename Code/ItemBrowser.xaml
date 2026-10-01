@@ -11,8 +11,18 @@
             <!--  Tabs  -->
             <ribbon:RibbonTab x:Name="ribbonTabHome" Header="Home">
                 <ribbon:RibbonGroup Header="Vault Actions">
-                    <ribbon:RibbonButton x:Name="oNewDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oNewDatabaseButton_Click" Label="New" LargeImageSource="pack://application:,,,/Crypture;component/Images/DatabaseNew.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
-                    <ribbon:RibbonButton x:Name="oLoadDatabaseButton" Height="Auto" Margin="6,6,6,0" Click="oLoadDatabaseButton_Click" Label="Load" LargeImageSource="pack://application:,,,/Crypture;component/Images/DatabaseLoad.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oNewDatabaseButton" Height="Auto" Margin="6,6,6,0"
+                        Click="oNewDatabaseButton_Click" Label="New" KeyTip="N"
+                        LargeImageSource="{StaticResource Crypture.NewVaultIcon}"
+                        ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonSplitButton x:Name="oLoadDatabaseButton" Height="Auto" Margin="6,6,6,0"
+                        Click="oLoadDatabaseButton_Click" Label="Load" HeaderKeyTip="L" KeyTip="R"
+                        DropDownOpened="oLoadDatabaseButton_DropDownOpened"
+                        LargeImageSource="{StaticResource Crypture.LoadVaultIcon}"
+                        ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}"
+                        ItemContainerStyle="{StaticResource Crypture.RecentVaultMenuItem}"
+                        ToolTip="Open a Vault, or use the arrow to choose a recent Vault."
+                        DropDownToolTipTitle="Recent Vaults" />
                     <ribbon:RibbonButton x:Name="oBackupDatabaseButton" Margin="6,6,6,0" Label="Back Up..."
                         Click="oBackupDatabaseButton_Click" IsEnabled="False" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
                         SmallImageSource="pack://application:,,,/Crypture;component/Images/Save.png"

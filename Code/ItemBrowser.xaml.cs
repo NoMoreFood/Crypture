@@ -2,6 +2,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Configuration;
 using System.Collections.ObjectModel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
@@ -15,6 +17,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Ribbon;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -28,6 +31,8 @@ namespace Crypture
     {
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
 
+        internal const int RecentVaultLimit = 10;
+
         private string sDatabasePath;
         private List<User> CertificateList = new List<User>();
         private HashSet<string> PrivateCertificates = new HashSet<string>();
@@ -38,9 +43,9 @@ namespace Crypture
             if (!CertificateUsageFilter.Read().Matches(oCert))
                 throw new InvalidOperationException("This certificate is excluded by the certificate usage filters " +
                     "in Crypture.exe.config.");
-            if (!CertificateOperations.CheckCertificateStatus(oCert))
+            if (!CertificateOperations.CheckCertificateStatus(oCert, true))
                 throw new InvalidOperationException("Select a valid RSA, ECDH, or ML-KEM encryption certificate. " +
-                    "Review the certificate validation settings if you use a self-signed certificate.");
+                    "Review the certificate validation settings and selection filters in Crypture.exe.config.");
             using (CryptureEntities oContent = new CryptureEntities())
             {
                 if (oContent.Users.Where(u => u.Certificate == oCert.RawData).Count() > 0)
@@ -79,6 +84,7 @@ namespace Crypture
             // initialize xaml form display
             InitializeComponent();
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
+            RefreshRecentVaults();
 
             string[] sArgs = Environment.GetCommandLineArgs();
             if (sArgs.Length > 1) LoadDatabase(sArgs[1]);
@@ -165,7 +171,8 @@ namespace Crypture
                         // Filter eligible encryption certificates before opening the selector.
                         X509Certificate2Collection oCollection = new X509Certificate2Collection();
                         foreach (X509Certificate2 oCert in oCertificates)
-                            if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert))
+                            if (oUsageFilter.Matches(oCert) &&
+                                CertificateOperations.CheckCertificateStatus(oCert, true))
                                 oCollection.Add(oCert);
                         if (oCollection.Count == 0)
                             throw new InvalidOperationException("No certificates match the usage filters and " +
@@ -214,7 +221,8 @@ namespace Crypture
                         foreach (byte[] oCertData in oAccount.Certificates)
                         {
                             using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
-                                if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert))
+                                if (oUsageFilter.Matches(oCert) &&
+                                    CertificateOperations.CheckCertificateStatus(oCert, true))
                                     oCollection.Add(new X509Certificate2(oCert));
                         }
                         if (oCollection.Count == 0) continue;
@@ -341,6 +349,11 @@ namespace Crypture
             HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
             using (CryptureEntities oContent = new CryptureEntities())
             {
+                // Keep item rows, recipients, and protection metadata in one read snapshot during concurrent saves.
+                oContent.Database.OpenConnection();
+                using SqliteTransaction oTransaction = ((SqliteConnection)oContent.Database.GetDbConnection())
+                    .BeginTransaction(deferred: true);
+                using var oSnapshot = oContent.Database.UseTransaction(oTransaction);
                 oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances).ThenInclude(j => j.User).ToList();
                 oUsers = oContent.Users.ToList();
                 var oProtection = oContent.Ciphers.Select(c => new
@@ -355,6 +368,7 @@ namespace Crypture
                         CipherParams = oPolicy.CipherParams, ProtectionDescriptor = oPolicy.ProtectionDescriptor
                     };
                 }
+                oSnapshot.Commit();
             }
             ItemList = new ObservableCollection<Item>(oItems.OrderBy(i => i.Label));
             CertificateList = oUsers.OrderBy(u => u.Name).ToList();
@@ -497,6 +511,7 @@ namespace Crypture
                 oSearchTextBox.IsEnabled = bEnableControls;
                 oDatabaseStatus.Text = sDatabase;
                 Title = "Crypture - " + Path.GetFileName(sDatabase);
+                RememberRecentVault(sDatabase);
                 return true;
             }
             catch (Exception eError)
@@ -526,6 +541,80 @@ namespace Crypture
             };
             if (!oSaveDialog.ShowDialog(this).Value) return;
             LoadDatabase(oSaveDialog.FileName);
+        }
+
+        internal void RememberRecentVault(string sPath)
+        {
+            // Only successful Vault loads are remembered, newest first and without Windows path duplicates.
+            sPath = Path.GetFullPath(sPath);
+            StringCollection oRecent = new StringCollection();
+            oRecent.AddRange(new[] { sPath }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
+                .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(RecentVaultLimit).ToArray());
+            Properties.Settings.Default.RecentVaults = oRecent;
+            RefreshRecentVaults();
+            SaveRecentVaults();
+        }
+
+        private void RefreshRecentVaults()
+        {
+            // Keep menu labels literal so underscores in Vault filenames are not treated as access keys.
+            oLoadDatabaseButton.Items.Clear();
+            string[] oPaths = (Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
+                .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(RecentVaultLimit).ToArray();
+            for (int nIndex = 0; nIndex < oPaths.Length; nIndex++)
+            {
+                string sPath = oPaths[nIndex];
+                RibbonMenuItem oEntry = new RibbonMenuItem
+                {
+                    Header = new TextBlock { Text = (nIndex + 1) + ". " + Path.GetFileName(sPath) },
+                    ToolTip = sPath, Tag = sPath, KeyTip = (nIndex + 1).ToString()
+                };
+                oEntry.Click += oRecentVault_Click;
+                oLoadDatabaseButton.Items.Add(oEntry);
+            }
+            if (oPaths.Length == 0)
+                oLoadDatabaseButton.Items.Add(new RibbonMenuItem { Header = "No Recent Vaults", IsEnabled = false });
+            oLoadDatabaseButton.Items.Add(new RibbonSeparator());
+            RibbonMenuItem oClear = new RibbonMenuItem { Header = "_Clear Recent Vaults", IsEnabled = oPaths.Length > 0 };
+            oClear.Click += oClearRecentVaults_Click;
+            oLoadDatabaseButton.Items.Add(oClear);
+        }
+
+        private void SaveRecentVaults()
+        {
+            // Preference persistence must not undo an otherwise successful Vault load.
+            try
+            {
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception oError) when (oError is ConfigurationErrorsException || oError is IOException ||
+                oError is UnauthorizedAccessException)
+            {
+                oDatabaseStatus.ToolTip = "Recent Vaults could not be saved: " + oError.Message;
+            }
+        }
+
+        private void oLoadDatabaseButton_DropDownOpened(object sender, EventArgs e)
+        {
+            RefreshRecentVaults();
+        }
+
+        private void oRecentVault_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            oLoadDatabaseButton.IsDropDownOpen = false;
+            LoadDatabase((string)((RibbonMenuItem)sender).Tag);
+        }
+
+        private void oClearRecentVaults_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            oLoadDatabaseButton.IsDropDownOpen = false;
+            Properties.Settings.Default.RecentVaults = new StringCollection();
+            RefreshRecentVaults();
+            SaveRecentVaults();
         }
 
         private void oClaimCertButton_Click(object sender, RoutedEventArgs e)

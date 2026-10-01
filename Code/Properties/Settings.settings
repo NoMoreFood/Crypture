@@ -14,6 +14,12 @@
     <Setting Name="ShowCertificateTools" Type="System.Boolean" Scope="Application">
       <Value Profile="(Default)">True</Value>
     </Setting>
+    <Setting Name="ShowExpiredCertificates" Type="System.Boolean" Scope="Application">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="ShowUntrustedCertificates" Type="System.Boolean" Scope="Application">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
     <Setting Name="CertificateKeyUsageInclude" Type="System.String" Scope="Application">
       <Value Profile="(Default)">KeyEncipherment;KeyAgreement</Value>
     </Setting>
@@ -50,6 +56,10 @@
     </Setting>
     <Setting Name="SecretFontFamily" Type="System.String" Scope="User">
       <Value Profile="(Default)">Consolas</Value>
+    </Setting>
+    <Setting Name="RecentVaults" Type="System.Collections.Specialized.StringCollection" Scope="User">
+      <Value Profile="(Default)">&lt;?xml version="1.0" encoding="utf-16"?&gt;
+&lt;ArrayOfString xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /&gt;</Value>
     </Setting>
     <Setting Name="ThemeMode" Type="System.String" Scope="User">
       <Value Profile="(Default)">System</Value>

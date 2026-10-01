@@ -6,6 +6,12 @@ namespace Crypture
 {
     public partial class CryptureEntities : DbContext
     {
+        public CryptureEntities()
+        {
+            // Explicit commits apply SQLite's lock waiting even to single-statement saves with RETURNING.
+            Database.AutoTransactionBehavior = AutoTransactionBehavior.Always;
+        }
+
         public static string ConnectionString { get; set; } = "";
 
         public static string DatabasePath

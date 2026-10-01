@@ -15,6 +15,70 @@
     <SolidColorBrush x:Key="Crypture.DisabledBrush" Color="#687582" />
     <SolidColorBrush x:Key="Crypture.WarningBrush" Color="#9A3412" />
 
+    <Pen x:Key="Crypture.VaultLine" Brush="#808080" Thickness="1.5"
+        StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+    <Pen x:Key="Crypture.VaultAccentLine" Brush="#808080" Thickness="2"
+        StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+    <DrawingGroup x:Key="Crypture.VaultDoor">
+        <DrawingGroup.ClipGeometry>
+            <GeometryGroup FillRule="EvenOdd">
+                <RectangleGeometry Rect="0,0,48,48" />
+                <EllipseGeometry Center="38,37" RadiusX="10" RadiusY="10" />
+            </GeometryGroup>
+        </DrawingGroup.ClipGeometry>
+        <GeometryDrawing Brush="Transparent" Geometry="M0,0 H48 V48 H0 Z" />
+        <GeometryDrawing Brush="Transparent" Pen="{StaticResource Crypture.VaultLine}">
+            <GeometryDrawing.Geometry>
+                <RectangleGeometry Rect="5,4,36,37" RadiusX="3" RadiusY="3" />
+            </GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Pen="{StaticResource Crypture.VaultLine}">
+            <GeometryDrawing.Geometry>
+                <RectangleGeometry Rect="10,9,26,27" RadiusX="1" RadiusY="1" />
+            </GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Pen="{StaticResource Crypture.VaultLine}">
+            <GeometryDrawing.Geometry>
+                <EllipseGeometry Center="23,23" RadiusX="8" RadiusY="8" />
+            </GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Pen="{StaticResource Crypture.VaultLine}"
+            Geometry="M23,15 V31 M15,23 H31 M17.3,17.3 L28.7,28.7 M17.3,28.7 L28.7,17.3" />
+        <GeometryDrawing Brush="#808080">
+            <GeometryDrawing.Geometry>
+                <EllipseGeometry Center="23,23" RadiusX="2.5" RadiusY="2.5" />
+            </GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Pen="{StaticResource Crypture.VaultLine}" Geometry="M5,13 H10 M5,31 H10" />
+        <GeometryDrawing Brush="#808080"
+            Geometry="M10,41 V44 H16 V41 Z M30,41 V44 H36 V41 Z" />
+    </DrawingGroup>
+    <GeometryDrawing x:Key="Crypture.VaultBadge" Brush="Transparent"
+        Pen="{StaticResource Crypture.VaultAccentLine}">
+        <GeometryDrawing.Geometry>
+            <EllipseGeometry Center="38,37" RadiusX="8.5" RadiusY="8.5" />
+        </GeometryDrawing.Geometry>
+    </GeometryDrawing>
+    <DrawingImage x:Key="Crypture.NewVaultIcon">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <StaticResource ResourceKey="Crypture.VaultDoor" />
+                <StaticResource ResourceKey="Crypture.VaultBadge" />
+                <GeometryDrawing Pen="{StaticResource Crypture.VaultAccentLine}" Geometry="M33,37 H43 M38,32 V42" />
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+    <DrawingImage x:Key="Crypture.LoadVaultIcon">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <StaticResource ResourceKey="Crypture.VaultDoor" />
+                <StaticResource ResourceKey="Crypture.VaultBadge" />
+                <GeometryDrawing Pen="{StaticResource Crypture.VaultAccentLine}"
+                    Geometry="M32,37 H43 M38,32 L43,37 L38,42" />
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+
     <local:SecretFontConverter x:Key="Crypture.SecretFontConverter" />
 
     <Style x:Key="Crypture.ControlStyle" TargetType="Control">
@@ -176,11 +240,12 @@
     </Style>
     <Style TargetType="ComboBoxItem" BasedOn="{StaticResource Crypture.ControlStyle}">
         <Setter Property="Padding" Value="6,4" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
                     <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter />
+                        <ContentPresenter VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
@@ -261,11 +326,13 @@
     <Style TargetType="ListBoxItem" BasedOn="{StaticResource Crypture.ControlStyle}">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Padding" Value="3" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
                     <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -289,6 +356,21 @@
     <Style TargetType="DataGridCell">
         <Setter Property="Foreground" Value="{DynamicResource Crypture.TextBrush}" />
         <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DataGridCell">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}"
+                        SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                            SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
                 <Setter Property="Background" Value="{DynamicResource Crypture.SelectionBrush}" />
@@ -825,6 +907,10 @@
         <Setter Property="FocusedBorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
         <Setter Property="CanAddToQuickAccessToolBarDirectly" Value="False" />
     </Style>
+    <Style TargetType="ribbon:RibbonSplitButton" BasedOn="{StaticResource {x:Type ribbon:RibbonMenuButton}}">
+        <Setter Property="CheckedBackground" Value="{DynamicResource Crypture.SelectionBrush}" />
+        <Setter Property="CheckedBorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
+    </Style>
     <Style TargetType="ribbon:RibbonMenuItem" BasedOn="{StaticResource Crypture.ControlStyle}">
         <Setter Property="Background" Value="{DynamicResource Crypture.ControlBrush}" />
         <Setter Property="CheckedBackground" Value="{DynamicResource Crypture.SelectionBrush}" />
@@ -834,5 +920,10 @@
         <Setter Property="PressedBackground" Value="{DynamicResource Crypture.SelectionBrush}" />
         <Setter Property="PressedBorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
         <Setter Property="CanAddToQuickAccessToolBarDirectly" Value="False" />
+    </Style>
+    <Style x:Key="Crypture.RecentVaultMenuItem" TargetType="ribbon:RibbonMenuItem"
+        BasedOn="{StaticResource {x:Type ribbon:RibbonMenuItem}}">
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
 </ResourceDictionary>

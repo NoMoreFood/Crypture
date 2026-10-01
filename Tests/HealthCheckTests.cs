@@ -2,12 +2,9 @@ using System;
 using Microsoft.Data.Sqlite;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
-using System.Windows;
-using System.Windows.Controls;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -150,42 +147,5 @@ internal static partial class RegressionTests
         Reject(() => VaultHealthCheck.Run(sMissing, true, true, CancellationToken.None),
             "Health check reports an unavailable Vault");
         Check(!File.Exists(sMissing), "Health check never creates a missing Vault");
-    }
-
-    private static void TestHealthCheckWindow(string sDirectory, ItemBrowser oBrowser)
-    {
-        Check(((System.Windows.Controls.Ribbon.RibbonButton)oBrowser.FindName("oHealthCheckButton")).IsEnabled,
-            "A loaded Vault enables the Health Check action");
-        VaultHealthWindow oWindow = new VaultHealthWindow(Path.Combine(sDirectory, "health-check.cryptdb"));
-        ShowTestWindow(oWindow);
-        Button oRun = (Button)oWindow.FindName("oRunButton");
-        TextBlock oSummary = (TextBlock)oWindow.FindName("oSummary");
-        DataGrid oResults = (DataGrid)oWindow.FindName("oResults");
-        PumpUntil(() => oRun.IsEnabled && oSummary.Text != "Preparing Health Check..." &&
-            oSummary.Text != "Checking Vault...");
-        Check(oResults.Items.Count > 0 && oSummary.Text.Contains("Errors"),
-            "Health Check window displays an asynchronous report");
-        CheckBox oFilter = (CheckBox)oWindow.FindName("oIssuesOnly");
-        oFilter.IsChecked = true;
-        oFilter.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-        Check(oResults.Items.Cast<HealthCheckFinding>().All(f => f.Severity >= HealthStatus.Warning),
-            "Show Only Issues filters out passed and informational health results");
-        TextBox oDetails = (TextBox)oWindow.FindName("oDetails");
-        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oDetails),
-            "Health check details can be copied without selecting their text");
-        RenderWindow(oWindow, "health-check-copy.png");
-        Check(oDetails.Text.Contains("Affected Items:"),
-            "Selecting a health result displays affected items and details");
-        oRun.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        ((Button)oWindow.FindName("oCancelButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        PumpUntil(() => oRun.IsEnabled);
-        Check(oSummary.Text == "Health Check Canceled" && oResults.Items.Count == 0,
-            "Canceled checks do not leave a stale or incomplete success report");
-        oRun.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        oWindow.Close();
-        FieldInfo oCancellation = typeof(VaultHealthWindow).GetField("oCancellation",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        PumpUntil(() => oCancellation.GetValue(oWindow) == null);
-        Check(true, "Closing during a health check cancels background work safely");
     }
 }

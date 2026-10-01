@@ -55,22 +55,16 @@
                 <StackPanel Margin="14,8,14,12">
                     <Label Content="Item _Label:" Target="{Binding ElementName=oItemLabel}" Padding="0,3"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8EC;" />
-                    <DockPanel>
-                        <Button x:Name="oCopyLabelButton" DockPanel.Dock="Right" Margin="6,0,0,0"
-                            Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy Item Label"
-                            Command="ApplicationCommands.Copy" CommandParameter="All"
-                            CommandTarget="{Binding ElementName=oItemLabel}" />
-                        <TextBox x:Name="oItemLabel" MinHeight="28" Padding="5,3"
-                            Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" TextChanged="oItemChanged"
-                            ToolTip="Labels are visible in the Vault and are not encrypted." />
-                    </DockPanel>
+                    <TextBox x:Name="oItemLabel" MinHeight="28" Padding="5,3"
+                        Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" TextChanged="oItemChanged"
+                        ToolTip="Labels are visible in the Vault and are not encrypted." />
                     <Label Content="Item _Type:" Target="{Binding ElementName=oItemTypeSelector}"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" Margin="0,6,0,0" />
                     <ComboBox x:Name="oItemTypeSelector" MinHeight="28"
                         SelectionChanged="oItemTypeChanged" AutomationProperties.Name="Item Type">
                         <ComboBoxItem Content="Text Secret" />
                         <ComboBoxItem Content="TOTP Authenticator" />
-                        <ComboBoxItem Content="File Attachment" IsEnabled="False" />
+                        <ComboBoxItem Content="File Attachment" />
                     </ComboBox>
                     <Grid Margin="0,8,0,10">
                         <Grid.ColumnDefinitions>

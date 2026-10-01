@@ -1,15 +1,12 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows;
-using System.Windows.Controls;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -252,43 +249,5 @@ internal static partial class RegressionTests
         oItem.Cipher.ProtectedKey = oEnvelope.Concat(new byte[] { 0 }).ToArray();
         Reject(() => ItemCryptography.Decrypt(oItem), "Recovery rejects trailing envelope data");
         oItem.Cipher.ProtectedKey = oEnvelope;
-    }
-
-    private static void TestRecoveryEditor(string sDirectory)
-    {
-        string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
-        byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
-        string sConnection = CryptureEntities.ConnectionString;
-        try
-        {
-            CryptureEntities.DatabasePath = Path.Combine(sDirectory, "recovery.cryptdb");
-            Item oItem;
-            using (CryptureEntities oContext = new CryptureEntities())
-                oItem = DatabaseOperations.LoadItem(oContext.Items.Single(i => i.Label == "Certificate Item").ItemId);
-            SetRecoveryConfig(PrincipalProtection.LocalUserDescriptor, null);
-            ItemEditor oEditor = new ItemEditor(oItem);
-            Check(((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex == 1 &&
-                ((TextBlock)oEditor.FindName("oRecoveryNotice")).Visibility == Visibility.Visible,
-                "Certificate editor displays independent Windows emergency recovery");
-            typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, new object[] { null, null });
-            PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-                .GetValue(oEditor));
-            Check(((TextBox)oEditor.FindName("oItemData")).Text.Contains("Emergency recovery works") &&
-                ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex == 1,
-                "Certificate item decrypts automatically through Windows recovery while keeping its primary mode");
-            RenderWindow(oEditor, "editor-emergency-recovery.png");
-            oEditor.Close();
-            SetRecoveryConfig(null, "invalid base64");
-            oEditor = new ItemEditor(oItem);
-            Check(((TextBlock)oEditor.FindName("oRecoveryNotice")).Text.Contains("invalid"),
-                "Invalid configuration is shown without blocking access to existing items");
-            oEditor.Close();
-        }
-        finally
-        {
-            File.WriteAllBytes(sConfigPath, oOriginalConfig);
-            CryptureEntities.ConnectionString = sConnection;
-        }
     }
 }

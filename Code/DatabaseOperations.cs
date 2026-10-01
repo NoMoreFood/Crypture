@@ -263,7 +263,16 @@ namespace Crypture
                 {
                     oSource.Open();
                     oDestination.Open();
-                    oSource.BackupDatabase(oDestination);
+
+                    // Acquire the read snapshot through a command so normal lock waiting applies to the backup.
+                    using (SqliteTransaction oTransaction = oSource.BeginTransaction(deferred: true))
+                    using (SqliteCommand oCommand = new SqliteCommand(
+                        "SELECT COUNT(*) FROM sqlite_schema", oSource, oTransaction))
+                    {
+                        oCommand.ExecuteScalar();
+                        oSource.BackupDatabase(oDestination);
+                        oTransaction.Commit();
+                    }
                 }
                 File.Move(sTemporary, sDestination);
             }

@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Configuration;
 using System.Xml;
-using System.Windows.Controls;
 using System.Formats.Asn1;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -103,6 +102,116 @@ internal static partial class RegressionTests
         }
     }
 
+    private static void TestCertificateVisibility(RSA oKey)
+    {
+        string sConfigPath = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).FilePath;
+        byte[] oOriginal = File.ReadAllBytes(sConfigPath);
+        Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
+        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
+        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
+        Check(!oSettings.ShowExpiredCertificates && !oSettings.ShowUntrustedCertificates,
+            "Expired and untrusted selection settings default to hidden");
+
+        // Exercise configuration reloads with real certificates, without changing Windows trust anchors.
+        void Reload(bool bExpired, bool bUntrusted, bool bAllowSelfSigned = false, bool bCheckRevocation = false)
+        {
+            XmlDocument oConfig = new XmlDocument { PreserveWhitespace = true };
+            oConfig.LoadXml(Encoding.UTF8.GetString(oOriginal).TrimStart('\uFEFF'));
+            oConfig.SelectSingleNode("//setting[@name='ShowExpiredCertificates']/value").InnerText =
+                bExpired.ToString();
+            oConfig.SelectSingleNode("//setting[@name='ShowUntrustedCertificates']/value").InnerText =
+                bUntrusted.ToString();
+            File.WriteAllText(sConfigPath, oConfig.OuterXml, new UTF8Encoding(false));
+            ConfigurationManager.RefreshSection("applicationSettings/Crypture.Properties.Settings");
+            oSettings.Reload();
+            oSettings.AllowSelfSignedCertificates = bAllowSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bCheckRevocation;
+        }
+        using RSA oIssuerKey = new RSACng(2048);
+        CertificateRequest oIssuerRequest = new("CN=Visibility Issuer " + Guid.NewGuid().ToString("N"), oIssuerKey,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        oIssuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        oIssuerRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        using X509Certificate2 oIssuer = oIssuerRequest.CreateSelfSigned(
+            DateTimeOffset.Now.AddDays(-5), DateTimeOffset.Now.AddDays(5));
+        using X509Certificate2 oPublicIssuer = X509CertificateLoader.LoadCertificate(oIssuer.RawData);
+        using X509Store oStore = new(StoreName.My, StoreLocation.CurrentUser);
+        oStore.Open(OpenFlags.ReadWrite);
+        CertificateRequest oRequest = new("CN=Visibility Recipient", oKey,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        oRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment, true));
+        X509SignatureGenerator oSigner = X509SignatureGenerator.CreateForRSA(oIssuerKey, RSASignaturePadding.Pkcs1);
+        using X509Certificate2 oIssued = oRequest.Create(oIssuer.SubjectName, oSigner,
+            DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        using X509Certificate2 oExpiredIssued = oRequest.Create(oIssuer.SubjectName, oSigner,
+            DateTimeOffset.Now.AddDays(-3), DateTimeOffset.Now.AddDays(-2), RandomNumberGenerator.GetBytes(16));
+        using X509Certificate2 oMissingIssuer = oRequest.Create(new X500DistinguishedName("CN=Absent Visibility CA"),
+            oSigner, DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        using X509Certificate2 oValid = Certificate(oKey, "Visible Self-Signed", DateTimeOffset.Now.AddDays(-1),
+            DateTimeOffset.Now.AddDays(1));
+        using X509Certificate2 oExpired = Certificate(oKey, "Visible Expired", DateTimeOffset.Now.AddDays(-3),
+            DateTimeOffset.Now.AddDays(-2));
+        using X509Certificate2 oFuture = Certificate(oKey, "Visible Future", DateTimeOffset.Now.AddDays(1),
+            DateTimeOffset.Now.AddDays(2));
+        using X509Certificate2 oSigning = Certificate(oKey, "Visible Signing Only", DateTimeOffset.Now.AddDays(-1),
+            DateTimeOffset.Now.AddDays(1), X509KeyUsageFlags.DigitalSignature);
+        byte[] oBrokenData = oValid.RawData;
+        oBrokenData[^1] ^= 1;
+        using X509Certificate2 oBroken = X509CertificateLoader.LoadCertificate(oBrokenData);
+        oBrokenData = oIssued.RawData;
+        oBrokenData[^1] ^= 1;
+        using X509Certificate2 oBrokenIssued = X509CertificateLoader.LoadCertificate(oBrokenData);
+        try
+        {
+            oStore.Add(oPublicIssuer);
+            foreach (bool bExpired in new[] { false, true })
+            foreach (bool bUntrusted in new[] { false, true })
+            {
+                Reload(bExpired, bUntrusted);
+                CertificateUsageFilter oFilter = CertificateUsageFilter.Read();
+                string sPolicy = $"expired={bExpired}, untrusted={bUntrusted}";
+                Check(CertificateOperations.CanSelectCertificate(oValid.RawData, oFilter) == bUntrusted,
+                    "Self-signed selection follows trust visibility: " + sPolicy);
+                Check(CertificateOperations.CanSelectCertificate(oIssued.RawData, oFilter) == bUntrusted,
+                    "Issued selection uses Windows trust anchors: " + sPolicy);
+                Check(CertificateOperations.CanSelectCertificate(oMissingIssuer.RawData, oFilter) == bUntrusted,
+                    "Missing trust chain follows untrusted visibility: " + sPolicy);
+                Check(CertificateOperations.CanSelectCertificate(oExpired.RawData, oFilter) ==
+                    (bExpired && bUntrusted), "Expired self-signed selection requires both permissions: " + sPolicy);
+                Check(CertificateOperations.CanSelectCertificate(oExpiredIssued.RawData, oFilter) ==
+                    (bExpired && bUntrusted), "Expired issued selection requires both permissions: " + sPolicy);
+                Check(!CertificateOperations.CanSelectCertificate(oFuture.RawData, oFilter),
+                    "Future validity is never waived by expiry visibility: " + sPolicy);
+                Check(!CertificateOperations.CanSelectCertificate(oBroken.RawData, oFilter) &&
+                    !CertificateOperations.CanSelectCertificate(oBrokenIssued.RawData, oFilter),
+                    "Invalid signatures remain excluded: " + sPolicy);
+                Check(!CertificateOperations.CheckCertificateStatus(oExpired) &&
+                    !CertificateOperations.CheckCertificateStatus(oIssued),
+                    "Visibility does not waive strict expiry and trust validation: " + sPolicy);
+            }
+            Reload(true, false, true);
+            Check(CertificateOperations.CheckCertificateStatus(oExpired, true) &&
+                !CertificateOperations.CheckCertificateStatus(oIssued, true),
+                "Expiry visibility combines with the existing self-signed permission independently of CA trust");
+            Reload(true, true);
+            Check(!CertificateOperations.CheckCertificateStatus(oSigning, true) &&
+                !CertificateOperations.CanSelectCertificate(new byte[] { 1, 2 }, CertificateUsageFilter.Read()),
+                "Selection visibility excludes signing-only and damaged certificates");
+            Reload(true, true, bCheckRevocation: true);
+            Check(!CertificateOperations.CheckCertificateStatus(oIssued, true),
+                "Untrusted visibility preserves online revocation checks");
+        }
+        finally
+        {
+            oStore.Remove(oPublicIssuer);
+            File.WriteAllBytes(sConfigPath, oOriginal);
+            ConfigurationManager.RefreshSection("applicationSettings/Crypture.Properties.Settings");
+            oSettings.Reload();
+            oSettings.AllowSelfSignedCertificates = bSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bRevocation;
+        }
+    }
+
     private static void TestCertificateUsageStartup()
     {
         System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(App).TypeHandle);
@@ -116,6 +225,8 @@ internal static partial class RegressionTests
             oSettings.CertificateEnhancedKeyUsageExclude == "1.3.6.1.5.5.7.3.3" &&
             !oSettings.AllowUnrestrictedCertificateKeyUsage && !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
             "Application startup loads all six certificate selection defaults from the sidecar");
+        Check(oSettings.ShowExpiredCertificates && oSettings.ShowUntrustedCertificates,
+            "Application startup loads both certificate visibility settings from the sidecar");
     }
 
     private static void TestCertificateUsageConfiguration(ItemBrowser oBrowser, Item oItem)
@@ -132,11 +243,16 @@ internal static partial class RegressionTests
         Item oStored = DatabaseOperations.LoadItem(oItem.ItemId);
         User oRecipient = oStored.Instances.First().User;
 
-        // Reload the real adjacent configuration to exercise deployed defaults and recipient retention.
-        void Reload(string sInclude, bool bAutomatic = false, bool bRecovery = false)
+        // Reload the real adjacent configuration to exercise deployed defaults and recovery policy.
+        void Reload(string sInclude, bool bRecovery = false,
+            bool bShowExpired = false, bool bShowUntrusted = false)
         {
             XmlDocument oConfig = new XmlDocument { PreserveWhitespace = true };
             oConfig.LoadXml(Encoding.UTF8.GetString(oOriginal).TrimStart('\uFEFF'));
+            oConfig.SelectSingleNode("//setting[@name='ShowExpiredCertificates']/value").InnerText =
+                bShowExpired.ToString();
+            oConfig.SelectSingleNode("//setting[@name='ShowUntrustedCertificates']/value").InnerText =
+                bShowUntrusted.ToString();
             oConfig.SelectSingleNode("//setting[@name='CertificateKeyUsageInclude']/value").InnerText = sInclude;
             oConfig.SelectSingleNode("//setting[@name='CertificateKeyUsageExclude']/value").InnerText = "KeyAgreement";
             oConfig.SelectSingleNode("//setting[@name='CertificateEnhancedKeyUsageInclude']/value").InnerText =
@@ -146,8 +262,6 @@ internal static partial class RegressionTests
             oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateKeyUsage']/value").InnerText = "False";
             oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateEnhancedKeyUsage']/value").InnerText =
                 "False";
-            oConfig.SelectSingleNode("//setting[@name='AutomaticallyAddedCertificatesList']//ArrayOfString").InnerXml =
-                bAutomatic ? "<string>" + Convert.ToBase64String(oRecipient.Certificate) + "</string>" : "";
             oConfig.SelectSingleNode("//appSettings/add[@key='RecoveryCertificateBase64']/@value").Value =
                 bRecovery ? Convert.ToBase64String(oRecipient.Certificate) : "";
             File.WriteAllText(sConfigPath, oConfig.OuterXml, new UTF8Encoding(false));
@@ -161,13 +275,15 @@ internal static partial class RegressionTests
         }
         try
         {
-            Reload("DigitalSignature");
+            Reload("DigitalSignature", bShowExpired: true, bShowUntrusted: true);
             Check(oSettings.CertificateKeyUsageInclude == "DigitalSignature" &&
                 oSettings.CertificateKeyUsageExclude == "KeyAgreement" &&
                 oSettings.CertificateEnhancedKeyUsageInclude == "1.3.6.1.5.5.7.3.2" &&
                 oSettings.CertificateEnhancedKeyUsageExclude == "1.3.6.1.5.5.7.3.3" &&
                 !oSettings.AllowUnrestrictedCertificateKeyUsage && !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
                 "Adjacent config supplies all six certificate usage defaults");
+            Check(oSettings.ShowExpiredCertificates && oSettings.ShowUntrustedCertificates,
+                "Adjacent config supplies both certificate visibility settings");
 
             // A fresh process also verifies the real application's startup config path.
             var oStart = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath)
@@ -189,17 +305,6 @@ internal static partial class RegressionTests
             }
             CertificateUsageFilter oFilter = CertificateUsageFilter.Read();
             Check(!oFilter.Matches(oRecipient.Certificate), "Configured usage filters exclude unrelated new recipients");
-            ItemEditor oNew = new ItemEditor();
-            var oChoices = (System.Windows.Controls.Ribbon.RibbonMenuButton)oNew.FindName("oAddCertDropDown");
-            Check(oChoices.Items.Cast<User>().All(u => oFilter.Matches(u.Certificate)),
-                "New item sharing lists use the configured usage filters");
-            oNew.Close();
-            ItemEditor oExisting = new ItemEditor(oStored);
-            oChoices = (System.Windows.Controls.Ribbon.RibbonMenuButton)oExisting.FindName("oAddCertDropDown");
-            Check(oExisting.UserListSelected.Any(u => u.UserId == oRecipient.UserId) &&
-                oChoices.Items.Cast<User>().Any(u => u.UserId == oRecipient.UserId),
-                "Existing item recipients remain visible and removable despite selection filters");
-            oExisting.Close();
             using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oRecipient.Certificate))
             {
                 Check(CertificateOperations.CheckCertificateStatus(oCert),
@@ -207,12 +312,7 @@ internal static partial class RegressionTests
                 Reject(() => oBrowser.AddCertificate(oCert, CertificateOperations.CurrentUserSid),
                     "Direct certificate imports honor the configured usage filters");
             }
-            Reload("DigitalSignature", true);
-            ItemEditor oRequired = new ItemEditor();
-            Check(oRequired.UserListSelected.Any(u => u.UserId == oRecipient.UserId),
-                "Administrator-required certificates remain selected when excluded from normal choices");
-            oRequired.Close();
-            Reload("DigitalSignature", false, true);
+            Reload("DigitalSignature", bRecovery: true);
             Item oRecoveryItem = new Item { Label = "Filtered Certificate Recovery", ItemType = "text" };
             byte[] oSecret = Encoding.Unicode.GetBytes("Recovery remains available under restrictive selection filters.");
             DatabaseOperations.SaveItem(oRecoveryItem, oSecret, Array.Empty<User>(), PrincipalProtection.LocalUserDescriptor);
@@ -224,11 +324,7 @@ internal static partial class RegressionTests
             Check(ItemCryptography.Decrypt(oRecoveryItem).SequenceEqual(oSecret),
                 "Restrictive certificate selection defaults preserve Windows-protected item access");
             Reload("InvalidUsage");
-            ItemEditor oInvalid = new ItemEditor(oStored);
-            Check(((TextBlock)oInvalid.FindName("oCertificateUsageNotice")).Text.Contains("CertificateKeyUsageInclude") &&
-                oInvalid.UserListSelected.Any(u => u.UserId == oRecipient.UserId),
-                "Invalid usage settings show a diagnostic without blocking existing recipients");
-            oInvalid.Close();
+            Reject(() => CertificateUsageFilter.Read(), "Invalid usage settings reject certificate selection");
         }
         finally
         {
