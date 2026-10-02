@@ -14,7 +14,8 @@ namespace Crypture
         {
             InitializeComponent();
             Utilities.EnableClipboardTimeout(oGeneratedPassword);
-            PasswordOptions oOptions = bHasVault ? DatabaseOperations.LoadPasswordOptions() : new PasswordOptions();
+            PasswordOptions oOptions = bHasVault
+                ? DatabaseOperations.LoadPasswordOptions() : PasswordOptions.ReadDefaults();
             if (!bHasVault) oSettingsHint.Text = "No Vault is open. Settings apply only to this window.";
             oMinimumLength.Text = oOptions.MinimumLength.ToString(CultureInfo.InvariantCulture);
             oMaximumLength.Text = oOptions.MaximumLength.ToString(CultureInfo.InvariantCulture);

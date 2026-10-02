@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Reflection;
+using System.Xml.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using Crypture;
@@ -748,6 +749,7 @@ internal static partial class RegressionTests
             TestCertificateUsageConfiguration(oBrowser, oItem);
             TestEditorCertificateLoading(sDirectory);
             TestPasswordGeneratorLayout();
+            TestPasswordGeneratorDefaults(sDirectory);
         }
         finally
         {
@@ -760,6 +762,145 @@ internal static partial class RegressionTests
             }
             oApplication.Shutdown();
             CryptureEntities.DatabasePath = sDatabase;
+        }
+    }
+
+    private static void TestPasswordGeneratorDefaults(string sDirectory)
+    {
+        string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
+        string sPreviousConnection = CryptureEntities.ConnectionString;
+        PasswordGenerator oGenerator = null;
+        MethodInfo oGenerate = typeof(PasswordGenerator).GetMethod("oGenerateButton_Click",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        void Configure(params (string Name, string Value)[] oValues)
+        {
+            XDocument oConfig = XDocument.Parse(Encoding.UTF8.GetString(oOriginalConfig).TrimStart('\uFEFF'),
+                LoadOptions.PreserveWhitespace);
+            XElement oSettings = oConfig.Root.Element("appSettings");
+            oSettings.Elements("add").Where(e => ((string)e.Attribute("key"))
+                .StartsWith("PasswordGenerator", StringComparison.Ordinal)).Remove();
+            foreach (var oValue in oValues)
+                oSettings.Add(new XElement("add", new XAttribute("key", "PasswordGenerator" + oValue.Name),
+                    new XAttribute("value", oValue.Value)));
+            oConfig.Save(sConfigPath, SaveOptions.DisableFormatting);
+        }
+
+        void Invalid(string sDetail)
+        {
+            try
+            {
+                PasswordOptions.ReadDefaults();
+            }
+            catch (InvalidOperationException oError)
+            {
+                Check(oError.GetBaseException().Message.Contains(sConfigPath) && oError.Message.Contains(sDetail),
+                    "Invalid generator configuration identifies the file and error: " + sDetail);
+                return;
+            }
+            throw new Exception("Invalid generator configuration was accepted: " + sDetail);
+        }
+
+        try
+        {
+            // Exercise the adjacent file through both generator entry paths, including XML punctuation.
+            Configure(("MinimumLength", "8"), ("MaximumLength", "12"), ("IncludeUppercase", "False"),
+                ("IncludeLowercase", "False"), ("IncludeDigits", "False"), ("IncludeSymbols", "True"),
+                ("SymbolCharacters", "!&\"'<>|"), ("ExcludedCharacters", "!&\"'<>"),
+                ("ExcludeSimilar", "False"), ("RequireEachType", "False"));
+            CryptureEntities.ConnectionString = "";
+            oGenerator = new PasswordGenerator();
+            Check(((TextBox)oGenerator.FindName("oMinimumLength")).Text == "8" &&
+                ((TextBox)oGenerator.FindName("oMaximumLength")).Text == "12" &&
+                ((CheckBox)oGenerator.FindName("oUppercase")).IsChecked == false &&
+                ((CheckBox)oGenerator.FindName("oLowercase")).IsChecked == false &&
+                ((CheckBox)oGenerator.FindName("oDigits")).IsChecked == false &&
+                ((CheckBox)oGenerator.FindName("oSymbols")).IsChecked == true &&
+                ((TextBox)oGenerator.FindName("oSymbolCharacters")).Text == "!&\"'<>|" &&
+                ((TextBox)oGenerator.FindName("oExcludedCharacters")).Text == "!&\"'<>" &&
+                ((CheckBox)oGenerator.FindName("oExcludeSimilar")).IsChecked == false &&
+                ((CheckBox)oGenerator.FindName("oRequireEachType")).IsChecked == false,
+                "Standalone generator loads all ten configured defaults");
+            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            string sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
+            Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
+                "Configured symbols, exclusions, lengths, and similar-character choice control generated output");
+            oGenerator.Close();
+
+            string sVault = Path.Combine(sDirectory, "password-defaults.cryptdb");
+            DatabaseOperations.CreateDatabase(sVault,
+                File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
+            CryptureEntities.DatabasePath = sVault;
+            oGenerator = new PasswordGenerator();
+            Check(((TextBox)oGenerator.FindName("oMinimumLength")).Text == "8" &&
+                ((TextBox)oGenerator.FindName("oMaximumLength")).Text == "12",
+                "A Vault without generator preferences uses configured defaults");
+            using (CryptureEntities oContext = new CryptureEntities())
+                Check(oContext.Database.SqlQueryRaw<long>(
+                    "SELECT COUNT(*) AS Value FROM PasswordGeneratorSettings").Single() == 0,
+                    "Opening a generator does not save defaults into the Vault");
+            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.Close();
+            Check(DatabaseOperations.LoadPasswordOptions().GetCharacterGroups().Single() == "|",
+                "Generating saves the configured preferences into the Vault");
+
+            // Reopening sees new defaults, while saved Vault preferences remain independent of that file.
+            Configure(("MinimumLength", "1"), ("MaximumLength", "1"), ("IncludeUppercase", "True"),
+                ("IncludeLowercase", "True"), ("IncludeDigits", "False"), ("IncludeSymbols", "False"),
+                ("RequireEachType", "False"));
+            CryptureEntities.ConnectionString = "";
+            oGenerator = new PasswordGenerator();
+            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
+            Check(sPassword.Length == 1 && Char.IsAsciiLetter(sPassword[0]),
+                "Reopening reads changed defaults and allows optional character-type coverage");
+            oGenerator.Close();
+            CryptureEntities.DatabasePath = sVault;
+            oGenerator = new PasswordGenerator();
+            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
+            Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
+                "Saved Vault preferences override changed application defaults");
+            oGenerator.Close();
+
+            Configure(("IncludeDigits", "yes"));
+            Invalid("PasswordGeneratorIncludeDigits");
+            Check(DatabaseOperations.LoadPasswordOptions().GetCharacterGroups().Single() == "|",
+                "Invalid unused defaults do not prevent loading saved Vault preferences");
+            Configure(("MinimumLength", "twenty"));
+            Invalid("PasswordGeneratorMinimumLength");
+            Configure(("MinimumLength", "32"), ("MaximumLength", "16"));
+            Invalid("Lengths must be between");
+            Configure(("IncludeUppercase", "False"), ("IncludeLowercase", "False"),
+                ("IncludeDigits", "False"), ("IncludeSymbols", "False"));
+            Invalid("Select at least one character type");
+            Configure(("SymbolCharacters", "not punctuation"));
+            Invalid("Allowed symbols must be ASCII punctuation");
+            Configure(("ExcludedCharacters", "0123456789"));
+            Invalid("Each selected character type must have at least one allowed character");
+
+            // Missing settings use built-in defaults; explicit empty lists retain their meaning.
+            Configure(("IncludeSymbols", "False"), ("SymbolCharacters", ""), ("ExcludedCharacters", ""));
+            PasswordOptions oDefaults = PasswordOptions.ReadDefaults();
+            Check(oDefaults.MinimumLength == 20 && oDefaults.MaximumLength == 24 &&
+                oDefaults.IncludeUppercase && oDefaults.IncludeLowercase && oDefaults.IncludeDigits &&
+                !oDefaults.IncludeSymbols && oDefaults.ExcludeSimilar && oDefaults.RequireEachType &&
+                oDefaults.SymbolCharacters == "" && oDefaults.ExcludedCharacters == "",
+                "Partial configuration preserves omitted defaults and explicit empty character lists");
+            File.WriteAllText(sConfigPath, "<configuration><appSettings>");
+            Invalid("Invalid password generator defaults");
+            File.Delete(sConfigPath);
+            oDefaults = PasswordOptions.ReadDefaults();
+            Check(oDefaults.MinimumLength == 20 && oDefaults.MaximumLength == 24 &&
+                oDefaults.GetCharacterGroups().Count == 4 && !File.Exists(sConfigPath),
+                "Missing configuration uses built-in defaults without creating a file");
+        }
+        finally
+        {
+            oGenerator?.Close();
+            File.WriteAllBytes(sConfigPath, oOriginalConfig);
+            CryptureEntities.ConnectionString = sPreviousConnection;
         }
     }
 

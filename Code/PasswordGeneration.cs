@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 
@@ -17,6 +20,52 @@ namespace Crypture
         public string ExcludedCharacters { get; set; } = "";
         public bool ExcludeSimilar { get; set; } = true;
         public bool RequireEachType { get; set; } = true;
+
+        internal static PasswordOptions ReadDefaults()
+        {
+            // Read the adjacent configuration when opening a generator without saved Vault preferences.
+            string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+            try
+            {
+                Configuration oConfig = ConfigurationManager.OpenMappedExeConfiguration(
+                    new ExeConfigurationFileMap { ExeConfigFilename = sPath }, ConfigurationUserLevel.None);
+                string Read(string sName, string sDefault) =>
+                    oConfig.AppSettings.Settings["PasswordGenerator" + sName]?.Value ?? sDefault;
+
+                int ReadNumber(string sName, int nDefault)
+                {
+                    if (Int32.TryParse(Read(sName, nDefault.ToString(CultureInfo.InvariantCulture)).Trim(),
+                        NumberStyles.None, CultureInfo.InvariantCulture, out int nValue)) return nValue;
+                    throw new InvalidOperationException("PasswordGenerator" + sName + " must be a whole number.");
+                }
+
+                bool ReadFlag(string sName, bool bDefault)
+                {
+                    if (Boolean.TryParse(Read(sName, bDefault.ToString()), out bool bValue)) return bValue;
+                    throw new InvalidOperationException("PasswordGenerator" + sName + " must be True or False.");
+                }
+
+                // Preserve built-in defaults for omitted keys and validate the complete character policy.
+                PasswordOptions oOptions = new PasswordOptions();
+                oOptions.MinimumLength = ReadNumber(nameof(MinimumLength), oOptions.MinimumLength);
+                oOptions.MaximumLength = ReadNumber(nameof(MaximumLength), oOptions.MaximumLength);
+                oOptions.IncludeUppercase = ReadFlag(nameof(IncludeUppercase), oOptions.IncludeUppercase);
+                oOptions.IncludeLowercase = ReadFlag(nameof(IncludeLowercase), oOptions.IncludeLowercase);
+                oOptions.IncludeDigits = ReadFlag(nameof(IncludeDigits), oOptions.IncludeDigits);
+                oOptions.IncludeSymbols = ReadFlag(nameof(IncludeSymbols), oOptions.IncludeSymbols);
+                oOptions.SymbolCharacters = Read(nameof(SymbolCharacters), oOptions.SymbolCharacters);
+                oOptions.ExcludedCharacters = Read(nameof(ExcludedCharacters), oOptions.ExcludedCharacters);
+                oOptions.ExcludeSimilar = ReadFlag(nameof(ExcludeSimilar), oOptions.ExcludeSimilar);
+                oOptions.RequireEachType = ReadFlag(nameof(RequireEachType), oOptions.RequireEachType);
+                oOptions.GetCharacterGroups();
+                return oOptions;
+            }
+            catch (Exception oError) when (oError is ConfigurationErrorsException or InvalidOperationException)
+            {
+                throw new InvalidOperationException("Invalid password generator defaults in " + sPath + ": " +
+                    oError.Message);
+            }
+        }
 
         internal List<string> GetCharacterGroups()
         {

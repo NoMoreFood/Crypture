@@ -173,7 +173,7 @@ namespace Crypture
                 PasswordOptions oOptions = oContent.Database.SqlQueryRaw<PasswordOptions>(
                     "SELECT MinimumLength, MaximumLength, IncludeUppercase, IncludeLowercase, IncludeDigits, " +
                     "IncludeSymbols, SymbolCharacters, ExcludedCharacters, ExcludeSimilar, RequireEachType " +
-                    "FROM PasswordGeneratorSettings WHERE Id = 1").SingleOrDefault() ?? new PasswordOptions();
+                    "FROM PasswordGeneratorSettings WHERE Id = 1").SingleOrDefault() ?? PasswordOptions.ReadDefaults();
                 oOptions.GetCharacterGroups();
                 return oOptions;
             }
