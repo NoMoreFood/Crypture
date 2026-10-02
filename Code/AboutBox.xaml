@@ -24,7 +24,7 @@
             <TabItem Header="Crypture License">
                 <TextBox IsReadOnly="True" ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Visible" TextWrapping="Wrap" Text="{x:Static local:Licenses.Crypture}" />
             </TabItem>
-            <TabItem Header=".NET and SQLite">
+            <TabItem Header="Dependency Licenses">
                 <TextBox x:Name="oRuntimeNotices" IsReadOnly="True" TextWrapping="Wrap"
                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
             </TabItem>

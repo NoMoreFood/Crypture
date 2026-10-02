@@ -1,8 +1,17 @@
+using Microsoft.Win32;
 using System;
 using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using ZXing;
+using ZXing.Common;
 
 namespace Crypture
 {
@@ -12,6 +21,7 @@ namespace Crypture
         private TotpSecret oSecret;
         private bool bLoading = true;
         private bool bActive;
+        private int nQrImport;
         internal Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
         internal event EventHandler SettingsChanged;
 
@@ -34,6 +44,9 @@ namespace Crypture
 
         internal void SetActive(bool bEnabled)
         {
+            nQrImport++;
+            oSetupFields.IsEnabled = true;
+            oQrImportStatus.Text = "";
             bActive = bEnabled;
             RefreshSecret();
             UpdateTimer();
@@ -182,6 +195,104 @@ namespace Crypture
             });
         }
 
+        internal static TotpSecret ReadQrFile(string sPath)
+        {
+            using FileStream oFile = File.OpenRead(sPath);
+            if (oFile.Length > Utilities.MaxItemSize)
+                throw new InvalidOperationException("Image files must be no larger than 64 MB.");
+            return ReadQrImage(BitmapFrame.Create(oFile, BitmapCreateOptions.IgnoreColorProfile,
+                BitmapCacheOption.None));
+        }
+
+        internal static TotpSecret ReadQrImage(BitmapSource oImage)
+        {
+            if (oImage == null || (long)oImage.PixelWidth * oImage.PixelHeight > Utilities.MaxItemSize / 4)
+                throw new InvalidOperationException("Choose an image containing a setup QR code, " +
+                    "and crop it to the code if the image is too large.");
+
+            // Normalize WPF image formats, including transparency, without external imaging dependencies.
+            FormatConvertedBitmap oBitmap = new FormatConvertedBitmap(oImage, PixelFormats.Bgra32, null, 0);
+            int nStride = oBitmap.PixelWidth * 4;
+            byte[] oPixels = new byte[nStride * oBitmap.PixelHeight];
+            try
+            {
+                oBitmap.CopyPixels(oPixels, nStride, 0);
+                RGBLuminanceSource oSource = new RGBLuminanceSource(oPixels, oBitmap.PixelWidth,
+                    oBitmap.PixelHeight, RGBLuminanceSource.BitmapFormat.BGRA32);
+                BarcodeReaderGeneric oReader = new BarcodeReaderGeneric
+                {
+                    AutoRotate = true,
+                    Options = new DecodingOptions { PossibleFormats = [BarcodeFormat.QR_CODE], TryHarder = true }
+                };
+
+                // Scan both polarities and reject ambiguous setups instead of choosing an account silently.
+                string[] oLinks = new[] { oSource, oSource.invert() }
+                    .SelectMany(s => oReader.DecodeMultiple(s) ?? [])
+                    .Select(r => r.Text?.Trim())
+                    .Where(s => s != null && s.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.Ordinal).ToArray();
+                if (oLinks.Length != 1)
+                    throw new InvalidOperationException(oLinks.Length == 0
+                        ? "No authenticator setup QR code was found. Choose a clear image of a TOTP setup code."
+                        : "More than one authenticator setup QR code was found. Crop the image to the code to import.");
+                return TotpSecret.Parse(oLinks[0]);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(oPixels);
+            }
+        }
+
+        internal async Task ImportQrCodeAsync(Func<TotpSecret> oReadCode)
+        {
+            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            int nImport = ++nQrImport;
+            oSetupFields.IsEnabled = false;
+            oQrImportStatus.Text = "Reading QR code...";
+            try
+            {
+                // Decode off the dispatcher; locking or changing item type invalidates the pending result.
+                using TotpSecret oValue = await Task.Run(oReadCode);
+                if (nImport == nQrImport && bActive && IsEnabled) ApplySecret(oValue);
+            }
+            catch (Exception) when (nImport != nQrImport || !bActive || !IsEnabled) { }
+            finally
+            {
+                if (nImport == nQrImport)
+                {
+                    oSetupFields.IsEnabled = true;
+                    oQrImportStatus.Text = "";
+                }
+            }
+        }
+
+        private async void oImportQrImage_Click(object sender, RoutedEventArgs e)
+        {
+            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            OpenFileDialog oDialog = new OpenFileDialog
+            {
+                Title = "Import Authenticator QR Code",
+                Filter = "Image Files (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff)|" +
+                    "*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|All Files (*.*)|*.*"
+            };
+            if (oDialog.ShowDialog(Window.GetWindow(this)) != true) return;
+            await Utilities.TryOperationAsync(Window.GetWindow(this),
+                () => ImportQrCodeAsync(() => ReadQrFile(oDialog.FileName)));
+        }
+
+        private async void oPasteQrImage_Click(object sender, RoutedEventArgs e)
+        {
+            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            await Utilities.TryOperationAsync(Window.GetWindow(this), () =>
+            {
+                // Clipboard access stays on the UI thread; freeze the snapshot before background decoding.
+                BitmapSource oImage = Clipboard.GetImage() ?? throw new InvalidOperationException(
+                    "Copy an image or screenshot containing a setup QR code first.");
+                oImage.Freeze();
+                return ImportQrCodeAsync(() => ReadQrImage(oImage));
+            });
+        }
+
         private void oGenerateSecret_Click(object sender, RoutedEventArgs e)
         {
             oSecretInput.Text = TotpSecret.Generate((string)oAlgorithm.SelectedValue);
@@ -189,6 +300,9 @@ namespace Crypture
 
         internal void Clear()
         {
+            nQrImport++;
+            oSetupFields.IsEnabled = true;
+            oQrImportStatus.Text = "";
             bActive = false;
             oTimer.Stop();
             oSecret?.Dispose();

@@ -26,7 +26,7 @@
                 <Run Text="Keep Windows time in sync with the service." />
             </TextBlock>
             <Expander x:Name="oSetup" Header="Authenticator Setup" IsExpanded="True">
-                <StackPanel Margin="0,10,0,0">
+                <StackPanel x:Name="oSetupFields" Margin="0,10,0,0">
                     <Label Content="Import Setup _Link or Base32 Secret:" Target="{Binding ElementName=oImportInput}"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A7;" />
                     <DockPanel Margin="0,0,0,10">
@@ -36,6 +36,16 @@
                             IsUndoEnabled="False" AutomationProperties.Name="TOTP Setup Link or Base32 Secret"
                             ToolTip="Paste an otpauth://totp/ setup link or the service's Base32 secret." />
                     </DockPanel>
+                    <WrapPanel Margin="0,0,0,4">
+                        <Button Content="Import _QR Image..." Padding="10,4" Margin="0,0,8,6"
+                            Click="oImportQrImage_Click" Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8A7;"
+                            ToolTip="Import an authenticator setup QR code from an image file." />
+                        <Button Content="Paste QR Imag_e" Padding="10,4" Margin="0,0,0,6"
+                            Click="oPasteQrImage_Click" Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8C8;"
+                            ToolTip="Import an authenticator setup QR code from a clipboard image or screenshot." />
+                    </WrapPanel>
+                    <TextBlock x:Name="oQrImportStatus" TextWrapping="Wrap"
+                        Foreground="{DynamicResource Crypture.MutedBrush}" AutomationProperties.LiveSetting="Polite" />
                     <Label Content="_Issuer:" Target="{Binding ElementName=oIssuer}"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE80F;" />
                     <TextBox x:Name="oIssuer" MinHeight="28" Padding="5,3" MaxLength="256" IsUndoEnabled="False"

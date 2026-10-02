@@ -5,8 +5,15 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Crypture;
+using ZXing;
+using ZXing.QrCode;
 
 internal static partial class RegressionTests
 {
@@ -114,6 +121,8 @@ internal static partial class RegressionTests
         ItemEditor oEditor = null;
         try
         {
+            TestTotpQrImport(sDirectory);
+
             // Verify encrypted persistence without relying on the import or save dialog flow.
             DatabaseOperations.CreateDatabase(sVault,
                 File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
@@ -158,6 +167,177 @@ internal static partial class RegressionTests
             CryptographicOperations.ZeroMemory(oPayload);
             if (oPlain != null) CryptographicOperations.ZeroMemory(oPlain);
             CryptureEntities.ConnectionString = sConnection;
+        }
+    }
+
+    private static BitmapSource CreateQrScreenshot(string[] oValues, bool bInverted = false, bool bTransparent = false)
+    {
+        const int nSize = 320, nMargin = 32;
+        int nWidth = Math.Max(1, oValues.Length) * (nSize + nMargin) + nMargin;
+        int nHeight = nSize + nMargin * 2;
+        int nStride = nWidth * 4;
+        byte[] oPixels = new byte[nStride * nHeight];
+        if (!bTransparent) Array.Fill(oPixels, (byte)255);
+        for (int nCode = 0; nCode < oValues.Length; nCode++)
+        {
+            var oCode = new QRCodeWriter().encode(oValues[nCode], BarcodeFormat.QR_CODE, nSize, nSize);
+            for (int nY = 0; nY < nSize; nY++)
+                for (int nX = 0; nX < nSize; nX++)
+                {
+                    int nPixel = (nY + nMargin) * nStride + (nX + nMargin + nCode * (nSize + nMargin)) * 4;
+                    byte nValue = oCode[nX, nY] || bTransparent ? (byte)0 : (byte)255;
+                    oPixels[nPixel] = oPixels[nPixel + 1] = oPixels[nPixel + 2] = nValue;
+                    oPixels[nPixel + 3] = bTransparent && !oCode[nX, nY] ? (byte)0 : (byte)255;
+                }
+        }
+        if (bInverted)
+            for (int nPixel = 0; nPixel < oPixels.Length; nPixel += 4)
+                for (int nChannel = 0; nChannel < 3; nChannel++)
+                    oPixels[nPixel + nChannel] = (byte)(255 - oPixels[nPixel + nChannel]);
+        BitmapSource oImage = BitmapSource.Create(nWidth, nHeight, 96, 96, PixelFormats.Bgra32, null,
+            oPixels, nStride);
+        oImage.Freeze();
+        CryptographicOperations.ZeroMemory(oPixels);
+        return oImage;
+    }
+
+    private static void TestTotpQrImport(string sDirectory)
+    {
+        string sUri = "otpauth://totp/Acme%20%26%20Co:alice%2Bops%40example.com?secret=" + RfcTotpSecret +
+            "&issuer=Acme%20%26%20Co&algorithm=SHA256&digits=8&period=60";
+        string sOther = "otpauth://totp/Other:second%40example.com?secret=" + RfcTotpSecret;
+        BitmapSource oImage = CreateQrScreenshot([sUri]);
+        TotpPanel oPanel = new TotpPanel { Clock = () => DateTimeOffset.FromUnixTimeSeconds(59) };
+        int nChanges = 0;
+        oPanel.SettingsChanged += (s, e) => nChanges++;
+        Task Import(Func<TotpSecret> oReader) => oPanel.Dispatcher
+            .InvokeAsync(() => oPanel.ImportQrCodeAsync(oReader)).Task.Unwrap();
+        void Complete(Task oTask)
+        {
+            PumpUntil(() => oTask.IsCompleted);
+            oTask.GetAwaiter().GetResult();
+        }
+        try
+        {
+            // Decode real image formats and screenshot variations rather than mocking QR results.
+            BitmapEncoder[] oEncoders = [new PngBitmapEncoder(), new JpegBitmapEncoder(), new BmpBitmapEncoder(),
+                new GifBitmapEncoder(), new TiffBitmapEncoder()];
+            string[] oExtensions = ["png", "jpg", "bmp", "gif", "tiff"];
+            for (int nFormat = 0; nFormat < oEncoders.Length; nFormat++)
+            {
+                string sPath = Path.Combine(sDirectory, "authenticator-qr." + oExtensions[nFormat]);
+                oEncoders[nFormat].Frames.Add(BitmapFrame.Create(oImage));
+                using (FileStream oOutput = File.Create(sPath)) oEncoders[nFormat].Save(oOutput);
+                using TotpSecret oRead = TotpPanel.ReadQrFile(sPath);
+                Check(oRead.GetBase32() == RfcTotpSecret && oRead.Issuer == "Acme & Co" &&
+                    oRead.Account == "alice+ops@example.com" && oRead.Algorithm == "SHA256" &&
+                    oRead.Digits == 8 && oRead.Period == 60,
+                    "Import the complete authenticator setup from a " + oExtensions[nFormat] + " QR image");
+                using FileStream oExclusive = File.Open(sPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                Check(oExclusive.Length > 0, "QR import releases the " + oExtensions[nFormat] + " image file");
+            }
+            foreach (BitmapSource oVariant in new BitmapSource[]
+            {
+                new FormatConvertedBitmap(oImage, PixelFormats.Gray8, null, 0),
+                new TransformedBitmap(oImage, new RotateTransform(90)),
+                CreateQrScreenshot([sUri], bInverted: true),
+                CreateQrScreenshot([sUri], bTransparent: true),
+                CreateQrScreenshot(["https://example.com/", sUri]),
+                CreateQrScreenshot([sUri, sUri])
+            })
+            {
+                using TotpSecret oRead = TotpPanel.ReadQrImage(oVariant);
+                Check(oRead.ToUri() == sUri,
+                    "Decode rotated, grayscale, transparent, inverted, or mixed QR screenshots");
+            }
+
+            // Image and file imports must update the same editor settings and mark the item as changed.
+            oPanel.SetActive(true);
+            Complete(Import(() => TotpPanel.ReadQrFile(Path.Combine(sDirectory, "authenticator-qr.png"))));
+            using TotpSecret oExpected = TotpSecret.Parse(sUri);
+            Check(oPanel.ReadUri() == sUri && nChanges == 1 &&
+                ((TextBox)oPanel.FindName("oCurrentCode")).Text == oExpected.GetCode(oPanel.Clock()),
+                "QR file import fills every setup field, refreshes the code, and raises one change notification");
+            Complete(Import(() => TotpPanel.ReadQrImage(CreateQrScreenshot([sOther]))));
+            Check(oPanel.ReadUri().Contains("second%40example.com") && nChanges == 2,
+                "QR screenshot import uses the same authenticator editor flow");
+            string sBefore = oPanel.ReadUri();
+            foreach (string[] oInvalid in new string[][]
+            {
+                [], ["https://example.com/"], ["otpauth://hotp/Account?secret=" + RfcTotpSecret + "&counter=1"],
+                ["otpauth://totp/Account?secret=AAAA"], [sUri, sOther]
+            })
+            {
+                BitmapSource oInvalidImage = CreateQrScreenshot(oInvalid);
+                Reject(() => Complete(Import(() => TotpPanel.ReadQrImage(oInvalidImage))),
+                    "Reject absent, unrelated, unsupported, malformed, or ambiguous setup QR codes");
+                Check(oPanel.ReadUri() == sBefore && nChanges == 2 &&
+                    ((StackPanel)oPanel.FindName("oSetupFields")).IsEnabled &&
+                    ((TextBlock)oPanel.FindName("oQrImportStatus")).Text.Length == 0,
+                    "Failed QR imports preserve the existing authenticator and restore setup controls");
+            }
+            string sBroken = Path.Combine(sDirectory, "broken-qr.png");
+            File.WriteAllBytes(sBroken, [1, 2, 3]);
+            Reject(() => Complete(Import(() => TotpPanel.ReadQrFile(sBroken))), "Reject unreadable QR image files");
+            Reject(() => { using TotpSecret oRead = TotpPanel.ReadQrImage(null); }, "Reject a missing clipboard image");
+            string sLarge = Path.Combine(sDirectory, "large-qr.png");
+            using (FileStream oLarge = File.Create(sLarge)) oLarge.SetLength(Utilities.MaxItemSize + 1L);
+            Reject(() => { using TotpSecret oRead = TotpPanel.ReadQrFile(sLarge); }, "Reject oversized QR image files");
+
+            // A pending background decode cannot overwrite another import or bring a locked seed back.
+            using ManualResetEventSlim oStarted = new ManualResetEventSlim();
+            using ManualResetEventSlim oRelease = new ManualResetEventSlim();
+            TotpSecret oDecoded = null;
+            int nUnexpectedReads = 0;
+            Task oPending = Import(() =>
+            {
+                oStarted.Set();
+                if (!oRelease.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("QR test was not released.");
+                oDecoded = TotpPanel.ReadQrImage(oImage);
+                return oDecoded;
+            });
+            try
+            {
+                PumpUntil(() => oStarted.IsSet);
+                Complete(Import(() => { nUnexpectedReads++; return TotpPanel.ReadQrImage(oImage); }));
+                Check(nUnexpectedReads == 0, "A second QR import cannot race the current setup operation");
+                oPanel.Clear();
+                Check(((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
+                    "Locking clears the authenticator while QR decoding is still in progress");
+                oPanel.SetActive(true);
+                Complete(Import(() => TotpPanel.ReadQrImage(CreateQrScreenshot([sOther]))));
+                sBefore = oPanel.ReadUri();
+            }
+            finally
+            {
+                oRelease.Set();
+                PumpUntil(() => oPending.IsCompleted);
+            }
+            oPending.GetAwaiter().GetResult();
+            Check(oPanel.ReadUri() == sBefore && nChanges == 3,
+                "An import invalidated by locking cannot overwrite a later authenticator setup");
+            Reject(() => oDecoded.GetCode(DateTimeOffset.UtcNow), "A discarded QR setup disposes its decoded seed");
+
+            string sRenderDirectory = Environment.GetEnvironmentVariable("CRYPTURE_TEST_RENDER_DIR");
+            if (!String.IsNullOrEmpty(sRenderDirectory))
+            {
+                Directory.CreateDirectory(sRenderDirectory);
+                oPanel.Background = (Brush)oPanel.FindResource("Crypture.WindowBrush");
+                oPanel.Foreground = (Brush)oPanel.FindResource("Crypture.TextBrush");
+                oPanel.Measure(new Size(640, 1100));
+                oPanel.Arrange(new Rect(0, 0, 640, 1100));
+                oPanel.UpdateLayout();
+                RenderTargetBitmap oRender = new RenderTargetBitmap(640, 1100, 96, 96, PixelFormats.Pbgra32);
+                oRender.Render(oPanel);
+                PngBitmapEncoder oEncoder = new PngBitmapEncoder();
+                oEncoder.Frames.Add(BitmapFrame.Create(oRender));
+                using FileStream oOutput = File.Create(Path.Combine(sRenderDirectory, "totp-qr-import.png"));
+                oEncoder.Save(oOutput);
+            }
+        }
+        finally
+        {
+            oPanel.Clear();
         }
     }
 }
