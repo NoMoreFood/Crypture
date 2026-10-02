@@ -1,8 +1,11 @@
 ﻿using Microsoft.Win32;
 using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Security;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -126,5 +129,69 @@ namespace Crypture
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hWindow, int nAttribute, ref int nValue, int nSize);
+    }
+
+    internal static class PortableStartup
+    {
+        [STAThread]
+        private static void Main()
+        {
+            if (TryRestartWithLocalExtraction()) return;
+            RunApplication();
+        }
+
+        // Defer WPF initialization until native library probing completes.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void RunApplication() => App.Main();
+
+        internal static bool TryRestartWithLocalExtraction()
+        {
+            try
+            {
+                // Retry once using a cache beside the portable executable.
+                const string sVariable = "DOTNET_BUNDLE_EXTRACT_BASE_DIR";
+                string sLocalCache = Path.Combine(AppContext.BaseDirectory, ".net");
+                string sCurrentCache = Environment.GetEnvironmentVariable(sVariable);
+                if (!string.IsNullOrEmpty(sCurrentCache) &&
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(sCurrentCache)).Equals(sLocalCache,
+                        StringComparison.OrdinalIgnoreCase)) return false;
+
+                // Probe extracted native libraries before WPF or SQLite initializes.
+                string sSearchPaths = AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES") as string ?? "";
+                foreach (string sDirectory in sSearchPaths.Split(Path.PathSeparator,
+                    StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!Directory.Exists(sDirectory) || Path.TrimEndingDirectorySeparator(sDirectory).Equals(
+                        Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory),
+                            StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (string sLibrary in Directory.EnumerateFiles(sDirectory, "*.dll"))
+                    {
+                        if (NativeLibrary.TryLoad(sLibrary, out IntPtr hLibrary))
+                        {
+                            NativeLibrary.Free(hLibrary);
+                            continue;
+                        }
+
+                        // Preserve arguments and change extraction only for the restarted process.
+                        Directory.CreateDirectory(sLocalCache);
+                        ProcessStartInfo oStart = new ProcessStartInfo(Environment.ProcessPath)
+                        {
+                            UseShellExecute = false, CreateNoWindow = true
+                        };
+                        foreach (string sArgument in Environment.GetCommandLineArgs().AsSpan(1))
+                            oStart.ArgumentList.Add(sArgument);
+                        oStart.Environment[sVariable] = sLocalCache;
+                        using Process oProcess = Process.Start(oStart);
+                        return oProcess != null;
+                    }
+                }
+            }
+            catch (Exception oError) when (oError is IOException || oError is UnauthorizedAccessException ||
+                oError is SecurityException || oError is Win32Exception)
+            {
+                // Keep the original startup path if the local cache or restart is unavailable.
+            }
+            return false;
+        }
     }
 }

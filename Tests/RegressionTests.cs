@@ -2,6 +2,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -50,6 +51,8 @@ internal static partial class RegressionTests
     {
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ROLE") is string sRole)
             return RunConcurrencyWorker(sRole);
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_DIRECTORY") != null)
+            return RunPortableStartupWorker();
         string sDirectory = Path.Combine(Path.GetTempPath(), "Crypture.Tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(sDirectory);
         try
@@ -59,6 +62,7 @@ internal static partial class RegressionTests
                 TestCertificateUsageStartup();
                 return 0;
             }
+            TestPortableExtraction(sDirectory);
             using (RSA oKey = new RSACng(2048))
             using (RSA oOtherKey = new RSACng(2048))
             using (X509Certificate2 oCert = Certificate(oKey, "Test", DateTimeOffset.Now.AddDays(-1),
@@ -98,6 +102,67 @@ internal static partial class RegressionTests
             GC.WaitForPendingFinalizers();
             SqliteConnection.ClearAllPools();
             Directory.Delete(sDirectory, true);
+        }
+    }
+
+    private static int RunPortableStartupWorker()
+    {
+        AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY",
+            Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_BASE"));
+        AppContext.SetData("NATIVE_DLL_SEARCH_DIRECTORIES",
+            Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_DIRECTORY"));
+        if (PortableStartup.TryRestartWithLocalExtraction()) return 0;
+        string sResult = Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_RESULT");
+        File.WriteAllLines(sResult + ".tmp",
+            new[] { Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR") ?? "",
+                Environment.ProcessId.ToString() }.Concat(Environment.GetCommandLineArgs().Skip(1)));
+        File.Move(sResult + ".tmp", sResult);
+        return 0;
+    }
+
+    private static void TestPortableExtraction(string sDirectory)
+    {
+        string[] sArguments = [@"Vault folder\test vault.db", "argument with \"quotes\"", @"trailing\", "Unicode: \u2603"];
+        foreach (string sScenario in new[] { "Valid", "Failed", "Retried", "Unwritable" })
+        {
+            string sRoot = Path.Combine(sDirectory, "Portable", sScenario);
+            string sNativeDirectory = Path.Combine(sRoot, "Native");
+            string sApplicationDirectory = Path.Combine(sRoot, "Application");
+            Directory.CreateDirectory(sNativeDirectory);
+            Directory.CreateDirectory(sApplicationDirectory);
+            if (sScenario == "Valid")
+                File.Copy(Path.Combine(Environment.SystemDirectory, "version.dll"),
+                    Path.Combine(sNativeDirectory, "version.dll"));
+            else File.WriteAllBytes(Path.Combine(sNativeDirectory, "Invalid.dll"), [1, 2, 3]);
+            string sLocalCache = Path.Combine(sApplicationDirectory, ".net");
+            if (sScenario == "Unwritable") File.WriteAllText(sLocalCache, "The cache path is occupied by a file.");
+            string sResult = Path.Combine(sRoot, "Result.txt");
+            ProcessStartInfo oStart = new ProcessStartInfo(Environment.ProcessPath)
+            {
+                UseShellExecute = false, CreateNoWindow = true
+            };
+            foreach (string sArgument in sArguments) oStart.ArgumentList.Add(sArgument);
+            oStart.Environment["CRYPTURE_TEST_PORTABLE_DIRECTORY"] = sNativeDirectory;
+            oStart.Environment["CRYPTURE_TEST_PORTABLE_BASE"] = sApplicationDirectory;
+            oStart.Environment["CRYPTURE_TEST_PORTABLE_RESULT"] = sResult;
+            oStart.Environment.Remove("DOTNET_BUNDLE_EXTRACT_BASE_DIR");
+            if (sScenario == "Retried")
+                oStart.Environment["DOTNET_BUNDLE_EXTRACT_BASE_DIR"] = sLocalCache + Path.DirectorySeparatorChar;
+            using Process oWorker = Process.Start(oStart);
+            Check(oWorker.WaitForExit(10000) && oWorker.ExitCode == 0, sScenario + " portable startup worker exits");
+            Stopwatch oWait = Stopwatch.StartNew();
+            while (!File.Exists(sResult) && oWait.ElapsedMilliseconds < 10000)
+                System.Threading.Thread.Sleep(20);
+            Check(File.Exists(sResult), sScenario + " portable startup completes without a restart loop");
+            string[] sReport = File.ReadAllLines(sResult);
+            bool bRestarted = sScenario == "Failed";
+            Check((int.Parse(sReport[1]) != oWorker.Id) == bRestarted,
+                sScenario + " portable startup restarts only when a library fails and the local cache is available");
+            string sExpectedCache = sScenario == "Retried" ? sLocalCache + Path.DirectorySeparatorChar :
+                bRestarted ? sLocalCache : "";
+            Check(sReport[0] == sExpectedCache, sScenario + " portable startup uses the expected extraction directory");
+            Check(sReport.Skip(2).SequenceEqual(sArguments),
+                sScenario + " portable startup preserves command-line arguments");
         }
     }
 

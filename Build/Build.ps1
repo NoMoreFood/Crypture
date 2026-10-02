@@ -192,14 +192,33 @@ try
 
         Sign-File $executable
 
-        # Build and validate an MSI containing the same signed, self-contained executable.
+        # Publish the installed application with its runtime and dependencies alongside the executable.
+        $installedDirectory = Join-Path (Join-Path $stage 'Installed') $architecture
+        Write-Host "Publishing Crypture $version as an unpacked, self-contained $runtimeId application."
+        Invoke-Tool $dotnet @('publish', $project, '--configuration', 'Release', '--runtime', $runtimeId,
+            '--no-restore', '--verbosity', 'minimal', '-p:PublishProfile=Portable', '-p:PublishSingleFile=false',
+            '-p:IncludeNativeLibrariesForSelfExtract=false', '-p:EnableCompressionInSingleFile=false',
+            "-p:PublishDir=$installedDirectory/", "-p:RuntimeNoticesFile=$notices")
+        $installedConfig = Join-Path $installedDirectory 'Crypture.dll.config'
+        Move-Item -LiteralPath $installedConfig -Destination (Join-Path $installedDirectory 'Crypture.exe.config')
+        foreach ($file in Get-ChildItem -LiteralPath $installedDirectory -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.dll') })
+        {
+            if ($file.Name -in @('Crypture.exe', 'Crypture.dll') -or
+                (!$SkipSigning -and !(Get-AuthenticodeSignature -LiteralPath $file.FullName).SignerCertificate))
+            {
+                Sign-File $file.FullName
+            }
+        }
+
+        # Build and validate an MSI containing the unpacked application.
         $installerDirectory = Join-Path (Join-Path $stage 'Installers') $architecture
         $installer = Join-Path $OutputDirectory "Crypture-$architecture-$version-installer.msi"
         Invoke-Tool $wix @('build', (Join-Path $PSScriptRoot 'Crypture.wxs'), '-arch', $architecture,
             '-ext', $uiExtension, '-culture', 'en-us', '-pdbtype', 'none',
             '-intermediatefolder', $installerDirectory, '-out', $installer,
             '-d', "ProductName=$ProductName", '-d', "ProductUrl=$ProductUrl", '-d', "Version=$version",
-            '-d', "ExecutablePath=$executable", '-d', "IconPath=$PSScriptRoot\..\Code\Safe.ico",
+            '-d', "PublishDirectory=$installedDirectory", '-d', "IconPath=$PSScriptRoot\..\Code\Safe.ico",
             '-d', "LicenseRtf=$licenseRtf")
         Invoke-Tool $wix @('msi', 'validate', $installer,
             '-intermediateFolder', (Join-Path $installerDirectory 'Validation'))

@@ -13,7 +13,7 @@
         <StandardDirectory Id="ProgramFiles6432Folder">
             <Directory Id="INSTALLFOLDER" Name="$(var.ProductName)">
                 <Component Id="CryptureApplication" Guid="*">
-                    <File Id="CryptureExecutable" Source="$(var.ExecutablePath)" Name="Crypture.exe" KeyPath="yes">
+                    <File Id="CryptureExecutable" Source="$(var.PublishDirectory)\Crypture.exe" Name="Crypture.exe" KeyPath="yes">
                         <Shortcut Id="ApplicationStartMenuShortcut" Directory="ProgramMenuFolder"
                             Name="$(var.ProductName)" Advertise="yes" WorkingDirectory="INSTALLFOLDER"
                             Icon="Crypture.exe" />
@@ -24,6 +24,11 @@
         <StandardDirectory Id="ProgramMenuFolder" />
         <Feature Id="CryptureFeature" Title="$(var.ProductName)" Level="1">
             <ComponentRef Id="CryptureApplication" />
+            <File Directory="INSTALLFOLDER" Source="$(var.PublishDirectory)\e_sqlite3.dll" DefaultLanguage="0" />
+            <Files Directory="INSTALLFOLDER" Include="$(var.PublishDirectory)\**">
+                <Exclude Files="$(var.PublishDirectory)\Crypture.exe" />
+                <Exclude Files="$(var.PublishDirectory)\e_sqlite3.dll" />
+            </Files>
         </Feature>
 
         <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
