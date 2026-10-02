@@ -13,13 +13,18 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Orientation="Horizontal">
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
             <Image Name="img" Width="200" Height="80" Margin="10,10,10,10" Source="pack://application:,,,/Crypture;component/Images/Save.png" Stretch="Uniform" />
-            <StackPanel Margin="0,10,0,0" Orientation="Vertical" VerticalAlignment="Top">
+            <StackPanel Grid.Column="1" Margin="0,10,10,0" VerticalAlignment="Top">
                 <TextBlock Text="Crypture" FontSize="40" FontWeight="Bold" Foreground="{DynamicResource Crypture.MutedBrush}" />
-                <TextBlock Text="Software for protecting data at rest." Margin="0,5,0,0" FontWeight="Bold" Foreground="{DynamicResource Crypture.MutedBrush}" />
+                <TextBlock Text="Software for protecting data at rest." Margin="0,5,0,0" TextWrapping="Wrap"
+                    FontWeight="Bold" Foreground="{DynamicResource Crypture.MutedBrush}" />
             </StackPanel>
-        </StackPanel>
+        </Grid>
         <TabControl Grid.Row="1" Margin="5,0,5,5" Padding="2">
             <TabItem Header="Crypture License">
                 <TextBox IsReadOnly="True" ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Visible" TextWrapping="Wrap" Text="{x:Static local:Licenses.Crypture}" />
