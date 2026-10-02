@@ -747,6 +747,7 @@ internal static partial class RegressionTests
             TestTotpVault(sDirectory);
             TestCertificateUsageConfiguration(oBrowser, oItem);
             TestEditorCertificateLoading(sDirectory);
+            TestPasswordGeneratorLayout();
         }
         finally
         {
@@ -759,6 +760,54 @@ internal static partial class RegressionTests
             }
             oApplication.Shutdown();
             CryptureEntities.DatabasePath = sDatabase;
+        }
+    }
+
+    private static void TestPasswordGeneratorLayout()
+    {
+        string sConnection = CryptureEntities.ConnectionString;
+        CryptureEntities.ConnectionString = "";
+        PasswordGenerator oGenerator = new PasswordGenerator
+        {
+            Width = 520, Height = 600, Left = -20000, Top = -20000,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            ShowActivated = false, ShowInTaskbar = false
+        };
+        try
+        {
+            // Exercise the real scroll viewport at minimum size with normal and enlarged text.
+            oGenerator.Show();
+            PumpUntil(() => oGenerator.IsLoaded);
+            ScrollViewer oScroll = (ScrollViewer)((Grid)oGenerator.Content).Children[0];
+            Border oResult = (Border)oGenerator.FindName("oPasswordResult");
+            TextBox oPassword = (TextBox)oGenerator.FindName("oGeneratedPassword");
+            MethodInfo oGenerate = typeof(PasswordGenerator).GetMethod("oGenerateButton_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            foreach (double nFontSize in new[] { 12d, 18d })
+            {
+                oGenerator.FontSize = nFontSize;
+                foreach (int nLength in new[] { 24, 1024 })
+                {
+                    ((TextBox)oGenerator.FindName("oMinimumLength")).Text = nLength.ToString();
+                    ((TextBox)oGenerator.FindName("oMaximumLength")).Text = nLength.ToString();
+                    oScroll.ScrollToTop();
+                    oGenerator.UpdateLayout();
+                    oGenerate.Invoke(oGenerator, new object[] { null, null });
+                    oGenerator.UpdateLayout();
+                    Rect oBounds = oResult.TransformToAncestor(oScroll).TransformBounds(
+                        new Rect(oResult.RenderSize));
+                    Check(oBounds.Top >= -1 && oBounds.Bottom <= oScroll.ViewportHeight + 1 &&
+                        oPassword.Text.Length == nLength &&
+                        ((Button)oGenerator.FindName("oCopyButton")).IsEnabled,
+                        "Generated password and copy action stay visible at font size " + nFontSize +
+                        " and " + nLength + " characters");
+                }
+            }
+        }
+        finally
+        {
+            oGenerator.Close();
+            CryptureEntities.ConnectionString = sConnection;
         }
     }
 

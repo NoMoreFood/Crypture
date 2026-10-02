@@ -83,6 +83,10 @@ namespace Crypture
                 oInsertButton.IsEnabled = true;
                 oPasswordStatus.Text = sPassword.Length + " characters. " +
                     (bHasVault ? "Settings saved in this Vault." : "Ready to copy.");
+
+                // Keep the generated password and copy action visible in small windows.
+                oPasswordResult.UpdateLayout();
+                oPasswordResult.BringIntoView();
             });
         }
 
