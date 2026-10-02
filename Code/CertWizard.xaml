@@ -13,75 +13,91 @@
         <TabControl Margin="2,2,2,2">
             <TabItem Header="General"
                 Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8A5;">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Row="11" Grid.ColumnSpan="2" Margin="6,8" TextWrapping="Wrap"
-                        Foreground="{DynamicResource Crypture.MutedBrush}"
-                        Text="For ECC encryption, choose ECDH and Key Agreement. ECDSA is for signing. ML-KEM recipients require an issued certificate with a CNG private key; this wizard cannot self-sign ML-KEM certificates." />
-                    <Label Grid.Row="0" Grid.Column="0" Content="Provider Types: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE713;" />
-                    <StackPanel Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
-                        <CheckBox x:Name="oHardwareCheckbox" Margin="0,0,10,0" Checked="oProviderType_Checked" Content="Hardware" IsChecked="True" Unchecked="oProviderType_Checked" />
-                        <CheckBox x:Name="oSoftwareCheckbox" Checked="oProviderType_Checked" Content="Software" IsChecked="True" Unchecked="oProviderType_Checked" />
-                    </StackPanel>
-                    <Label Grid.Row="1" Grid.Column="0" Content="Provider Name: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8F1;" />
-                    <ComboBox x:Name="oProviderComboBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" IsEditable="False" IsReadOnly="True" ItemsSource="{Binding ElementName=oWizardWindow, Path=ProviderOptions.Keys}" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedProvider}" SelectionChanged="oProviderComboBox_SelectionChanged" />
-                    <Label Grid.Row="2" Grid.Column="0" Content="Key Algorithm: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8D7;" />
-                    <ComboBox x:Name="oSignatureComboBox" Grid.Row="2" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedSignature}" SelectionChanged="oSignatureComboBox_SelectionChanged" />
-                    <Label Grid.Row="3" Grid.Column="0" Content="Key Length: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8EF;" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-                        <TextBox x:Name="oKeyLengthTextBox" Width="70" Margin="0,0,0,5" HorizontalAlignment="Left" />
-                        <Label x:Name="oKeyLengthHintLabel" Margin="0,0,0,5" />
-                    </StackPanel>
-                    <Label Grid.Row="4" Grid.Column="0" Content="Hash Algorithm: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8FD;" />
-                    <ComboBox x:Name="oHashComboBox" Grid.Row="4" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedHash}" />
-                    <Label Grid.Row="5" Grid.Column="0" Content="Subject Name: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
-                    <TextBox x:Name="oSubjectTextBox" Grid.Row="5" Grid.Column="1" Margin="0,0,0,5" />
-                    <Label Grid.Row="6" Grid.Column="0" Content="Issuer Name: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE716;" />
-                    <TextBox x:Name="oIssuerTextBox" ToolTip="For self-signed certificates, leave blank to use the subject. Certificate requests use the issuer chosen by the CA." Grid.Row="6" Grid.Column="1" Margin="0,0,0,5" />
-                    <Label Grid.Row="7" Grid.Column="0" Content="Validity: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE787;" />
-                    <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal">
-                        <DatePicker x:Name="oValidFromDatePicker" Margin="0,0,0,5" />
-                        <Label Content=" to " />
-                        <DatePicker x:Name="oValidUntilDatePicker" Margin="0,0,0,5" />
-                    </StackPanel>
-                    <Separator Grid.Row="8" Grid.Column="0" Margin="0,10" />
-                    <Separator Grid.Row="8" Grid.Column="1" Margin="0,10" />
-                    <Label Grid.Row="9" Grid.Column="0" Content="Generation Option: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
-                    <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,0,0,5" Orientation="Horizontal">
-                        <RadioButton x:Name="oCertificateSelfSignedRadio" VerticalAlignment="Bottom" Content="Self-Signed Certificate" GroupName="CertRequest" IsChecked="True" />
-                        <RadioButton Margin="20,0,0,0" VerticalAlignment="Bottom" Content="Certificate Request" GroupName="CertRequest" />
-                    </StackPanel>
-                    <Label Grid.Row="10" Grid.Column="0" Content="Create Certificate: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE710;" />
-                    <Button x:Name="oGenerateButton" Grid.Row="10" Grid.Column="1" Width="100" HorizontalAlignment="Left" VerticalAlignment="Center" Click="oGenerateButton_Click" Content="Generate" IsEnabled="False"
-                        Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
-                </Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Row="11" Grid.ColumnSpan="2" Margin="6,8" TextWrapping="Wrap"
+                            Foreground="{DynamicResource Crypture.MutedBrush}"
+                            Text="For ECC encryption, choose ECDH and Key Agreement. ECDSA is for signing. ML-KEM recipients require an issued certificate with a CNG private key; this wizard cannot self-sign ML-KEM certificates." />
+                        <Label Grid.Row="0" Grid.Column="0" Content="Provider Types: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE713;" />
+                        <StackPanel Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
+                            <CheckBox x:Name="oHardwareCheckbox" Margin="0,0,10,0" Checked="oProviderType_Checked" Content="Hardware" IsChecked="True" Unchecked="oProviderType_Checked" />
+                            <CheckBox x:Name="oSoftwareCheckbox" Checked="oProviderType_Checked" Content="Software" IsChecked="True" Unchecked="oProviderType_Checked" />
+                        </StackPanel>
+                        <Label Grid.Row="1" Grid.Column="0" Content="Provider Name: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8F1;" />
+                        <ComboBox x:Name="oProviderComboBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" IsEditable="False" IsReadOnly="True" ItemsSource="{Binding ElementName=oWizardWindow, Path=ProviderOptions.Keys}" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedProvider}" SelectionChanged="oProviderComboBox_SelectionChanged" />
+                        <Label Grid.Row="2" Grid.Column="0" Content="Key Algorithm: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8D7;" />
+                        <ComboBox x:Name="oSignatureComboBox" Grid.Row="2" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedSignature}" SelectionChanged="oSignatureComboBox_SelectionChanged" />
+                        <Label Grid.Row="3" Grid.Column="0" Content="Key Length: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8EF;" />
+                        <Grid Grid.Row="3" Grid.Column="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="oKeyLengthTextBox" Width="70" Margin="0,0,5,5"
+                                HorizontalAlignment="Left" VerticalAlignment="Top" />
+                            <Label x:Name="oKeyLengthHintLabel" Grid.Column="1" Margin="0,0,0,5">
+                                <Label.ContentTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                    </DataTemplate>
+                                </Label.ContentTemplate>
+                            </Label>
+                        </Grid>
+                        <Label Grid.Row="4" Grid.Column="0" Content="Hash Algorithm: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8FD;" />
+                        <ComboBox x:Name="oHashComboBox" Grid.Row="4" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedHash}" />
+                        <Label Grid.Row="5" Grid.Column="0" Content="Subject Name: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
+                        <TextBox x:Name="oSubjectTextBox" Grid.Row="5" Grid.Column="1" Margin="0,0,0,5" />
+                        <Label Grid.Row="6" Grid.Column="0" Content="Issuer Name: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE716;" />
+                        <TextBox x:Name="oIssuerTextBox" ToolTip="For self-signed certificates, leave blank to use the subject. Certificate requests use the issuer chosen by the CA." Grid.Row="6" Grid.Column="1" Margin="0,0,0,5" />
+                        <Label Grid.Row="7" Grid.Column="0" Content="Validity: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE787;" />
+                        <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal">
+                            <DatePicker x:Name="oValidFromDatePicker" Margin="0,0,0,5" />
+                            <Label Content=" to " />
+                            <DatePicker x:Name="oValidUntilDatePicker" Margin="0,0,0,5" />
+                        </StackPanel>
+                        <Separator Grid.Row="8" Grid.Column="0" Margin="0,10" />
+                        <Separator Grid.Row="8" Grid.Column="1" Margin="0,10" />
+                        <Label Grid.Row="9" Grid.Column="0" Content="Generation Option: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
+                        <WrapPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
+                            <RadioButton x:Name="oCertificateSelfSignedRadio" Margin="0,0,16,5"
+                                Content="Self-Signed Certificate" GroupName="CertRequest" IsChecked="True" />
+                            <RadioButton Margin="0,0,0,5" Content="Certificate Request" GroupName="CertRequest" />
+                        </WrapPanel>
+                        <Label Grid.Row="10" Grid.Column="0" Content="Create Certificate: "
+                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE710;" />
+                        <Button x:Name="oGenerateButton" Grid.Row="10" Grid.Column="1" MinWidth="100"
+                            HorizontalAlignment="Left" VerticalAlignment="Center" Content="Generate"
+                            IsEnabled="False" Click="oGenerateButton_Click"
+                            Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
+                    </Grid>
+                </ScrollViewer>
             </TabItem>
             <TabItem Header="Key Usages"
                 Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8D7;">
