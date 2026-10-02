@@ -5,9 +5,9 @@ with Windows users and security groups (CNG DPAPI-NG), certificates, or local Wi
 
 ## Getting Started
 
-Extract **Crypture-2.0.0-portable.zip** and run `Crypture.exe` from the folder matching your Windows computer:
-**x64** or **arm64**. Each executable includes the .NET 10 runtime and its dependencies. Application preferences
-are stored in your Windows user profile.
+Extract the portable ZIP and run `Crypture.exe` from the folder matching your Windows computer: **x64** or **arm64**.
+Each executable includes the required .NET runtime and its dependencies. Application preferences are stored in your
+Windows user profile.
 
 1. Choose **Home → New** and select a location for your Vault. The new-item dialog opens automatically.
 2. Enter an **Item Label** and the content to protect, then select a protection mode below. Use **Add New Item**
@@ -126,26 +126,27 @@ settings. Lookups run in the background and can be cancelled between requests.
 
 ## Encryption and Privacy
 
-New saves use **AES-256-CBC with HMAC-SHA256**, authenticating the label, item type, IV, and ciphertext before
+Saving an item uses **AES-256-CBC with HMAC-SHA256**, authenticating the label, item type, IV, and ciphertext before
 decryption. Windows protection wraps both keys with DPAPI-NG and also authenticates the descriptor and protected key
 blob. Certificate items use authenticated recipient envelopes: RSA-OAEP-SHA1 for provider compatibility, or
 ECDH/ML-KEM with SP800-108 HMAC-SHA256 key derivation and AES-256-GCM key wrapping. Cryptographic operations use
 Windows/.NET primitives.
 
 Labels, timestamps, modifier identities, recipient certificates, and Windows protection descriptors remain visible.
-Certificate access depends on the private key, not its account label. Older items remain readable and show a legacy
-notice until saved again; newly authenticated items cannot be opened by older Crypture releases. Authentication does
-not prevent deleting or replaying an entire Vault snapshot, so retain filesystem permissions and backups.
+Certificate access depends on the private key, not its account label. Legacy items remain readable and show a notice
+until saved again. Releases without support for authenticated items cannot open items saved in that format.
+Authentication does not prevent deleting or replaying an entire Vault snapshot, so retain filesystem permissions and
+backups.
 
 ## Building and Packaging
 
-Build on Windows with the **.NET 10 SDK** selected by `global.json`. From the repository root, run
+Build on Windows with the **.NET SDK** required by `global.json`. From the repository root, run
 `dotnet build Code\Crypture.sln`; the SDK restores NuGet dependencies automatically. The project uses WPF and
 Windows certificate enrollment COM support.
 
-Run `Code\Build\Build.cmd` to restore dependencies and publish self-contained, single-file executables for
-**win-x64** and **win-arm64**. The default package is `Binaries\Crypture-2.0.0-portable.zip`, containing `x64` and
-`arm64` folders with one `Crypture.exe` each. To package a single architecture, pass `-RuntimeIdentifier win-x64`,
+Run `Build\Build.cmd` to restore dependencies and publish self-contained, single-file executables for **win-x64**
+and **win-arm64**. The portable ZIP is written to `Binaries`, containing `x64` and `arm64` folders with one
+`Crypture.exe` each. To package a single architecture, pass `-RuntimeIdentifier win-x64`,
 `-RuntimeIdentifier win-arm64`, or `-RuntimeIdentifier win-x86`. Each executable includes its architecture's runtime,
 native dependencies, and license notices; licenses are available in **About**.
 
@@ -155,20 +156,19 @@ SignTool and selects a certificate from the current user's Personal store, falli
 It signs, timestamps, and verifies the staged executable before publishing. Pass `-SkipSigning` to produce an
 unsigned build for local testing.
 
-The package version comes from `Code\Crypture.csproj`. Keep it aligned with `Code\Properties\AssemblyInfo.cs` and
-the application manifest: package `2.0.0` corresponds to assembly/file version `2.0.0.0`. Each run uses a fresh
-subdirectory under `Code\Build\PackageStage`; existing release packages are not overwritten. Move an existing
-package before building the same version again.
+Package names use the version from `Code\Crypture.csproj`. Keep it aligned with `Code\Properties\AssemblyInfo.cs` and
+the application manifest. Each run uses a fresh subdirectory under `Build\PackageStage`; existing release packages
+are not overwritten. Move an existing package before building the same version again.
 
 The portable executable uses built-in configuration defaults. To customize application settings or recovery,
 place a `Crypture.exe.config` beside it, using `Code\App.config` as the starting point.
 
 ### Validation
 
-From the repository root, run `dotnet build Tests\Crypture.Tests.csproj`, then
-`Tests\bin\Debug\net10.0-windows\Crypture.Tests.exe`. The suite covers encryption, tampering, protection conversion,
-Vault recovery, concurrent Vault access, password policies, clipboard expiration, and WPF controls using temporary
-Vaults and keys. Computer-store private-key round trips require an elevated test process.
+From the repository root, run `dotnet run --project Tests\Crypture.Tests.csproj`. The suite covers encryption,
+tampering, protection conversion, Vault recovery, concurrent Vault access, password policies, clipboard expiration,
+and WPF controls using temporary Vaults and keys. Computer-store private-key round trips require an elevated test
+process.
 
 * Set `CRYPTURE_TEST_DOMAIN_SIDS` to semicolon-separated SIDs or account names granting the test account access to
   enable domain authorization tests. These require a domain-connected machine with AD key distribution; otherwise
