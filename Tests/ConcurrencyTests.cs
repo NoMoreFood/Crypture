@@ -193,6 +193,8 @@ internal static partial class RegressionTests
 
             string sLegacy = sSchema[..sSchema.IndexOf("CREATE TABLE IF NOT EXISTS", StringComparison.Ordinal)]
                 .Replace("\t[ModifiedByIdentity] nvarchar NULL,\r\n", "")
+                .Replace("\t[ContentSuite] integer NULL,\r\n", "")
+                .Replace("\t[AuthenticationTag] blob NULL,\r\n", "")
                 .Replace("\t[ProtectionDescriptor] nvarchar NULL,\r\n", "")
                 .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
                 .Replace("\t[Signature] blob NULL\r\n", "")

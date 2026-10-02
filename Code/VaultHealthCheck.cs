@@ -72,7 +72,7 @@ namespace Crypture
                 {
                     oCommand.Transaction = oTransaction;
                     oCommand.CommandText = "SELECT i.ItemId, i.Label, c.CipherParams, " +
-                        "c.ProtectionDescriptor, c.ProtectedKey " +
+                        "c.ProtectionDescriptor, c.ProtectedKey, c.ContentSuite " +
                         "FROM Item i LEFT JOIN Cipher c ON i.ItemId = c.ItemId";
                     using (SqliteDataReader oReader = oCommand.ExecuteReader())
                     {
@@ -84,7 +84,8 @@ namespace Crypture
                             {
                                 CipherParams = oReader.GetInt64(2),
                                 ProtectionDescriptor = oReader.IsDBNull(3) ? null : oReader.GetString(3),
-                                ProtectedKey = oReader.IsDBNull(4) ? null : (byte[])oReader.GetValue(4)
+                                ProtectedKey = oReader.IsDBNull(4) ? null : (byte[])oReader.GetValue(4),
+                                ContentSuite = oReader.IsDBNull(5) ? null : oReader.GetInt64(5)
                             };
                             oItems.Add(oItem.ItemId, oItem);
                         }
@@ -136,6 +137,14 @@ namespace Crypture
                 if (oItem.Cipher == null)
                 {
                     oPolicy.Add(HealthStatus.Error, "The saved protection policy is missing.");
+                    oReport.Findings.Add(oPolicy);
+                    continue;
+                }
+                if (!ItemCryptography.HasSupportedContentSuite(oItem.Cipher) ||
+                    oItem.Cipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm && !AesGcm.IsSupported)
+                {
+                    oPolicy.Add(HealthStatus.Error,
+                        "The saved content encryption suite is unsupported on this computer.");
                     oReport.Findings.Add(oPolicy);
                     continue;
                 }

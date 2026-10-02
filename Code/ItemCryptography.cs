@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -8,6 +9,12 @@ using System.Text;
 
 namespace Crypture
 {
+    internal enum ContentEncryptionSuite : long
+    {
+        Aes256Gcm = 1,
+        Aes256CbcHmacSha256 = 2
+    }
+
     internal static class ItemCryptography
     {
         internal const long AuthenticatedFormat = 1;
@@ -18,14 +25,51 @@ namespace Crypture
         internal static bool UsesWindowsProtection(Cipher oCipher) => oCipher?.CipherParams == PrincipalFormat ||
             oCipher?.CipherParams == RecoveryFormat && oCipher.ProtectionDescriptor != null;
 
+        internal static ContentEncryptionSuite ReadContentEncryptionSuite()
+        {
+            // Read the adjacent deployment policy at the save boundary without affecting stored-item access.
+            string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+            try
+            {
+                Configuration oConfig = ConfigurationManager.OpenMappedExeConfiguration(
+                    new ExeConfigurationFileMap { ExeConfigFilename = sPath }, ConfigurationUserLevel.None);
+                string sSuite = oConfig.AppSettings.Settings["ContentEncryptionSuite"]?.Value.Trim();
+                ContentEncryptionSuite nSuite = sSuite switch
+                {
+                    null or nameof(ContentEncryptionSuite.Aes256Gcm) => ContentEncryptionSuite.Aes256Gcm,
+                    nameof(ContentEncryptionSuite.Aes256CbcHmacSha256) => ContentEncryptionSuite.Aes256CbcHmacSha256,
+                    _ => throw new InvalidOperationException("The ContentEncryptionSuite setting in " + sPath +
+                        " must be Aes256Gcm or Aes256CbcHmacSha256.")
+                };
+                if (nSuite == ContentEncryptionSuite.Aes256Gcm && !AesGcm.IsSupported)
+                    throw new PlatformNotSupportedException("AES-256-GCM is unavailable on this computer.");
+                return nSuite;
+            }
+            catch (ConfigurationErrorsException oError)
+            {
+                throw new InvalidOperationException("The encryption settings in " + sPath +
+                    " could not be read. Correct the configuration before saving.", oError);
+            }
+        }
+
+        // An absent suite identifies CBC content with format-specific authentication.
+        internal static bool HasSupportedContentSuite(Cipher oCipher) => oCipher.ContentSuite == null ||
+            (oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm ||
+                oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256CbcHmacSha256) &&
+            oCipher.CipherParams is PrincipalFormat or CertificateFormat or RecoveryFormat;
+
         internal static void Encrypt(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
-            string sProtectionDescriptor = null, string sRecoveryDescriptor = null)
+            string sProtectionDescriptor = null, string sRecoveryDescriptor = null,
+            ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm)
         {
             int nMaxSize = oItem.ItemType is "text" or "totp"
                 ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
             if (oPlainText == null || oPlainText.Length > nMaxSize)
                 throw new InvalidDataException("Items must be no larger than 64 MB.");
+            if (nContentSuite is not (ContentEncryptionSuite.Aes256Gcm or ContentEncryptionSuite.Aes256CbcHmacSha256))
+                throw new CryptographicException("The content encryption suite is unsupported.");
 
+            // Content encryption and recipient access are independent parts of the stored format.
             bool bPrincipals = sProtectionDescriptor != null;
             if (bPrincipals) PrincipalProtection.ParseDescriptor(sProtectionDescriptor, out _, false);
             List<User> oUsers = (oRecipients ?? Enumerable.Empty<User>()).GroupBy(u => u.UserId)
@@ -40,22 +84,38 @@ namespace Crypture
                 using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oKeys);
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, 32);
                 Buffer.BlockCopy(oKeys, 32, oAuthenticationKey, 0, 32);
-                using (Aes oAes = new AesCng())
+                oItem.Cipher = new Cipher
                 {
-                    oAes.Key = oEncryptionKey;
-                    oAes.GenerateIV();
-                    using (ICryptoTransform oEncryptor = oAes.CreateEncryptor())
+                    CipherParams = nFormat,
+                    ContentSuite = (long)nContentSuite,
+                    ProtectionDescriptor = sProtectionDescriptor
+                };
+
+                // Encrypt once with fresh keys and a fresh nonce, then share the keys with each recipient.
+                if (nContentSuite == ContentEncryptionSuite.Aes256Gcm)
+                {
+                    oItem.Cipher.CipherVector = RandomNumberGenerator.GetBytes(12);
+                    oItem.Cipher.CipherText = new byte[oPlainText.Length];
+                    oItem.Cipher.AuthenticationTag = new byte[16];
+                    using (AesGcm oAes = new AesGcm(oEncryptionKey, 16))
+                        oAes.Encrypt(oItem.Cipher.CipherVector, oPlainText, oItem.Cipher.CipherText,
+                            oItem.Cipher.AuthenticationTag, GetAssociatedData(oItem));
+                }
+                else
+                {
+                    using (Aes oAes = new AesCng())
                     {
-                        oItem.Cipher = new Cipher
-                        {
-                            CipherParams = nFormat,
-                            ProtectionDescriptor = sProtectionDescriptor,
-                            CipherVector = oAes.IV,
-                            CipherText = oEncryptor.TransformFinalBlock(oPlainText, 0, oPlainText.Length)
-                        };
+                        oAes.Key = oEncryptionKey;
+                        oAes.Mode = CipherMode.CBC;
+                        oAes.Padding = PaddingMode.PKCS7;
+                        oAes.GenerateIV();
+                        oItem.Cipher.CipherVector = oAes.IV;
+                        using (ICryptoTransform oEncryptor = oAes.CreateEncryptor())
+                            oItem.Cipher.CipherText = oEncryptor.TransformFinalBlock(oPlainText, 0, oPlainText.Length);
                     }
                 }
 
+                // Authenticate the protected keys and access policy independently for each access path.
                 oItem.Instances.Clear();
                 if (bPrincipals && !bRecovery)
                 {
@@ -103,10 +163,15 @@ namespace Crypture
             bool bPrincipals = oCipher?.CipherParams == PrincipalFormat;
             bool bRecovery = oCipher?.CipherParams == RecoveryFormat;
             bool bCertificate = oInstance != null && oCert != null;
+            bool bGcm = oCipher?.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm;
+
+            // Validate the stored suite and its lengths before opening any private or Windows-protected keys.
             if ((oInstance == null) != (oCert == null) ||
-                oCipher == null || oCipher.CipherVector == null || oCipher.CipherVector.Length != 16 ||
-                oCipher.CipherText == null || oCipher.CipherText.Length == 0 ||
-                oCipher.CipherText.Length % 16 != 0 || oCipher.CipherText.Length > nMaxSize + 16 ||
+                oCipher == null || !HasSupportedContentSuite(oCipher) || oCipher.CipherVector == null ||
+                oCipher.CipherVector.Length != (bGcm ? 12 : 16) || oCipher.CipherText == null ||
+                (bGcm ? oCipher.CipherText.Length > nMaxSize || oCipher.AuthenticationTag?.Length != 16
+                    : oCipher.CipherText.Length == 0 || oCipher.CipherText.Length % 16 != 0 ||
+                        oCipher.CipherText.Length > nMaxSize + 16 || oCipher.AuthenticationTag != null) ||
                 ((!bPrincipals && !bRecovery || bRecovery && bCertificate) &&
                 (oInstance == null || oCert == null ||
                 oCipher.CipherParams != oInstance.CipherParams ||
@@ -156,9 +221,20 @@ namespace Crypture
                             "The item failed its integrity check. It may have been altered.");
                 }
 
+                // Release plaintext only after authenticating the metadata, recipient envelope, and content.
+                if (bGcm)
+                {
+                    byte[] oPlainText = new byte[oCipher.CipherText.Length];
+                    using (AesGcm oAes = new AesGcm(oEncryptionKey, 16))
+                        oAes.Decrypt(oCipher.CipherVector, oCipher.CipherText, oCipher.AuthenticationTag,
+                            oPlainText, GetAssociatedData(oItem));
+                    return oPlainText;
+                }
                 using (Aes oAes = new AesCng())
                 {
                     oAes.Key = oEncryptionKey;
+                    oAes.Mode = CipherMode.CBC;
+                    oAes.Padding = PaddingMode.PKCS7;
                     oAes.IV = oCipher.CipherVector;
                     using (ICryptoTransform oDecryptor = oAes.CreateDecryptor())
                     {
@@ -178,6 +254,22 @@ namespace Crypture
             }
         }
 
+        private static byte[] GetAssociatedData(Item oItem)
+        {
+            // Domain-separated, length-prefixed metadata binds the content to its suite and protection format.
+            using (MemoryStream oStream = new MemoryStream())
+            using (BinaryWriter oWriter = new BinaryWriter(oStream, Encoding.UTF8, true))
+            {
+                oWriter.Write("Crypture Content");
+                oWriter.Write(oItem.Cipher.CipherParams);
+                oWriter.Write(oItem.Cipher.ContentSuite.Value);
+                oWriter.Write(oItem.Label);
+                oWriter.Write(oItem.ItemType);
+                oWriter.Flush();
+                return oStream.ToArray();
+            }
+        }
+
         private static byte[] ComputeSignature(Item oItem, byte[] oKey, Instance oInstance = null)
         {
             using (HMACSHA256 oHmac = new HMACSHA256(oKey))
@@ -185,11 +277,17 @@ namespace Crypture
             using (BinaryWriter oWriter = new BinaryWriter(oStream, Encoding.UTF8, true))
             {
                 // Length-prefixed metadata and ciphertext prevent ambiguous authenticated messages.
-                oWriter.Write("Crypture");
-                oWriter.Write(oItem.Cipher.CipherParams);
-                oWriter.Write(oItem.Label);
-                oWriter.Write(oItem.ItemType);
+                if (oItem.Cipher.ContentSuite != null) oWriter.Write(GetAssociatedData(oItem));
+                else
+                {
+                    oWriter.Write("Crypture");
+                    oWriter.Write(oItem.Cipher.CipherParams);
+                    oWriter.Write(oItem.Label);
+                    oWriter.Write(oItem.ItemType);
+                }
                 oWriter.Write(oItem.Cipher.CipherVector);
+                if (oItem.Cipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm)
+                    oWriter.Write(oItem.Cipher.AuthenticationTag);
                 if (oItem.Cipher.CipherParams == PrincipalFormat)
                 {
                     oWriter.Write(oItem.Cipher.ProtectionDescriptor);

@@ -40,6 +40,7 @@ namespace Crypture
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null)
         {
+            ContentEncryptionSuite nContentSuite = ItemCryptography.ReadContentEncryptionSuite();
             RecoveryPolicy oRecovery = RecoveryPolicy.Read();
             List<User> oUsers = sProtectionDescriptor == null
                 ? (oRecipients ?? Enumerable.Empty<User>()).ToList() : new List<User>();
@@ -68,7 +69,7 @@ namespace Crypture
                     if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
                 }
                 ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
-                    sProtectionDescriptor, oRecovery.Descriptor);
+                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite);
                 Item oStored = null;
                 if (oItem.ItemId != 0)
                 {
@@ -77,6 +78,8 @@ namespace Crypture
                     if (oStored == null || oStored.ModifiedDate != oItem.ModifiedDate ||
                         oStored.Cipher == null || oItem.Cipher == null ||
                         oStored.Cipher.CipherParams != oItem.Cipher.CipherParams ||
+                        oStored.Cipher.ContentSuite != oItem.Cipher.ContentSuite ||
+                        !oStored.Cipher.AuthenticationTag.AsSpan().SequenceEqual(oItem.Cipher.AuthenticationTag) ||
                         oStored.Cipher.ProtectionDescriptor != oItem.Cipher.ProtectionDescriptor ||
                         !oStored.Cipher.CipherVector.SequenceEqual(oItem.Cipher.CipherVector) ||
                         !oStored.Cipher.CipherText.SequenceEqual(oItem.Cipher.CipherText))
@@ -99,6 +102,8 @@ namespace Crypture
                 oStored.Cipher.CipherText = oEncrypted.Cipher.CipherText;
                 oStored.Cipher.CipherVector = oEncrypted.Cipher.CipherVector;
                 oStored.Cipher.CipherParams = oEncrypted.Cipher.CipherParams;
+                oStored.Cipher.ContentSuite = oEncrypted.Cipher.ContentSuite;
+                oStored.Cipher.AuthenticationTag = oEncrypted.Cipher.AuthenticationTag;
                 oStored.Cipher.ProtectionDescriptor = oEncrypted.Cipher.ProtectionDescriptor;
                 oStored.Cipher.ProtectedKey = oEncrypted.Cipher.ProtectedKey;
                 oStored.Cipher.Signature = oEncrypted.Cipher.Signature;
@@ -144,6 +149,8 @@ namespace Crypture
                         new[] { "Item", "ModifiedByIdentity", "nvarchar" },
                         new[] { "Cipher", "ProtectionDescriptor", "nvarchar" },
                         new[] { "Cipher", "ProtectedKey", "blob" },
+                        new[] { "Cipher", "ContentSuite", "integer" },
+                        new[] { "Cipher", "AuthenticationTag", "blob" },
                         new[] { "Cipher", "Signature", "blob" }
                     })
                     {

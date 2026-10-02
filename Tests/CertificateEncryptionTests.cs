@@ -844,49 +844,53 @@ internal static partial class RegressionTests
         byte[] oPlain = Encoding.UTF8.GetBytes("ECC and post-quantum recipient test\n\u2603");
         User[] oRecipients = { new User { UserId = 8, Certificate = oCert.RawData },
             new User { UserId = 9, Certificate = oRsaCert.RawData } };
-        Item oItem = new Item { Label = "Algorithm test", ItemType = "text" };
-        ItemCryptography.Encrypt(oItem, oPlain, oRecipients);
-        Instance oInstance = oItem.Instances.First();
-        Check(oItem.Cipher.CipherParams == ItemCryptography.CertificateFormat &&
-            ItemCryptography.Decrypt(oItem, oInstance, oCert).SequenceEqual(oPlain), sName + " round trip");
-        Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Last(), oRsaCert).SequenceEqual(oPlain),
-            sName + " mixed RSA recipient round trip");
-        byte[] oFirstEnvelope = oInstance.CipherKey.ToArray();
-        ItemCryptography.Encrypt(oItem, oPlain, oRecipients);
-        oInstance = oItem.Instances.First();
-        Check(!oFirstEnvelope.SequenceEqual(oInstance.CipherKey), sName + " fresh encapsulation per save");
-        using (X509Certificate2 oPublicOnly = X509CertificateLoader.LoadCertificate(oCert.RawData))
-            RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oPublicOnly),
-                sName + " requires a private key");
-        RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oRsaCert),
-            sName + " rejects incorrect recipient algorithm");
-        foreach (int nOffset in new[] { 0, 4, 8, oInstance.CipherKey.Length - 17, oInstance.CipherKey.Length - 1 })
+        foreach (ContentEncryptionSuite nSuite in Enum.GetValues<ContentEncryptionSuite>())
         {
-            oInstance.CipherKey[nOffset] ^= 1;
+            string sSuiteName = sName + " " + nSuite;
+            Item oItem = new Item { Label = "Algorithm test", ItemType = "text" };
+            ItemCryptography.Encrypt(oItem, oPlain, oRecipients, nContentSuite: nSuite);
+            Instance oInstance = oItem.Instances.First();
+            Check(oItem.Cipher.CipherParams == ItemCryptography.CertificateFormat &&
+                ItemCryptography.Decrypt(oItem, oInstance, oCert).SequenceEqual(oPlain), sSuiteName + " round trip");
+            Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Last(), oRsaCert).SequenceEqual(oPlain),
+                sSuiteName + " mixed RSA recipient round trip");
+            byte[] oFirstEnvelope = oInstance.CipherKey.ToArray();
+            ItemCryptography.Encrypt(oItem, oPlain, oRecipients, nContentSuite: nSuite);
+            oInstance = oItem.Instances.First();
+            Check(!oFirstEnvelope.SequenceEqual(oInstance.CipherKey), sSuiteName + " fresh encapsulation per save");
+            using (X509Certificate2 oPublicOnly = X509CertificateLoader.LoadCertificate(oCert.RawData))
+                RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oPublicOnly),
+                    sSuiteName + " requires a private key");
+            RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oRsaCert),
+                sSuiteName + " rejects incorrect recipient algorithm");
+            foreach (int nOffset in new[] { 0, 4, 8, oInstance.CipherKey.Length - 17, oInstance.CipherKey.Length - 1 })
+            {
+                oInstance.CipherKey[nOffset] ^= 1;
+                RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
+                    sSuiteName + " rejects modified key envelope at " + nOffset);
+                oInstance.CipherKey[nOffset] ^= 1;
+            }
+            byte[] oSaved = oInstance.CipherKey;
+            foreach (byte[] oBadEnvelope in new[] { new byte[0], oSaved.Take(oSaved.Length - 1).ToArray(),
+                oSaved.Concat(new byte[1]).ToArray(), new byte[4097] })
+            {
+                oInstance.CipherKey = oBadEnvelope;
+                RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
+                    sSuiteName + " rejects malformed envelope of " + oBadEnvelope.Length + " bytes");
+            }
+            oInstance.CipherKey = oSaved;
+            oInstance.UserId++;
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-                sName + " rejects modified key envelope at " + nOffset);
-            oInstance.CipherKey[nOffset] ^= 1;
-        }
-        byte[] oSaved = oInstance.CipherKey;
-        foreach (byte[] oBadEnvelope in new[] { new byte[0], oSaved.Take(oSaved.Length - 1).ToArray(),
-            oSaved.Concat(new byte[1]).ToArray(), new byte[4097] })
-        {
-            oInstance.CipherKey = oBadEnvelope;
+                sSuiteName + " authenticates the recipient identity");
+            oInstance.UserId--;
+            oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.AuthenticatedFormat;
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-                sName + " rejects malformed envelope of " + oBadEnvelope.Length + " bytes");
+                sSuiteName + " rejects a format downgrade");
+            oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.CertificateFormat;
+            oItem.Label = "Tampered";
+            RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
+                sSuiteName + " authenticates item metadata");
         }
-        oInstance.CipherKey = oSaved;
-        oInstance.UserId++;
-        RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-            sName + " authenticates the recipient identity");
-        oInstance.UserId--;
-        oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.AuthenticatedFormat;
-        RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-            sName + " rejects a format downgrade");
-        oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.CertificateFormat;
-        oItem.Label = "Tampered";
-        RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-            sName + " authenticates item metadata");
     }
 
     private static void TestAlgorithmVault(string sDirectory, X509Certificate2 oCert, string sName)

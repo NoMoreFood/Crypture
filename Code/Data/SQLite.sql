@@ -3,6 +3,8 @@ CREATE TABLE [Cipher] (
 	[CipherText] blob  NOT NULL,
 	[CipherVector] blob  NOT NULL,
 	[CipherParams] integer DEFAULT '0' NOT NULL,
+	[ContentSuite] integer NULL,
+	[AuthenticationTag] blob NULL,
 	[ProtectionDescriptor] nvarchar NULL,
 	[ProtectedKey] blob NULL,
 	[Signature] blob NULL

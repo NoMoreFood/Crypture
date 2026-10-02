@@ -72,6 +72,7 @@ internal static partial class RegressionTests
             {
                 TestConcurrentDatabase(sDirectory, oCert, oOtherCert);
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ONLY") == "1") return 0;
+                TestContentEncryptionSuites(sDirectory, oCert, oOtherCert);
                 TestEncryption(oCert, oOtherCert);
                 TestTotpAlgorithms(oCert);
                 TestPrincipalProtection();
@@ -529,6 +530,8 @@ internal static partial class RegressionTests
         Check(!File.Exists(sBadDatabase), "Remove incomplete new Vault");
 
         string sLegacySchema = sSchema.Replace("\t[ModifiedByIdentity] nvarchar NULL,\r\n", "")
+            .Replace("\t[ContentSuite] integer NULL,\r\n", "")
+            .Replace("\t[AuthenticationTag] blob NULL,\r\n", "")
             .Replace("\t[ProtectionDescriptor] nvarchar NULL,\r\n", "")
             .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
             .Replace("\t[Signature] blob NULL\r\n", "")
