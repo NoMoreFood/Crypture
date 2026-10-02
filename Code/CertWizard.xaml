@@ -94,7 +94,7 @@
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE710;" />
                         <Button x:Name="oGenerateButton" Grid.Row="10" Grid.Column="1" MinWidth="100"
                             HorizontalAlignment="Left" VerticalAlignment="Center" Content="Generate"
-                            IsEnabled="False" Click="oGenerateButton_Click"
+                            IsEnabled="False" IsDefault="True" Click="oGenerateButton_Click"
                             Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
                     </Grid>
                 </ScrollViewer>

@@ -32,6 +32,7 @@
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A7;" />
                     <DockPanel Margin="0,0,0,10">
                         <Button DockPanel.Dock="Right" Content="_Import" Padding="10,3" Margin="6,0,0,0"
+                            IsDefault="{Binding IsKeyboardFocusWithin, ElementName=oImportInput}"
                             Click="oImport_Click" />
                         <TextBox x:Name="oImportInput" MinHeight="28" MaxLength="4096" Padding="5,3"
                             IsUndoEnabled="False" AutomationProperties.Name="TOTP Setup Link or Base32 Secret"

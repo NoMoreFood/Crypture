@@ -695,7 +695,12 @@ namespace Crypture
                 oSearchTextBox.SelectAll();
             }
             else if (e.Key == Key.F5 && !String.IsNullOrEmpty(sDatabasePath)) oRefreshItemButton_Click();
-            else if (e.Key == Key.Enter && oItemDataGrid.IsKeyboardFocusWithin) oViewItemButton_Click(sender, e);
+            else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
+            {
+                if (oItemDataGrid.IsKeyboardFocusWithin) oViewItemButton_Click(sender, e);
+                else if (oCertDataGrid.IsKeyboardFocusWithin) oViewCertButton_Click(sender, e);
+                else return;
+            }
             else return;
             e.Handled = true;
         }

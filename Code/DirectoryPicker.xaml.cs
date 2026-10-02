@@ -212,6 +212,15 @@ namespace Crypture
                 oAddButton_Click(sender, e);
         }
 
+        private void oResults_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter || Keyboard.Modifiers != ModifierKeys.None) return;
+
+            // Accept the selected accounts without moving to another result row.
+            oAddButton_Click(sender, e);
+            e.Handled = true;
+        }
+
         private void oCancelSearchButton_Click(object sender, RoutedEventArgs e) => oCancellation?.Cancel();
 
         private void oWindow_Closed(object sender, EventArgs e)

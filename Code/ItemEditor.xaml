@@ -129,6 +129,7 @@
                                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE716;" />
                                         <DockPanel>
                                             <Button Content="A_dd" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="10,3"
+                                                IsDefault="{Binding IsKeyboardFocusWithin, ElementName=oPrincipalName}"
                                                 Click="oAddPrincipal_Click"
                                                 Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
                                             <TextBox x:Name="oPrincipalName" MinHeight="28" Padding="5,3"

@@ -18,7 +18,8 @@
         </StackPanel>
         <DockPanel Grid.Row="1" Margin="0,0,0,12">
             <Button x:Name="oSearchButton" Content="_Search" DockPanel.Dock="Right" Margin="10,0,0,0"
-                MinWidth="100" Padding="12,6" IsDefault="True" Click="oSearchButton_Click"
+                MinWidth="100" Padding="12,6" Click="oSearchButton_Click"
+                IsDefault="{Binding IsKeyboardFocusWithin, ElementName=oQuery}"
                 Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE721;" />
             <Label Content="_Find:" DockPanel.Dock="Left" Target="{Binding ElementName=oQuery}"
                 VerticalAlignment="Center" Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
@@ -29,6 +30,7 @@
             CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
             SelectionMode="Extended" SelectionUnit="FullRow" GridLinesVisibility="Horizontal"
             SelectionChanged="oResults_SelectionChanged" MouseDoubleClick="oResults_MouseDoubleClick"
+            PreviewKeyDown="oResults_PreviewKeyDown"
             AutomationProperties.Name="Forest Search Results" RowHeight="32">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" MinWidth="120" />
@@ -59,6 +61,7 @@
                 Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8BB;" />
             <Button x:Name="oAddButton" Content="_Add Selected" DockPanel.Dock="Right" IsEnabled="False"
                 MinWidth="130" Padding="12,6" Margin="0,0,8,0" Click="oAddButton_Click"
+                IsDefault="{Binding IsKeyboardFocusWithin, ElementName=oResults}"
                 Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
             <Button x:Name="oCancelSearchButton" Content="Cancel S_earch" IsEnabled="False" MinWidth="130"
                 Padding="12,6" HorizontalAlignment="Left" Click="oCancelSearchButton_Click"
