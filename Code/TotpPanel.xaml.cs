@@ -21,6 +21,7 @@ namespace Crypture
         private TotpSecret oSecret;
         private bool bLoading = true;
         private bool bActive;
+        private bool bHasSetup;
         private int nQrImport;
         internal Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
         internal event EventHandler SettingsChanged;
@@ -62,6 +63,7 @@ namespace Crypture
 
         private TotpSecret ReadSecret()
         {
+            ApplyDefaults();
             if (!Int32.TryParse(oPeriod.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int nPeriod))
                 throw new InvalidOperationException("Enter a whole number for the rotation period.");
             return new TotpSecret(oSecretInput.Text, oIssuer.Text, oAccount.Text,
@@ -85,6 +87,7 @@ namespace Crypture
         private void ApplySecret(TotpSecret oValue)
         {
             bLoading = true;
+            bHasSetup = true;
             try
             {
                 oIssuer.Text = oValue.Issuer;
@@ -101,6 +104,37 @@ namespace Crypture
             }
             RefreshSecret();
             SettingsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void ApplyDefaults()
+        {
+            if (bHasSetup) return;
+
+            // Imported and saved setups keep their protocol settings; only empty setups use these defaults.
+            ConfigurationDefaults oDefaults = new ConfigurationDefaults("Totp");
+            string sAlgorithm = oDefaults.Choice("Algorithm", "SHA1", "SHA1", "SHA256", "SHA512");
+            int nDigits = Int32.Parse(oDefaults.Choice("Digits", "6", "6", "8"), CultureInfo.InvariantCulture);
+            int nPeriod = oDefaults.Number("PeriodSeconds", 30, 1, 3600);
+            string sIssuer = oDefaults.Text("Issuer", "").Trim();
+            string sAccount = oDefaults.Text("Account", "").Trim();
+            if (sIssuer.Length > 256 || sAccount.Length > 256 || sIssuer.Contains(':') || sAccount.Contains(':') ||
+                sIssuer.Any(Char.IsControl) || sAccount.Any(Char.IsControl))
+                throw oDefaults.Error("TotpIssuer and TotpAccount must be at most 256 characters, " +
+                    "without colons or control characters.");
+            bLoading = true;
+            try
+            {
+                oAlgorithm.SelectedValue = sAlgorithm;
+                oDigits.SelectedValue = nDigits.ToString(CultureInfo.InvariantCulture);
+                oPeriod.Text = nPeriod.ToString(CultureInfo.InvariantCulture);
+                oIssuer.Text = sIssuer;
+                oAccount.Text = sAccount;
+                bHasSetup = true;
+            }
+            finally
+            {
+                bLoading = false;
+            }
         }
 
         private void oOptionsChanged(object sender, RoutedEventArgs e)
@@ -295,7 +329,11 @@ namespace Crypture
 
         private void oGenerateSecret_Click(object sender, RoutedEventArgs e)
         {
-            oSecretInput.Text = TotpSecret.Generate((string)oAlgorithm.SelectedValue);
+            Utilities.TryOperation(Window.GetWindow(this), () =>
+            {
+                ApplyDefaults();
+                oSecretInput.Text = TotpSecret.Generate((string)oAlgorithm.SelectedValue);
+            });
         }
 
         internal void Clear()
@@ -307,6 +345,7 @@ namespace Crypture
             oTimer.Stop();
             oSecret?.Dispose();
             oSecret = null;
+            bHasSetup = false;
             bLoading = true;
             oSecretInput.Clear();
             oImportInput.Clear();

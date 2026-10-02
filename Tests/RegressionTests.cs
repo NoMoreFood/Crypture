@@ -50,6 +50,8 @@ internal static partial class RegressionTests
     [STAThread]
     private static int Main()
     {
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_STARTUP") == "1")
+            return RunConfiguredStartup();
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ROLE") is string sRole)
             return RunConcurrencyWorker(sRole);
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_DIRECTORY") != null)
@@ -61,6 +63,18 @@ internal static partial class RegressionTests
             if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONFIG_STARTUP") == "1")
             {
                 TestCertificateUsageStartup();
+                return 0;
+            }
+            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1")
+            {
+                Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                oApplication.Resources = new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
+                };
+                try { TestConfigurationDefaults(sDirectory); }
+                finally { oApplication.Shutdown(); }
+                Console.WriteLine("Completed " + nChecks + " configuration regression checks.");
                 return 0;
             }
             TestPortableExtraction(sDirectory);
@@ -750,6 +764,7 @@ internal static partial class RegressionTests
             TestEditorCertificateLoading(sDirectory);
             TestPasswordGeneratorLayout();
             TestPasswordGeneratorDefaults(sDirectory);
+            TestConfigurationDefaults(sDirectory);
         }
         finally
         {

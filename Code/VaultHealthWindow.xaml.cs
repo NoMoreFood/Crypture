@@ -18,6 +18,7 @@ namespace Crypture
         public VaultHealthWindow(string sPath)
         {
             InitializeComponent();
+            oIssuesOnly.IsChecked = new ConfigurationDefaults().Flag("HealthCheckShowOnlyIssues", false);
             Utilities.EnableClipboardTimeout(oDetails);
             sVaultPath = sPath;
             oVaultName.Text = Path.GetFileName(sPath);

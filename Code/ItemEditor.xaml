@@ -202,7 +202,7 @@
                             Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy Item Content"
                             Command="ApplicationCommands.Copy" CommandParameter="All"
                             CommandTarget="{Binding ElementName=oItemData}"
-                            ToolTip="Copy all unlocked text. Clears after 5 minutes or when Crypture closes." />
+                            ToolTip="Copy all unlocked text. Clears automatically or when Crypture closes." />
                         <Label x:Name="oContentTitle" HorizontalAlignment="Center" Content="Protected Item Content"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
                     </DockPanel>
@@ -223,7 +223,7 @@
                     <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True"
                         AcceptsTab="True" Padding="8" IsUndoEnabled="False"
                         Style="{StaticResource Crypture.SecretText}"
-                        ToolTip="Copied or cut text clears from the clipboard after 5 minutes or when Crypture closes."
+                        ToolTip="Copied or cut text clears from the clipboard automatically or when Crypture closes."
                         TextChanged="oItemChanged" AutomationProperties.Name="Protected Item Content" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Collapsed" />
                     <local:TotpPanel x:Name="oTotpPanel" Visibility="Collapsed" />
                     <Button x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"

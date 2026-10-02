@@ -94,8 +94,12 @@ namespace Crypture
         private void oCopyButton_Click(object sender, RoutedEventArgs e)
         {
             if (oGeneratedPassword.Text.Length == 0) return;
-            if (Utilities.TryOperation(this, () => App.CopyProtectedText(oGeneratedPassword.Text)))
-                oPasswordStatus.Text = "Copied. Clipboard clears after 5 minutes or when Crypture closes.";
+            Utilities.TryOperation(this, () =>
+            {
+                TimeSpan oTimeout = App.CopyProtectedText(oGeneratedPassword.Text);
+                oPasswordStatus.Text = "Copied. Clipboard clears after " + oTimeout.TotalSeconds +
+                    " seconds or when Crypture closes.";
+            });
         }
 
         private void oInsertButton_Click(object sender, RoutedEventArgs e)

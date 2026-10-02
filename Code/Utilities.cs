@@ -130,7 +130,8 @@ namespace Crypture
 
     internal sealed class ClipboardExpiration : IDisposable
     {
-        internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
+        internal static TimeSpan Timeout => TimeSpan.FromSeconds(
+            new ConfigurationDefaults().Number("ClipboardTimeoutSeconds", 300, 1, 86400));
         private readonly DispatcherTimer oTimer;
         private readonly Func<uint> oCaptureSequence;
         private readonly Func<uint, bool> oClearIfUnchanged;
@@ -148,12 +149,13 @@ namespace Crypture
             oTimer.Tick += (s, e) => ClearExpired();
         }
 
-        internal void TrackCopy()
+        internal void TrackCopy(TimeSpan? oTimeout = null)
         {
+            TimeSpan oDuration = oTimeout ?? Timeout;
             uint nCopied = oCaptureSequence();
             if (nCopied == 0) return;
             nSequence = nCopied;
-            oDeadline = oUtcNow() + Timeout;
+            oDeadline = oUtcNow() + oDuration;
             oTimer.Start();
         }
 

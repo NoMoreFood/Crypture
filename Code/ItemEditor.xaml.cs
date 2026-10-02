@@ -44,11 +44,23 @@ namespace Crypture
         private string sStoredLabel;
         private string sStoredItemType;
         private long? nStoredModifiedBy;
+        private readonly bool bIncludeOwnCertificates = true;
 
         public ItemEditor(bool bNewItem = true)
         {
-            ThisItem.Label = "My New Item";
-            ThisItem.ItemType = "text";
+            // Apply configured choices only to new items; saved items supply their own settings.
+            ConfigurationDefaults oDefaults = bNewItem ? new ConfigurationDefaults("NewItem") : null;
+            ThisItem.Label = oDefaults?.Text("Label", "My New Item") ?? "My New Item";
+            string sType = oDefaults?.Choice("Type", "Text", "Text", "Totp", "File") ?? "Text";
+            ThisItem.ItemType = sType == "Totp" ? "totp" : sType == "File" &&
+                Properties.Settings.Default.ShowItemFileUpload ? "" : "text";
+            string sProtection = oDefaults?.Choice("ProtectionMode", "Automatic",
+                "Automatic", "UserBased", "CertificateBased") ?? "Automatic";
+            string sScope = oDefaults?.Choice("WindowsScope", "Automatic",
+                "Automatic", "Domain", "LocalUser", "LocalMachine") ?? "Automatic";
+            bool bRequireAll = oDefaults?.Flag("RequireAllPrincipals", false) ?? false;
+            bool bIncludeCurrentUser = oDefaults?.Flag("IncludeCurrentUser", true) ?? true;
+            bIncludeOwnCertificates = oDefaults?.Flag("IncludeOwnCertificates", true) ?? true;
             DataContext = ThisItem;
             InitializeComponent();
 
@@ -88,10 +100,17 @@ namespace Crypture
                 Environment.MachineName, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
             if (bNewItem)
             {
-                PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
+                if (sScope != "Automatic") oPrincipalScope.SelectedIndex = sScope == "LocalMachine" ? 2
+                    : sScope == "Domain" && bDomainJoined ? 0 : 1;
+                oPrincipalMatch.SelectedIndex = bRequireAll ? 1 : 0;
+                if (bIncludeCurrentUser)
+                    PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
                 oProtectionMode.SelectedIndex = bCertificatesEnabled &&
                     (!bDpapiNgEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
                     ? 1 : bDpapiNgEnabled ? 0 : -1;
+                if (sProtection == "CertificateBased" && bCertificatesEnabled) oProtectionMode.SelectedIndex = 1;
+                else if (sProtection == "UserBased" && bDpapiNgEnabled &&
+                    CertificateOperations.GetAutomaticCertificates().Count == 0) oProtectionMode.SelectedIndex = 0;
             }
 
             // show certificate generator based on settings file
@@ -169,7 +188,7 @@ namespace Crypture
                 if (bClosed) return;
                 if (bNewItem)
                 {
-                    foreach (User oUser in oUsers.Where(u => oAvailable.Contains(u.UserId) &&
+                    foreach (User oUser in oUsers.Where(u => bIncludeOwnCertificates && oAvailable.Contains(u.UserId) &&
                         oPrivateCertificates.Contains(Convert.ToBase64String(u.Certificate))))
                         if (!UserListSelected.Contains(oUser)) UserListSelected.Add(oUser);
                     ThisItem.ModifiedBy = UserListSelected.FirstOrDefault(u =>
@@ -210,7 +229,8 @@ namespace Crypture
             oPrincipalMatch.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             oLoadItemButton.IsEnabled = !bEnabled;
             oItemData.IsEnabled = bEnabled && ThisItem.ItemType == "text";
-            oItemTypeSelector.IsEnabled = bEnabled && ThisItem.ItemType is "text" or "totp";
+            oItemTypeSelector.IsEnabled = bEnabled && (ThisItem.ItemType is "text" or "totp" ||
+                ThisItem.ItemId == 0 && BinaryItemData == null);
             bool bWasLoading = bLoading;
             bLoading = true;
             oItemTypeSelector.SelectedIndex = ThisItem.ItemType == "text" ? 0 : ThisItem.ItemType == "totp" ? 1 : 2;
@@ -226,6 +246,9 @@ namespace Crypture
             oItemData.Visibility = bEnabled && ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
             oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType is not ("text" or "totp")
                 ? Visibility.Visible : Visibility.Collapsed;
+            oDownloadTextBox.Content = BinaryItemData == null && ThisItem.ItemId == 0
+                ? "Choose File Attachment..." : "Save Decrypted File...";
+            System.Windows.Automation.AutomationProperties.SetName(oDownloadPanel, (string)oDownloadTextBox.Content);
             oTotpPanel.Visibility = bEnabled && ThisItem.ItemType == "totp" ? Visibility.Visible : Visibility.Collapsed;
             oTotpPanel.SetActive(bEnabled && ThisItem.ItemType == "totp");
             oCopyContentButton.Visibility = ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
@@ -476,7 +499,8 @@ namespace Crypture
             bool bCertificates = oProtectionMode.SelectedIndex == 1;
             bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
-                (!bCertificates || !bLoadingCertificates);
+                (!bCertificates || !bLoadingCertificates) &&
+                (ThisItem.ItemType is "text" or "totp" || BinaryItemData != null);
             oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
             oProtectionDisabledNotice.Text = !bDpapiNgEnabled && !bCertificatesEnabled
                 ? "Both encryption methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
@@ -756,6 +780,11 @@ namespace Crypture
 
         private void oDownloadPanel_Click(object sender, RoutedEventArgs e)
         {
+            if (ThisItem.ItemId == 0 && BinaryItemData == null)
+            {
+                oUploadAFile_Click(sender, e);
+                return;
+            }
             Utilities.TryOperation(this, () =>
             {
                 // generate the filter field to use based on the stored item type

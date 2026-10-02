@@ -88,7 +88,8 @@
                         <WrapPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
                             <RadioButton x:Name="oCertificateSelfSignedRadio" Margin="0,0,16,5"
                                 Content="Self-Signed Certificate" GroupName="CertRequest" IsChecked="True" />
-                            <RadioButton Margin="0,0,0,5" Content="Certificate Request" GroupName="CertRequest" />
+                            <RadioButton x:Name="oCertificateRequestRadio" Margin="0,0,0,5"
+                                Content="Certificate Request" GroupName="CertRequest" />
                         </WrapPanel>
                         <Label Grid.Row="10" Grid.Column="0" Content="Create Certificate: "
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE710;" />

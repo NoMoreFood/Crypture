@@ -63,7 +63,7 @@
                             Command="ApplicationCommands.Copy" CommandParameter="All"
                             CommandTarget="{Binding ElementName=oSecretInput}"
                             AutomationProperties.Name="Copy TOTP Secret"
-                            ToolTip="Copy the Base32 secret. Clears after 5 minutes or when Crypture closes." />
+                            ToolTip="Copy the Base32 secret. Clears automatically or when Crypture closes." />
                         <TextBox x:Name="oSecretInput" MinHeight="28" Padding="5,3" MaxLength="512"
                             IsUndoEnabled="False" TextChanged="oOptionsChanged"
                             Style="{StaticResource Crypture.SecretText}" AutomationProperties.Name="TOTP Base32 Secret"

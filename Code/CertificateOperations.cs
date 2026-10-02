@@ -203,7 +203,7 @@ namespace Crypture
             }
         }
 
-        private static X509KeyUsageFlags ParseKeyUsages(string sValue, string sSetting)
+        internal static X509KeyUsageFlags ParseKeyUsages(string sValue, string sSetting)
         {
             X509KeyUsageFlags oResult = X509KeyUsageFlags.None;
             foreach (string sName in SplitList(sValue))
@@ -216,7 +216,7 @@ namespace Crypture
             return oResult;
         }
 
-        private static HashSet<string> ParseEnhancedUsages(string sValue, string sSetting)
+        internal static HashSet<string> ParseEnhancedUsages(string sValue, string sSetting)
         {
             HashSet<string> oResult = new HashSet<string>(StringComparer.Ordinal);
             foreach (string sOid in SplitList(sValue))

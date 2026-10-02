@@ -31,7 +31,7 @@ namespace Crypture
     {
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
 
-        internal const int RecentVaultLimit = 10;
+        internal static int RecentVaultLimit => new ConfigurationDefaults().Number("RecentVaultLimit", 10, 0, 50);
 
         private static readonly string sApplicationTitle =
             $"Crypture {typeof(App).Assembly.GetName().Version.ToString(3)}";
@@ -87,6 +87,9 @@ namespace Crypture
             // initialize xaml form display
             InitializeComponent();
             Title = sApplicationTitle;
+            ConfigurationDefaults oDefaults = new ConfigurationDefaults();
+            oHideAccessible.IsChecked = oDefaults.Flag("HideMissingCertificateKeys", false);
+            ribbon.IsMinimized = oDefaults.Flag("RibbonMinimized", false);
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
             RefreshRecentVaults();
 
@@ -713,7 +716,8 @@ namespace Crypture
         private void oItemBrowser_Loaded(object sender, RoutedEventArgs e)
         {
             // Reopen the last Vault only when no Vault was specified on the command line.
-            if (Properties.Settings.Default.LoadLastVaultOnStartup && String.IsNullOrEmpty(sDatabasePath) &&
+            if (RecentVaultLimit > 0 && Properties.Settings.Default.LoadLastVaultOnStartup &&
+                String.IsNullOrEmpty(sDatabasePath) &&
                 Environment.GetCommandLineArgs().Length == 1)
             {
                 string sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()

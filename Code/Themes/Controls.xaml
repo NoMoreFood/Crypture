@@ -725,7 +725,7 @@
         <Setter Property="Content" Value="&#xE8C8;" />
         <Setter Property="AutomationProperties.Name" Value="Copy to Clipboard" />
         <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
-        <Setter Property="ToolTip" Value="Copy to the clipboard. Clears after 5 minutes or when Crypture closes." />
+        <Setter Property="ToolTip" Value="Copy to the clipboard. Clears automatically or when Crypture closes." />
         <Setter Property="ContentTemplate">
             <Setter.Value>
                 <DataTemplate>

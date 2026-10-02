@@ -35,8 +35,21 @@ namespace Crypture
         protected override void OnStartup(StartupEventArgs e)
         {
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-            ApplyThemePreference();
             base.OnStartup(e);
+
+            // Surface invalid startup defaults before opening the main window.
+            try
+            {
+                ApplyThemePreference();
+                MainWindow = new ItemBrowser();
+                MainWindow.Show();
+            }
+            catch (Exception oError)
+            {
+                MessageBox.Show("Crypture could not start.\n\n" + oError.GetBaseException().Message,
+                    "Crypture", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown(1);
+            }
         }
 
         private void oImage_Loaded(object sender, RoutedEventArgs e)
@@ -45,10 +58,13 @@ namespace Crypture
             RenderOptions.SetBitmapScalingMode((Image)sender, BitmapScalingMode.HighQuality);
         }
 
-        internal static void CopyProtectedText(string sText)
+        internal static TimeSpan CopyProtectedText(string sText)
         {
+            // Validate the timeout before placing any secret on the clipboard.
+            TimeSpan oTimeout = ClipboardExpiration.Timeout;
             Clipboard.SetText(sText);
-            oClipboardExpiration.TrackCopy();
+            oClipboardExpiration.TrackCopy(oTimeout);
+            return oTimeout;
         }
 
         protected override void OnExit(ExitEventArgs e)

@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Configuration;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -56,6 +58,11 @@ namespace Crypture
         private bool bLoadingProviders;
         private bool bStarted;
         private bool bClosed;
+        private readonly string sDefaultProvider;
+        private readonly string sDefaultSignature;
+        private readonly string sDefaultHash;
+        private readonly int nDefaultKeyLength;
+        private readonly X509KeyUsageFlags? oDefaultKeyUsages;
 
         public CertWizard() : this(GetDefaultProviderAsync, GetAvailableProvidersAsync)
         {
@@ -66,11 +73,56 @@ namespace Crypture
         {
             GetDefaultProvider = oGetDefaultProvider;
             GetAvailableProviders = oGetAvailableProviders;
+
+            // Validate one configuration snapshot before initializing event-driven controls.
+            ConfigurationDefaults oDefaults = new ConfigurationDefaults("CertificateGenerator");
+            sDefaultProvider = oDefaults.Text("Provider", DefaultProviderName).Trim();
+            sDefaultSignature = oDefaults.Text("KeyAlgorithm", "RSA").Trim().ToUpperInvariant();
+            sDefaultHash = oDefaults.Text("HashAlgorithm", "SHA256").Trim().ToUpperInvariant();
+            nDefaultKeyLength = oDefaults.Number("KeyLength", 2048, 1, 16384);
+            int nStartOffset = oDefaults.Number("StartOffsetDays", 0, -36500, 36500);
+            int nYears = oDefaults.Number("ValidityYears", 3, 0, 100);
+            int nDays = oDefaults.Number("ValidityDays", 0, 0, 36500);
+            string sStore = oDefaults.Choice("Store", "CurrentUser", "CurrentUser", "LocalMachine");
+            bool bSelfSigned = oDefaults.Flag("SelfSigned", true);
+            bool bHardware = oDefaults.Flag("ShowHardwareProviders", true);
+            bool bSoftware = oDefaults.Flag("ShowSoftwareProviders", true);
+            bool bLegacy = oDefaults.Flag("ShowLegacyProviders", false);
+            bool bExportable = oDefaults.Flag("KeyExportable", false);
+            bool bPasswordProtect = oDefaults.Flag("PasswordProtectKey", false);
+            if (sDefaultProvider.Length == 0 || sDefaultSignature.Length == 0 || sDefaultHash.Length == 0 ||
+                nYears + nDays == 0 || !bHardware && !bSoftware ||
+                sDefaultSignature == "RSA" && nDefaultKeyLength < 2048)
+                throw oDefaults.Error("CertificateGenerator defaults need a provider, algorithms, a positive " +
+                    "validity period, at least one provider type, and an RSA key length of at least 2048 bits.");
+            HashSet<string> oEnhancedUsages;
+            try
+            {
+                string sUsages = oDefaults.Text("KeyUsages", "Automatic").Trim();
+                oDefaultKeyUsages = sUsages.Equals("Automatic", StringComparison.OrdinalIgnoreCase) ? null :
+                    CertificateUsageFilter.ParseKeyUsages(sUsages, "CertificateGeneratorKeyUsages");
+                oEnhancedUsages = CertificateUsageFilter.ParseEnhancedUsages(
+                    oDefaults.Text("EnhancedKeyUsages", ""), "CertificateGeneratorEnhancedKeyUsages");
+            }
+            catch (ConfigurationErrorsException oError)
+            {
+                throw oDefaults.Error(oError.Message);
+            }
             InitializeComponent();
 
-            // set default values
-            oValidFromDatePicker.SelectedDate = DateTime.Now;
-            oValidUntilDatePicker.SelectedDate = DateTime.Now.AddYears(3);
+            // Initialize generation choices before providers finish loading.
+            oValidFromDatePicker.SelectedDate = DateTime.Today.AddDays(nStartOffset);
+            oValidUntilDatePicker.SelectedDate = oValidFromDatePicker.SelectedDate.Value
+                .AddYears(nYears).AddDays(nDays);
+            oSubjectTextBox.Text = oDefaults.Text("Subject", "");
+            oIssuerTextBox.Text = oDefaults.Text("Issuer", "");
+            oCertificateSelfSignedRadio.IsChecked = bSelfSigned;
+            oCertificateRequestRadio.IsChecked = !bSelfSigned;
+            oHardwareCheckbox.IsChecked = bHardware;
+            oSoftwareCheckbox.IsChecked = bSoftware;
+            oShowLegacyCheckbox.IsChecked = bLegacy;
+            oKeyExportableCheckbox.IsChecked = bExportable;
+            oPasswordProtectCheckbox.IsChecked = bPasswordProtect;
 
             // populate extended key usage options
             foreach (Oid oOid in NativeMethods.GetExtendedKeyUsages())
@@ -83,10 +135,15 @@ namespace Crypture
                 EkuOption oKeyUsage = new EkuOption()
                 {
                     Name = oOid.FriendlyName,
-                    Oid = oOid.Value
+                    Oid = oOid.Value,
+                    Selected = oEnhancedUsages.Contains(oOid.Value)
                 };
                 EnhancedKeyUsages.Add(oKeyUsage);
             }
+
+            // Custom EKUs remain visible and editable even when Windows has no friendly name for them.
+            foreach (string sOid in oEnhancedUsages.Where(s => !EnhancedKeyUsages.Any(o => o.Oid == s)))
+                EnhancedKeyUsages.Add(new EkuOption { Name = sOid, Oid = sOid, Selected = true });
 
             // populate key usage options
             foreach (string sKeyUsage in Enum.GetNames(typeof(X509KeyUsageFlags)))
@@ -108,6 +165,9 @@ namespace Crypture
             using (WindowsIdentity oIdentity = WindowsIdentity.GetCurrent())
                 oCertificateStoreMachineRadio.IsEnabled = new WindowsPrincipal(oIdentity)
                     .IsInRole(WindowsBuiltInRole.Administrator);
+            oCertificateStoreMachineRadio.IsChecked =
+                sStore == "LocalMachine" && oCertificateStoreMachineRadio.IsEnabled;
+            oCertificateStoreUserRadio.IsChecked = oCertificateStoreMachineRadio.IsChecked != true;
         }
 
         private static dynamic CreateEnrollmentObject(string sClass)
@@ -259,18 +319,22 @@ namespace Crypture
             oProviderStatus.ToolTip = null;
             try
             {
-                ProviderDetails oDefault = await GetDefaultProvider(bRefresh);
-                if (bClosed) return;
-                if (bRefresh) ProviderOptions.Clear();
-                ProviderOptions[DefaultProviderName] = oDefault;
-                oProviderType_Checked(null, null);
-                oProviderStatus.Text = "Loading other providers; you can use the selected provider now.";
+                if (sDefaultProvider == DefaultProviderName)
+                {
+                    ProviderDetails oDefault = await GetDefaultProvider(bRefresh);
+                    if (bClosed) return;
+                    if (bRefresh) ProviderOptions.Clear();
+                    ProviderOptions[DefaultProviderName] = oDefault;
+                    oProviderType_Checked(null, null);
+                    oProviderStatus.Text = "Loading other providers; you can use the selected provider now.";
+                }
 
                 Dictionary<string, ProviderDetails> oProviders = await GetAvailableProviders(bRefresh);
                 if (bClosed) return;
+                if (bRefresh && sDefaultProvider != DefaultProviderName) ProviderOptions.Clear();
                 foreach (var oProvider in oProviders)
                 {
-                    if (oProvider.Key != DefaultProviderName) ProviderOptions[oProvider.Key] = oProvider.Value;
+                    if (!ProviderOptions.ContainsKey(oProvider.Key)) ProviderOptions[oProvider.Key] = oProvider.Value;
                 }
                 oProviderType_Checked(null, null);
                 oProviderStatus.Text = oProviderComboBox.SelectedItem == null
@@ -306,9 +370,11 @@ namespace Crypture
             }
             oSignatureComboBox.ItemsSource = oProvider.SignatureAlgorithmns;
             oHashComboBox.ItemsSource = oProvider.HashAlgorithmns;
-            oSignatureComboBox.SelectedItem = oProvider.SignatureAlgorithmns.Contains("RSA")
+            oSignatureComboBox.SelectedItem = oProvider.SignatureAlgorithmns.Contains(sDefaultSignature)
+                ? sDefaultSignature : oProvider.SignatureAlgorithmns.Contains("RSA")
                 ? "RSA" : oProvider.SignatureAlgorithmns.FirstOrDefault();
-            oHashComboBox.SelectedItem = oProvider.HashAlgorithmns.Contains("SHA256")
+            oHashComboBox.SelectedItem = oProvider.HashAlgorithmns.Contains(sDefaultHash)
+                ? sDefaultHash : oProvider.HashAlgorithmns.Contains("SHA256")
                 ? "SHA256" : oProvider.HashAlgorithmns.FirstOrDefault();
             oGenerateButton.IsEnabled = oSignatureComboBox.SelectedItem != null && oHashComboBox.SelectedItem != null;
         }
@@ -328,6 +394,7 @@ namespace Crypture
             {
                 oProviderComboBox.ItemsSource = oNames;
                 oProviderComboBox.SelectedItem = oNames.Contains(sPrevious) ? sPrevious
+                    : oNames.Contains(sDefaultProvider) ? sDefaultProvider
                     : oNames.Contains(DefaultProviderName) ? DefaultProviderName : oNames.FirstOrDefault();
             }
             finally
@@ -356,10 +423,11 @@ namespace Crypture
 
             bool bAgreement = SelectedSignature.StartsWith("ECDH", StringComparison.Ordinal);
             bool bSigning = SelectedSignature.StartsWith("ECDSA", StringComparison.Ordinal);
+            X509KeyUsageFlags oUsages = oDefaultKeyUsages ?? (bAgreement ? X509KeyUsageFlags.KeyAgreement
+                : bSigning ? X509KeyUsageFlags.DigitalSignature : X509KeyUsageFlags.KeyEncipherment);
             foreach (EkuOption oUsage in KeyUsages)
-                oUsage.Selected = oUsage.Oid == (bAgreement ? nameof(X509KeyUsageFlags.KeyAgreement)
-                    : bSigning ? nameof(X509KeyUsageFlags.DigitalSignature)
-                    : nameof(X509KeyUsageFlags.KeyEncipherment));
+                oUsage.Selected = oUsage.Oid != nameof(X509KeyUsageFlags.None) &&
+                    (oUsages & Enum.Parse<X509KeyUsageFlags>(oUsage.Oid)) != 0;
             oKeyUsageCombobox.Items.Refresh();
 
             // get potential key lengths
@@ -377,7 +445,9 @@ namespace Crypture
                     "Minimum Length: {0}, Maximum Length: {1}",
                     MinLength.ToString(), MaxLength.ToString());
                 oKeyLengthTextBox.IsEnabled = true;
-                oKeyLengthTextBox.Text = Math.Max(MinLength, Math.Min(MaxLength, 2048)).ToString();
+                oKeyLengthTextBox.Text = Math.Max(MinLength, Math.Min(MaxLength,
+                    SelectedSignature == "RSA" ? Math.Max(2048, nDefaultKeyLength) : nDefaultKeyLength))
+                    .ToString(CultureInfo.InvariantCulture);
             }
         }
 
