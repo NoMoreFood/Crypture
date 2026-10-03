@@ -219,7 +219,9 @@ try
             '-intermediatefolder', $installerDirectory, '-out', $installer,
             '-d', "ProductName=$ProductName", '-d', "ProductUrl=$ProductUrl", '-d', "Version=$version",
             '-d', "PublishDirectory=$installedDirectory", '-d', "IconPath=$PSScriptRoot\..\Code\Safe.ico",
-            '-d', "LicenseRtf=$licenseRtf")
+            '-d', "LicenseRtf=$licenseRtf",
+            '-d', "DialogBitmap=$PSScriptRoot\Artwork\InstallerDialog.png",
+            '-d', "BannerBitmap=$PSScriptRoot\Artwork\InstallerBanner.png")
         Invoke-Tool $wix @('msi', 'validate', $installer,
             '-intermediateFolder', (Join-Path $installerDirectory 'Validation'))
         Sign-File $installer

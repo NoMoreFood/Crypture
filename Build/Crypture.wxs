@@ -33,5 +33,7 @@
 
         <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
         <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+        <WixVariable Id="WixUIDialogBmp" Value="$(var.DialogBitmap)" />
+        <WixVariable Id="WixUIBannerBmp" Value="$(var.BannerBitmap)" />
     </Package>
 </Wix>
