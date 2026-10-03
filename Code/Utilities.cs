@@ -7,6 +7,7 @@ using System.Windows;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
 using System.Windows.Media;
@@ -47,6 +48,70 @@ namespace Crypture
             oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
             oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
             oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+        }
+
+        internal static string GetRichText(RichTextBox oTextBox)
+        {
+            string sText = new TextRange(oTextBox.Document.ContentStart, oTextBox.Document.ContentEnd).Text;
+            return sText.EndsWith("\r\n", StringComparison.Ordinal) ? sText[..^2] : sText;
+        }
+
+        internal static void NormalizeRichTextAppearance(RichTextBox oTextBox)
+        {
+            // RTF stores inherited colors and fonts; let the app theme and secret-font setting supply those values.
+            FlowDocument oDocument = oTextBox.Document;
+            oDocument.ClearValue(TextElement.ForegroundProperty);
+            oDocument.ClearValue(TextElement.BackgroundProperty);
+            oDocument.ClearValue(TextElement.FontFamilyProperty);
+            oDocument.ClearValue(TextElement.FontSizeProperty);
+            for (TextPointer oPosition = oDocument.ContentStart;
+                oPosition != null && oPosition.CompareTo(oDocument.ContentEnd) < 0;
+                oPosition = oPosition.GetNextContextPosition(LogicalDirection.Forward))
+            {
+                if (oPosition.GetPointerContext(LogicalDirection.Forward) != TextPointerContext.ElementStart ||
+                    oPosition.GetAdjacentElement(LogicalDirection.Forward) is not TextElement oElement) continue;
+                oElement.ClearValue(TextElement.ForegroundProperty);
+                oElement.ClearValue(TextElement.BackgroundProperty);
+                oElement.ClearValue(TextElement.FontFamilyProperty);
+                oElement.ClearValue(TextElement.FontSizeProperty);
+            }
+        }
+
+        internal static void EnableClipboardTimeout(RichTextBox oTextBox, Func<string, bool> oCopy = null)
+        {
+            // Rich editing must use the same protected plain-text clipboard path as ordinary secrets.
+            oCopy = oCopy ?? (s => TryOperation(Window.GetWindow(oTextBox), () => App.CopyProtectedText(s)));
+            ExecutedRoutedEventHandler oExecuted = (s, e) =>
+            {
+                e.Handled = true;
+                bool bCut = e.Command == ApplicationCommands.Cut;
+                string sText = !bCut && Equals(e.Parameter, "All")
+                    ? GetRichText(oTextBox) : oTextBox.Selection.Text;
+                if (!oTextBox.IsEnabled || sText.Length == 0 || bCut && oTextBox.IsReadOnly) return;
+                if (oCopy(sText) && bCut) oTextBox.Selection.Text = "";
+            };
+            CanExecuteRoutedEventHandler oCanExecute = (s, e) =>
+            {
+                bool bCut = e.Command == ApplicationCommands.Cut;
+                e.CanExecute = oTextBox.IsEnabled && (!bCut || !oTextBox.IsReadOnly) &&
+                    (!bCut && Equals(e.Parameter, "All") ? GetRichText(oTextBox).Length > 0 :
+                        !oTextBox.Selection.IsEmpty);
+                e.Handled = true;
+            };
+            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, oExecuted, oCanExecute));
+            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
+            oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+            oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+
+            // Paste text only, keeping embedded files and external rich content out of encrypted notes.
+            DataObject.AddPastingHandler(oTextBox, (s, e) =>
+            {
+                if (e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText))
+                    e.FormatToApply = DataFormats.UnicodeText;
+                else if (e.SourceDataObject.GetDataPresent(DataFormats.Text))
+                    e.FormatToApply = DataFormats.Text;
+                else e.CancelCommand();
+            });
         }
 
         internal static bool TryOperation(Window oOwner, Action oAction)

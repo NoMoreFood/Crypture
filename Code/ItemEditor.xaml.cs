@@ -16,6 +16,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 
@@ -51,8 +52,8 @@ namespace Crypture
             // Apply configured choices only to new items; saved items supply their own settings.
             ConfigurationDefaults oDefaults = bNewItem ? new ConfigurationDefaults("NewItem") : null;
             ThisItem.Label = oDefaults?.Text("Label", "My New Item") ?? "My New Item";
-            string sType = oDefaults?.Choice("Type", "Text", "Text", "Totp", "File") ?? "Text";
-            ThisItem.ItemType = sType == "Totp" ? "totp" : sType == "File" &&
+            string sType = oDefaults?.Choice("Type", "Text", "Text", "RichText", "Totp", "File") ?? "Text";
+            ThisItem.ItemType = sType == "RichText" ? "richtext" : sType == "Totp" ? "totp" : sType == "File" &&
                 Properties.Settings.Default.ShowItemFileUpload ? "" : "text";
             string sProtection = oDefaults?.Choice("ProtectionMode", "Automatic",
                 "Automatic", "UserBased", "CertificateBased") ?? "Automatic";
@@ -72,6 +73,7 @@ namespace Crypture
                 oCertificateCancellation.Dispose();
             };
             Utilities.EnableClipboardTimeout(oItemData);
+            Utilities.EnableClipboardTimeout(oRichItemData);
             Utilities.EnableClipboardTimeout(oItemLabel);
             oTotpPanel.SettingsChanged += (s, e) =>
             {
@@ -222,36 +224,44 @@ namespace Crypture
         {
             // toggle what controls are available based on whether item item is decoded
             bEditing = bEnabled;
+            bool bPlainText = ThisItem.ItemType == "text";
+            bool bRichText = ThisItem.ItemType == "richtext";
             oAddCertDropDown.IsEnabled = bEnabled && bCertificatesEnabled && !bLoadingCertificates;
             oProtectionMode.IsEnabled = bEnabled && (bDpapiNgEnabled || bCertificatesEnabled);
             oPrincipalScope.IsEnabled = bEnabled && bDpapiNgEnabled;
             oPrincipalControls.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             oPrincipalMatch.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             oLoadItemButton.IsEnabled = !bEnabled;
-            oItemData.IsEnabled = bEnabled && ThisItem.ItemType == "text";
-            oItemTypeSelector.IsEnabled = bEnabled && (ThisItem.ItemType is "text" or "totp" ||
+            oItemData.IsEnabled = bEnabled && bPlainText;
+            oRichItemData.IsEnabled = bEnabled && bRichText;
+            oItemTypeSelector.IsEnabled = bEnabled && (ThisItem.ItemType is "text" or "richtext" or "totp" ||
                 ThisItem.ItemId == 0 && BinaryItemData == null);
             bool bWasLoading = bLoading;
             bLoading = true;
-            oItemTypeSelector.SelectedIndex = ThisItem.ItemType == "text" ? 0 : ThisItem.ItemType == "totp" ? 1 : 2;
+            oItemTypeSelector.SelectedIndex = bPlainText ? 0 : bRichText ? 1 : ThisItem.ItemType == "totp" ? 2 : 3;
             bLoading = bWasLoading;
             oItemLabel.IsReadOnly = !bEnabled;
             oUploadAFile.IsEnabled = bEnabled;
-            oGeneratePasswordButton.IsEnabled = bEnabled && ThisItem.ItemType == "text";
+            oGeneratePasswordButton.IsEnabled = bEnabled && (bPlainText || bRichText);
             oRemoveItemButton.IsEnabled = ThisItem.ItemId != 0;
             oLockItemButton.IsEnabled = bEnabled && ThisItem.ItemId != 0;
 
             // control panel display
             oTextLockImage.Visibility = bEnabled ? Visibility.Collapsed : Visibility.Visible;
-            oItemData.Visibility = bEnabled && ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
-            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType is not ("text" or "totp")
+            oTextContentPanel.Visibility = bEnabled && (bPlainText || bRichText)
+                ? Visibility.Visible : Visibility.Collapsed;
+            oItemData.Visibility = bEnabled && bPlainText ? Visibility.Visible : Visibility.Collapsed;
+            oRichItemData.Visibility = bEnabled && bRichText ? Visibility.Visible : Visibility.Collapsed;
+            oRichTextToolbar.Visibility = bEnabled && bRichText ? Visibility.Visible : Visibility.Collapsed;
+            oCopyContentButton.Visibility = oTextContentPanel.Visibility;
+            oCopyContentButton.CommandTarget = bRichText ? oRichItemData : oItemData;
+            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType is not ("text" or "richtext" or "totp")
                 ? Visibility.Visible : Visibility.Collapsed;
             oDownloadTextBox.Content = BinaryItemData == null && ThisItem.ItemId == 0
                 ? "Choose File Attachment..." : "Save Decrypted File...";
             System.Windows.Automation.AutomationProperties.SetName(oDownloadPanel, (string)oDownloadTextBox.Content);
             oTotpPanel.Visibility = bEnabled && ThisItem.ItemType == "totp" ? Visibility.Visible : Visibility.Collapsed;
             oTotpPanel.SetActive(bEnabled && ThisItem.ItemType == "totp");
-            oCopyContentButton.Visibility = ThisItem.ItemType == "text" ? Visibility.Visible : Visibility.Collapsed;
             oContentTitle.Content = ThisItem.ItemType == "totp" ? "TOTP Authenticator" : "Protected Item Content";
             oItemStatus.Text = !bEnabled ? "Locked - decrypt to view or edit this item."
                 : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == 0
@@ -271,10 +281,12 @@ namespace Crypture
                     if (String.IsNullOrWhiteSpace(ThisItem.Label))
                         throw new InvalidOperationException("Enter an item label before saving.");
 
-                    // perform data validation if in text mode and option is set
-                    if (ThisItem.ItemType == "text" &&
+                    // Apply the text filter to visible content in either secret-text format.
+                    if (ThisItem.ItemType is "text" or "richtext" &&
                         !String.IsNullOrWhiteSpace(Properties.Settings.Default.ItemTextExpressionFilter) &&
-                        !Regex.IsMatch(oItemData.Text, Properties.Settings.Default.ItemTextExpressionFilter,
+                        !Regex.IsMatch(ThisItem.ItemType == "richtext"
+                            ? Utilities.GetRichText(oRichItemData) : oItemData.Text,
+                            Properties.Settings.Default.ItemTextExpressionFilter,
                             RegexOptions.None, TimeSpan.FromSeconds(2)))
                         throw new InvalidOperationException(
                             "The item text provided does not satisfy the content filter.");
@@ -312,6 +324,7 @@ namespace Crypture
                     byte[] oPlainText = ThisItem.ItemType switch
                     {
                         "text" => Encoding.Unicode.GetBytes(oItemData.Text),
+                        "richtext" => SaveRichText(),
                         "totp" => Encoding.UTF8.GetBytes(oTotpPanel.ReadUri()),
                         _ => BinaryItemData
                     };
@@ -342,7 +355,7 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType is "text" or "totp" && oPlainText != null)
+                        if (ThisItem.ItemType is "text" or "richtext" or "totp" && oPlainText != null)
                             Array.Clear(oPlainText, 0, oPlainText.Length);
                     }
                 });
@@ -356,6 +369,16 @@ namespace Crypture
             // close and return to calling dialog
             bCompleted = true;
             Close();
+        }
+
+        private byte[] SaveRichText()
+        {
+            using (MemoryStream oStream = new MemoryStream())
+            {
+                new TextRange(oRichItemData.Document.ContentStart, oRichItemData.Document.ContentEnd)
+                    .Save(oStream, DataFormats.Rtf);
+                return oStream.ToArray();
+            }
         }
 
         private X509Certificate2 GetUserKey(IEnumerable<User> SourceUserList)
@@ -437,6 +460,14 @@ namespace Crypture
                     {
                         // process text item
                         if (ThisItem.ItemType == "text") oItemData.Text = Encoding.Unicode.GetString(oPlainText);
+                        else if (ThisItem.ItemType == "richtext")
+                        {
+                            using (MemoryStream oStream = new MemoryStream(oPlainText, false))
+                                new TextRange(oRichItemData.Document.ContentStart, oRichItemData.Document.ContentEnd)
+                                    .Load(oStream, DataFormats.Rtf);
+                            oRichItemData.Document.PagePadding = new Thickness(0);
+                            Utilities.NormalizeRichTextAppearance(oRichItemData);
+                        }
                         else if (ThisItem.ItemType == "totp")
                             oTotpPanel.LoadUri(new UTF8Encoding(false, true).GetString(oPlainText));
                         // text binary item
@@ -446,7 +477,8 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType is "text" or "totp") Array.Clear(oPlainText, 0, oPlainText.Length);
+                        if (ThisItem.ItemType is "text" or "richtext" or "totp")
+                            Array.Clear(oPlainText, 0, oPlainText.Length);
                         bLoading = false;
                     }
                 });
@@ -512,7 +544,7 @@ namespace Crypture
             bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
                 (!bCertificates || !bLoadingCertificates) &&
-                (ThisItem.ItemType is "text" or "totp" || BinaryItemData != null);
+                (ThisItem.ItemType is "text" or "richtext" or "totp" || BinaryItemData != null);
             oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
             oProtectionDisabledNotice.Text = !bDpapiNgEnabled && !bCertificatesEnabled
                 ? "Both encryption methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
@@ -688,6 +720,8 @@ namespace Crypture
         {
             bLoading = true;
             oItemData.Clear();
+            oRichItemData.Document.Blocks.Clear();
+            oRichItemData.Document.Blocks.Add(new Paragraph { Margin = new Thickness(0) });
             oTotpPanel.Clear();
             if (BinaryItemData != null) Array.Clear(BinaryItemData, 0, BinaryItemData.Length);
             BinaryItemData = null;
@@ -756,25 +790,64 @@ namespace Crypture
             oEditorPanels.IsEnabled = !bBusy;
             if (bEditing && bHasChanges) oItemStatus.Text = "Unsaved edits restored. Encrypt & Save to keep them.";
             else if (!bBusy) SetEditingControls(bEditing);
-            if (bEditing) oItemData.Focus();
+            if (bEditing && ThisItem.ItemType == "richtext") oRichItemData.Focus();
+            else if (bEditing) oItemData.Focus();
             else oLoadItemButton.Focus();
         }
 
         private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1 or 2)) return;
-            if (oItemTypeSelector.SelectedIndex == 2)
+            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1 or 2 or 3))
+                return;
+            if (oItemTypeSelector.SelectedIndex == 3)
             {
                 SetEditingControls(true);
                 oUploadAFile_Click(sender, e);
                 return;
             }
-            ThisItem.ItemType = oItemTypeSelector.SelectedIndex == 1 ? "totp" : "text";
+            string sNewType = oItemTypeSelector.SelectedIndex switch
+            {
+                1 => "richtext",
+                2 => "totp",
+                _ => "text"
+            };
+
+            // Text-format changes preserve the content while an explicit plain-text conversion removes formatting.
+            if (ThisItem.ItemType == "richtext" && sNewType == "text")
+            {
+                string sText = Utilities.GetRichText(oRichItemData);
+                if (sText.Length != 0 && MessageBox.Show(this,
+                    "Convert to plain text? Formatting will be removed.", "Convert Secret Text",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+                {
+                    bLoading = true;
+                    oItemTypeSelector.SelectedIndex = 1;
+                    bLoading = false;
+                    return;
+                }
+                oItemData.Text = sText;
+                oRichItemData.Document.Blocks.Clear();
+            }
+            else if (ThisItem.ItemType == "text" && sNewType == "richtext")
+            {
+                oRichItemData.Document.Blocks.Clear();
+                oRichItemData.Document.Blocks.Add(new Paragraph(new Run(oItemData.Text))
+                {
+                    Margin = new Thickness(0)
+                });
+                oItemData.Clear();
+            }
+            ThisItem.ItemType = sNewType;
             SetEditingControls(true);
             bHasChanges = true;
         }
 
         private void oItemChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!bLoading && bEditing) bHasChanges = true;
+        }
+
+        private void oRichItemChanged(object sender, TextChangedEventArgs e)
         {
             if (!bLoading && bEditing) bHasChanges = true;
         }
@@ -795,15 +868,23 @@ namespace Crypture
 
         private void oGeneratePasswordButton_Click(object sender, RoutedEventArgs e)
         {
-            if (bBusy || !bEditing || ThisItem.ItemType != "text") return;
+            if (bBusy || !bEditing || ThisItem.ItemType is not ("text" or "richtext")) return;
             Utilities.TryOperation(this, () =>
             {
                 PasswordGenerator oGenerator = new PasswordGenerator(true) { Owner = this };
                 if (oGenerator.ShowDialog() != true) return;
-                int nStart = oItemData.SelectionStart;
-                oItemData.SelectedText = oGenerator.SelectedPassword;
-                oItemData.Select(nStart + oGenerator.SelectedPassword.Length, 0);
-                oItemData.Focus();
+                if (ThisItem.ItemType == "richtext")
+                {
+                    oRichItemData.Selection.Text = oGenerator.SelectedPassword;
+                    oRichItemData.Focus();
+                }
+                else
+                {
+                    int nStart = oItemData.SelectionStart;
+                    oItemData.SelectedText = oGenerator.SelectedPassword;
+                    oItemData.Select(nStart + oGenerator.SelectedPassword.Length, 0);
+                    oItemData.Focus();
+                }
             });
         }
 

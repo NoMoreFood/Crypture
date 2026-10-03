@@ -10,19 +10,21 @@ namespace Crypture
 {
     public partial class VaultHealthWindow : Window
     {
-        private readonly string sVaultPath;
+        private readonly IVaultStorage oStorage;
         private CancellationTokenSource oCancellation;
         private VaultHealthReport oReport;
         private bool bClosed;
 
-        public VaultHealthWindow(string sPath)
+        public VaultHealthWindow(string sPath) : this(new SqliteVaultStorage(sPath)) { }
+
+        internal VaultHealthWindow(IVaultStorage oVaultStorage)
         {
             InitializeComponent();
             oIssuesOnly.IsChecked = new ConfigurationDefaults().Flag("HealthCheckShowOnlyIssues", false);
             Utilities.EnableClipboardTimeout(oDetails);
-            sVaultPath = sPath;
-            oVaultName.Text = Path.GetFileName(sPath);
-            oVaultName.ToolTip = sPath;
+            oStorage = oVaultStorage;
+            oVaultName.Text = oStorage.IsSqlServer ? oStorage.DisplayName : Path.GetFileName(oStorage.DisplayName);
+            oVaultName.ToolTip = oStorage.DisplayName;
         }
 
         private async void oRunButton_Click(object sender, RoutedEventArgs e)
@@ -50,7 +52,7 @@ namespace Crypture
             try
             {
                 VaultHealthReport oCompleted = await Task.Run(() => VaultHealthCheck.Run(
-                    sVaultPath, bAllowSelfSigned, bCheckRevocation, oToken, oProgress));
+                    oStorage, bAllowSelfSigned, bCheckRevocation, oToken, oProgress));
                 oToken.ThrowIfCancellationRequested();
                 if (bClosed) return;
                 oReport = oCompleted;

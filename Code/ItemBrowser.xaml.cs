@@ -32,6 +32,7 @@ namespace Crypture
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
 
         internal static int RecentVaultLimit => new ConfigurationDefaults().Number("RecentVaultLimit", 10, 0, 50);
+        private const string SqlRecentPrefix = "sqlserver:";
 
         private static readonly string sApplicationTitle =
             $"Crypture {typeof(App).Assembly.GetName().Version.ToString(3)}";
@@ -257,11 +258,6 @@ namespace Crypture
             Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
         }
 
-        private void oLoadLastVaultOnStartup_Click(object sender, RoutedEventArgs e)
-        {
-            Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
-        }
-
         private void Ribbon_SelectedTabChanged(object sender, SelectionChangedEventArgs e)
         {
             if (oItemDataGrid == null || oCertDataGrid == null) return;
@@ -339,31 +335,30 @@ namespace Crypture
 
         private void RefreshData()
         {
-            List<Item> oItems;
-            List<User> oUsers;
+            List<Item> oItems = null;
+            List<User> oUsers = null;
             HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
             using (CryptureEntities oContent = new CryptureEntities())
             {
                 // Keep item rows, recipients, and protection metadata in one read snapshot during concurrent saves.
-                oContent.Database.OpenConnection();
-                using SqliteTransaction oTransaction = ((SqliteConnection)oContent.Database.GetDbConnection())
-                    .BeginTransaction(deferred: true);
-                using var oSnapshot = oContent.Database.UseTransaction(oTransaction);
-                oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances).ThenInclude(j => j.User).ToList();
-                oUsers = oContent.Users.ToList();
-                var oProtection = oContent.Ciphers.Select(c => new
+                CryptureEntities.Storage.ReadSnapshot(oContent, () =>
                 {
-                    c.ItemId, c.CipherParams, c.ProtectionDescriptor
-                }).ToDictionary(c => c.ItemId);
-                foreach (Item oItem in oItems)
-                {
-                    if (!oProtection.TryGetValue(oItem.ItemId, out var oPolicy)) continue;
-                    oItem.Cipher = new Cipher
+                    oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances)
+                        .ThenInclude(j => j.User).ToList();
+                    oUsers = oContent.Users.ToList();
+                    var oProtection = oContent.Ciphers.Select(c => new
                     {
-                        CipherParams = oPolicy.CipherParams, ProtectionDescriptor = oPolicy.ProtectionDescriptor
-                    };
-                }
-                oSnapshot.Commit();
+                        c.ItemId, c.CipherParams, c.ProtectionDescriptor
+                    }).ToDictionary(c => c.ItemId);
+                    foreach (Item oItem in oItems)
+                    {
+                        if (!oProtection.TryGetValue(oItem.ItemId, out var oPolicy)) continue;
+                        oItem.Cipher = new Cipher
+                        {
+                            CipherParams = oPolicy.CipherParams, ProtectionDescriptor = oPolicy.ProtectionDescriptor
+                        };
+                    }
+                });
             }
             ItemList = new ObservableCollection<Item>(oItems.OrderBy(i => i.Label));
             CertificateList = oUsers.OrderBy(u => u.Name).ToList();
@@ -443,15 +438,10 @@ namespace Crypture
                 };
                 if (oSaveDialog.ShowDialog(this) != true) return;
 
-                // extract the sql file to use for initialization
-                string sExecutionText;
-                using (StreamReader oReader = new StreamReader(Application.GetResourceStream(
-                    new Uri("pack://application:,,,/Crypture;component/Data/SQLite.sql", UriKind.Absolute)).Stream))
-                    sExecutionText = oReader.ReadToEnd();
-
-                // create the new database and run the file
-                DatabaseOperations.CreateDatabase(oSaveDialog.FileName, sExecutionText);
-                if (LoadDatabase(oSaveDialog.FileName)) oAddItemButton_Click(sender, e);
+                // Create the selected file and open the new Vault.
+                SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.GetFullPath(oSaveDialog.FileName));
+                oStorage.Create();
+                if (LoadVault(oStorage, false)) oAddItemButton_Click(sender, e);
             });
         }
 
@@ -476,16 +466,18 @@ namespace Crypture
             }
         }
 
-        private bool LoadDatabase(string sDatabase, bool bEnableControls = true)
+        private bool LoadDatabase(string sDatabase, bool bEnableControls = true) =>
+            LoadVault(new SqliteVaultStorage(Path.GetFullPath(sDatabase)), false, bEnableControls);
+
+        private bool LoadVault(IVaultStorage oStorage, bool bCreate, bool bEnableControls = true)
         {
-            string sPreviousConnection = CryptureEntities.ConnectionString;
+            IVaultStorage oPreviousStorage = CryptureEntities.Storage;
             string sPreviousPath = sDatabasePath;
             try
             {
-                sDatabase = Path.GetFullPath(sDatabase);
-                DatabaseOperations.EnsureProtectionSchema(sDatabase);
-                // set our instance to use this new connection
-                CryptureEntities.DatabasePath = sDatabase;
+                if (bCreate) oStorage.Create();
+                else oStorage.Validate();
+                CryptureEntities.Storage = oStorage;
                 using (CryptureEntities oContent = new CryptureEntities())
                 {
                     oContent.Items.Take(1).Load();
@@ -494,7 +486,7 @@ namespace Crypture
                     oContent.Instances.Take(1).Load();
                 }
                 AddAutomaticCertificates();
-                sDatabasePath = sDatabase;
+                sDatabasePath = oStorage.DisplayName;
                 RefreshData();
                 oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
                 oAddItemButton.IsEnabled = bEnableControls && (Properties.Settings.Default.EnableDpapiNgProtection ||
@@ -503,26 +495,55 @@ namespace Crypture
                 oCertificatesTab.IsEnabled = bEnableControls;
                 oAdvancedTab.IsEnabled = bEnableControls;
                 oBackupDatabaseButton.IsEnabled = bEnableControls;
+                oBackupDatabaseButton.ToolTip = oStorage.IsSqlServer
+                    ? "Create a backup on the SQL Server host." : "Create a consistent copy of the encrypted Vault.";
+                oCompactDatabaseButton.Visibility = oStorage.SupportsCompact ? Visibility.Visible : Visibility.Collapsed;
                 oSearchTextBox.IsEnabled = bEnableControls;
-                oDatabaseStatus.Text = sDatabase;
-                Title = sApplicationTitle + " - " + Path.GetFileName(sDatabase);
-                RememberRecentVault(sDatabase);
+                oDatabaseStatus.Text = oStorage.DisplayName;
+                Title = sApplicationTitle + " - " + (oStorage.IsSqlServer
+                    ? oStorage.DisplayName : Path.GetFileName(oStorage.DisplayName));
+                if (oStorage is SqlServerVaultStorage oSqlServer)
+                    RememberRecentEntry(SqlRecentPrefix + oSqlServer.RecentConnection);
+                else RememberRecentVault(oStorage.DisplayName);
                 return true;
             }
             catch (Exception eError)
             {
-                CryptureEntities.ConnectionString = sPreviousConnection;
+                CryptureEntities.Storage = oPreviousStorage;
                 sDatabasePath = sPreviousPath;
-                // this method can be called during the startup routine so launch at a
-                // lower dispatcher priority to make sure that the window is available
                 Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
                 {
-                    MessageBox.Show(this, "An error occurred during Vault loading: " +
+                    MessageBox.Show(this, "The Vault could not be opened: " +
                         Environment.NewLine + Environment.NewLine + eError.GetBaseException().Message,
-                        "Error During Vault Loading", MessageBoxButton.OK, MessageBoxImage.Error);
+                        "Vault Connection Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }));
                 return false;
             }
+        }
+
+        private void oSqlServerButton_Click(object sender, RoutedEventArgs e)
+        {
+            SqlServerVaultDialog oDialog = new SqlServerVaultDialog { Owner = this };
+            if (oDialog.ShowDialog() != true) return;
+            OpenSqlVault(oDialog.Storage, oDialog.CreateDatabase);
+        }
+
+        private async void OpenSqlVault(SqlServerVaultStorage oStorage, bool bCreate)
+        {
+            // Paint connection feedback before opening a remote database.
+            string sPreviousStatus = oDatabaseStatus.Text;
+            Cursor oPreviousCursor = Mouse.OverrideCursor;
+            oDatabaseStatus.Text = bCreate ? "Creating SQL Server Vault..." : "Connecting to SQL Server...";
+            Mouse.OverrideCursor = Cursors.Wait;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            bool bLoaded = false;
+            try
+            {
+                bLoaded = LoadVault(oStorage, bCreate);
+                if (!bLoaded) oDatabaseStatus.Text = sPreviousStatus;
+            }
+            finally { Mouse.OverrideCursor = oPreviousCursor; }
+            if (bLoaded && bCreate) oAddItemButton_Click(this, null);
         }
 
         private void oLoadDatabaseButton_Click(object sender, RoutedEventArgs e)
@@ -538,12 +559,14 @@ namespace Crypture
             LoadDatabase(oSaveDialog.FileName);
         }
 
-        internal void RememberRecentVault(string sPath)
+        internal void RememberRecentVault(string sPath) => RememberRecentEntry(Path.GetFullPath(sPath));
+
+        private void RememberRecentEntry(string sEntry)
         {
-            // Only successful Vault loads are remembered, newest first and without Windows path duplicates.
-            sPath = Path.GetFullPath(sPath);
+            // Keep the last Vault even when recent history is disabled; SQL login passwords are omitted.
+            Properties.Settings.Default.LastVault = sEntry;
             StringCollection oRecent = new StringCollection();
-            oRecent.AddRange(new[] { sPath }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
+            oRecent.AddRange(new[] { sEntry }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
                 .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
                 .Take(RecentVaultLimit).ToArray());
             Properties.Settings.Default.RecentVaults = oRecent;
@@ -561,10 +584,22 @@ namespace Crypture
             for (int nIndex = 0; nIndex < oPaths.Length; nIndex++)
             {
                 string sPath = oPaths[nIndex];
+                string sLabel = Path.GetFileName(sPath);
+                string sTooltip = sPath;
+                if (sPath.StartsWith(SqlRecentPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        SqlServerVaultStorage oSqlServer = new SqlServerVaultStorage(sPath[SqlRecentPrefix.Length..]);
+                        sLabel = "SQL: " + oSqlServer.DisplayName;
+                        sTooltip = oSqlServer.DisplayName;
+                    }
+                    catch (ArgumentException) { sLabel = "SQL Server Vault"; sTooltip = "Invalid recent connection"; }
+                }
                 RibbonMenuItem oEntry = new RibbonMenuItem
                 {
-                    Header = new TextBlock { Text = (nIndex + 1) + ". " + Path.GetFileName(sPath) },
-                    ToolTip = sPath, Tag = sPath, KeyTip = (nIndex + 1).ToString()
+                    Header = new TextBlock { Text = (nIndex + 1) + ". " + sLabel },
+                    ToolTip = sTooltip, Tag = sPath, KeyTip = (nIndex + 1).ToString()
                 };
                 oEntry.Click += oRecentVault_Click;
                 oLoadDatabaseButton.Items.Add(oEntry);
@@ -600,7 +635,33 @@ namespace Crypture
         {
             e.Handled = true;
             oLoadDatabaseButton.IsDropDownOpen = false;
-            LoadDatabase((string)((RibbonMenuItem)sender).Tag);
+            OpenRecentVault((string)((RibbonMenuItem)sender).Tag);
+        }
+
+        private void OpenRecentVault(string sEntry)
+        {
+            if (!sEntry.StartsWith(SqlRecentPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                LoadDatabase(sEntry);
+                return;
+            }
+            string sConnection = sEntry[SqlRecentPrefix.Length..];
+            try
+            {
+                SqlServerVaultStorage oStorage = new SqlServerVaultStorage(sConnection);
+                if (new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(sConnection).IntegratedSecurity)
+                {
+                    OpenSqlVault(oStorage, false);
+                    return;
+                }
+                SqlServerVaultDialog oDialog = new SqlServerVaultDialog(oStorage.RecentConnection) { Owner = this };
+                if (oDialog.ShowDialog() == true) OpenSqlVault(oDialog.Storage, false);
+            }
+            catch (ArgumentException oError)
+            {
+                MessageBox.Show(this, oError.Message, "Invalid Recent Vault",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void oClearRecentVaults_Click(object sender, RoutedEventArgs e)
@@ -652,18 +713,15 @@ namespace Crypture
         private void oHealthCheckButton_Click(object sender, RoutedEventArgs e)
         {
             if (String.IsNullOrEmpty(sDatabasePath)) return;
-            Utilities.TryOperation(this, () => new VaultHealthWindow(sDatabasePath) { Owner = this }.ShowDialog());
+            Utilities.TryOperation(this, () => new VaultHealthWindow(CryptureEntities.Storage)
+                { Owner = this }.ShowDialog());
         }
 
         private void oCompactDatabaseButton_Click(object sender, RoutedEventArgs e)
         {
             Utilities.TryOperation(this, () =>
             {
-                using (CryptureEntities oContent = new CryptureEntities())
-                {
-                    oContent.Database.ExecuteSqlRaw("VACUUM;");
-                }
-
+                CryptureEntities.Storage.Compact();
                 MessageBox.Show(this, "Compact operation complete.",
                     "Operation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
             });
@@ -674,6 +732,17 @@ namespace Crypture
             if (String.IsNullOrEmpty(sDatabasePath)) return;
             Utilities.TryOperation(this, () =>
             {
+                if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+                {
+                    SqlServerBackupDialog oSqlDialog = new SqlServerBackupDialog(oSqlServer.DatabaseName)
+                        { Owner = this };
+                    if (oSqlDialog.ShowDialog() != true) return;
+                    oSqlServer.Backup(oSqlDialog.BackupPath);
+                    MessageBox.Show(this, "SQL Server Vault backup created on the server. " +
+                        "Keep certificate private keys backed up separately.",
+                        "Backup Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
                 SaveFileDialog oDialog = new SaveFileDialog
                 {
                     Title = "Back Up Vault",
@@ -715,14 +784,16 @@ namespace Crypture
 
         private void oItemBrowser_Loaded(object sender, RoutedEventArgs e)
         {
-            // Reopen the last Vault only when no Vault was specified on the command line.
-            if (RecentVaultLimit > 0 && Properties.Settings.Default.LoadLastVaultOnStartup &&
-                String.IsNullOrEmpty(sDatabasePath) &&
-                Environment.GetCommandLineArgs().Length == 1)
+            // A command-line Vault takes precedence over the last successful connection.
+            if (String.IsNullOrEmpty(sDatabasePath) && Environment.GetCommandLineArgs().Length == 1)
             {
-                string sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()
-                    .FirstOrDefault(p => !String.IsNullOrWhiteSpace(p));
-                if (File.Exists(sLastVault)) LoadDatabase(sLastVault);
+                string sLastVault = Properties.Settings.Default.LastVault;
+                if (String.IsNullOrWhiteSpace(sLastVault))
+                    sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()
+                        .FirstOrDefault(p => !String.IsNullOrWhiteSpace(p));
+                if (sLastVault?.StartsWith(SqlRecentPrefix, StringComparison.OrdinalIgnoreCase) == true)
+                    OpenRecentVault(sLastVault);
+                else if (!String.IsNullOrWhiteSpace(sLastVault)) LoadDatabase(sLastVault);
             }
 
             if (!string.IsNullOrWhiteSpace(Properties.Settings.Default.StartupMessageText))

@@ -62,7 +62,7 @@ namespace Crypture
             string sProtectionDescriptor = null, string sRecoveryDescriptor = null,
             ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm)
         {
-            int nMaxSize = oItem.ItemType is "text" or "totp"
+            int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
                 ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
             if (oPlainText == null || oPlainText.Length > nMaxSize)
                 throw new InvalidDataException("Items must be no larger than 64 MB.");
@@ -158,7 +158,7 @@ namespace Crypture
         internal static byte[] Decrypt(Item oItem, Instance oInstance = null, X509Certificate2 oCert = null)
         {
             Cipher oCipher = oItem.Cipher;
-            int nMaxSize = oItem.ItemType is "text" or "totp"
+            int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
                 ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
             bool bPrincipals = oCipher?.CipherParams == PrincipalFormat;
             bool bRecovery = oCipher?.CipherParams == RecoveryFormat;

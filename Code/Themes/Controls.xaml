@@ -126,6 +126,17 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <Style x:Key="Crypture.SecretRichText" TargetType="RichTextBox" BasedOn="{StaticResource Crypture.ControlStyle}">
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{DynamicResource Crypture.TextBrush}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="FontFamily">
+            <Setter.Value>
+                <Binding Source="{x:Static properties:Settings.Default}" Path="SecretFontFamily" Mode="OneWay"
+                    Converter="{StaticResource Crypture.SecretFontConverter}" />
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="Button" BasedOn="{StaticResource Crypture.ControlStyle}">
         <Setter Property="Background" Value="{DynamicResource Crypture.PanelBrush}" />
         <Setter Property="BorderThickness" Value="1" />

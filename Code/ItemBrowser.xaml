@@ -23,6 +23,10 @@
                         ItemContainerStyle="{StaticResource Crypture.RecentVaultMenuItem}"
                         ToolTip="Open a Vault, or use the arrow to choose a recent Vault."
                         DropDownToolTipTitle="Recent Vaults" />
+                    <ribbon:RibbonButton x:Name="oSqlServerButton" Margin="6,6,6,0" Label="SQL Server..."
+                        Click="oSqlServerButton_Click" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
+                        SmallImageSource="{StaticResource Crypture.LoadVaultIcon}"
+                        ToolTip="Open or create a Vault in SQL Server." />
                     <ribbon:RibbonButton x:Name="oBackupDatabaseButton" Margin="6,6,6,0" Label="Back Up..."
                         Click="oBackupDatabaseButton_Click" IsEnabled="False" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
                         SmallImageSource="pack://application:,,,/Crypture;component/Images/Save.png"
@@ -80,12 +84,6 @@
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
             <ribbon:RibbonTab x:Name="oViewTab" Header="View">
-                <ribbon:RibbonGroup Header="Startup">
-                    <CheckBox x:Name="oLoadLastVaultOnStartupCheckBox" Margin="10,6,10,0"
-                        Content="Load Last _Vault On Startup" Click="oLoadLastVaultOnStartup_Click"
-                        IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=LoadLastVaultOnStartup,Mode=TwoWay}"
-                        ToolTip="Automatically reopen the most recently used Vault when Crypture starts." />
-                </ribbon:RibbonGroup>
                 <ribbon:RibbonGroup Header="Appearance">
                     <StackPanel Margin="10,4,10,0">
                         <Label Content="_Theme:" Target="{Binding ElementName=oThemeComboBox}"

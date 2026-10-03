@@ -11,6 +11,9 @@ using System.Reflection;
 using System.Xml.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -85,6 +88,12 @@ internal static partial class RegressionTests
             using (X509Certificate2 oOtherCert = Certificate(oOtherKey, "Other", DateTimeOffset.Now.AddDays(-1),
                 DateTimeOffset.Now.AddDays(1)))
             {
+                if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_SQLSERVER_ONLY") == "1")
+                {
+                    TestSqlServerBackend(sDirectory, oCert, oOtherCert);
+                    return 0;
+                }
+                TestSqlServerBackend(sDirectory, oCert, oOtherCert);
                 TestConcurrentDatabase(sDirectory, oCert, oOtherCert);
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ONLY") == "1") return 0;
                 TestContentEncryptionSuites(sDirectory, oCert, oOtherCert);
@@ -536,6 +545,10 @@ internal static partial class RegressionTests
         string sDatabase = Path.Combine(sDirectory, "Vault ; \u00e9.cryptdb");
         string sSchema = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SQLite.sql"));
         DatabaseOperations.CreateDatabase(sDatabase, sSchema);
+        SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "Storage.cryptdb"));
+        oStorage.Create();
+        oStorage.Validate();
+        Check(File.Exists(oStorage.DisplayName), "SQLite storage interface creates a usable Vault");
         byte[] oOriginalDatabase = File.ReadAllBytes(sDatabase);
         Reject(() => DatabaseOperations.CreateDatabase(sDatabase, sSchema), "Refuse to overwrite existing Vault");
         Check(File.ReadAllBytes(sDatabase).SequenceEqual(oOriginalDatabase),
@@ -753,9 +766,11 @@ internal static partial class RegressionTests
             Check(oContent.Text.Length == 0 && oEditor.BinaryItemData == null && oBuffer.All(b => b == 0),
                 "Lock clears text and binary buffers while Vault is unavailable");
             TestPrivacyConcealment(oEditor);
+            TestEditorTextLayout(oEditor);
             oEditor.Close();
             oEditor = null;
             CryptureEntities.DatabasePath = sDatabase;
+            TestRichTextVaultRoundTrip(sDirectory);
 
             // Keep persistence and security assertions independently of menu and dialog presentation.
             oBrowser = new ItemBrowser();
@@ -917,6 +932,145 @@ internal static partial class RegressionTests
             oGenerator?.Close();
             File.WriteAllBytes(sConfigPath, oOriginalConfig);
             CryptureEntities.ConnectionString = sPreviousConnection;
+        }
+    }
+
+    private static TextBlock FindEditorGlyph(DependencyObject oElement)
+    {
+        if (oElement is TextBlock oText && oText.FontFamily.Source == "Segoe MDL2 Assets") return oText;
+        for (int nChild = 0; nChild < VisualTreeHelper.GetChildrenCount(oElement); nChild++)
+        {
+            TextBlock oGlyph = FindEditorGlyph(VisualTreeHelper.GetChild(oElement, nChild));
+            if (oGlyph != null) return oGlyph;
+        }
+        return null;
+    }
+
+    private static void TestEditorTextLayout(ItemEditor oEditor)
+    {
+        Button oCopy = (Button)oEditor.FindName("oCopyContentButton");
+        TextBox oPlain = (TextBox)oEditor.FindName("oItemData");
+        RichTextBox oRich = (RichTextBox)oEditor.FindName("oRichItemData");
+        Grid oContent = (Grid)oEditor.FindName("oTextContentPanel");
+        FrameworkElement oRoot = (FrameworkElement)oEditor.Content;
+        ComboBox oType = (ComboBox)oEditor.FindName("oItemTypeSelector");
+        string sOriginalType = oEditor.ThisItem.ItemType;
+        double nOriginalWidth = oEditor.Width, nOriginalFontSize = oEditor.FontSize;
+        try
+        {
+            // Check the rendered copy action and metadata glyphs at the minimum width and enlarged text.
+            Border oShield = (Border)oEditor.FindName("oPrivacyShield");
+            if (oShield.Visibility == Visibility.Visible)
+                ((Button)oEditor.FindName("oRevealButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            oEditor.SetEditingControls(true);
+            oPlain.Text = "Plain secret for formatting\r\nsecond line";
+            oEditor.Width = oEditor.MinWidth;
+            foreach (double nFontSize in new[] { 12d, 18d })
+            {
+                oEditor.FontSize = nFontSize;
+                oEditor.UpdateLayout();
+                Rect oCopyBounds = oCopy.TransformToAncestor(oContent).TransformBounds(new Rect(oCopy.RenderSize));
+                Check(oCopy.IsVisible && oPlain.IsVisible && oCopyBounds.Left >= oContent.ActualWidth - 48 &&
+                    oCopyBounds.Right <= oContent.ActualWidth - 4 && oCopyBounds.Top >= 4 &&
+                    oCopyBounds.Bottom <= 48 && oPlain.Padding.Right >= 46,
+                    "Editor copy action stays inside the plain text box at font size " + nFontSize);
+
+                string[] oNames = ["oItemLabelTitle", "oItemTypeTitle", "oCreatedTitle",
+                    "oModifiedTitle", "oModifiedByTitle"];
+                double[] oLeftEdges = oNames.Select(sName => FindEditorGlyph((DependencyObject)oEditor.FindName(sName)))
+                    .Select(oGlyph => oGlyph.TransformToAncestor(oRoot)
+                        .TransformBounds(new Rect(oGlyph.RenderSize)).Left).ToArray();
+                Check(oLeftEdges.All(nLeft => Math.Abs(nLeft - oLeftEdges[0]) <= 1),
+                    "Editor metadata icons share one left edge at font size " + nFontSize);
+                Label oModifiedBy = (Label)oEditor.FindName("oModifiedByTitle");
+                TextBlock oModifier = (TextBlock)oEditor.FindName("oItemModifiedBy");
+                Rect oLabelBounds = oModifiedBy.TransformToAncestor(oRoot)
+                    .TransformBounds(new Rect(oModifiedBy.RenderSize));
+                Rect oValueBounds = oModifier.TransformToAncestor(oRoot)
+                    .TransformBounds(new Rect(oModifier.RenderSize));
+                Check(oLabelBounds.Right + 4 <= oValueBounds.Left && oValueBounds.Width > 0,
+                    "Editor metadata label and value do not overlap at font size " + nFontSize);
+            }
+            string sOriginalText = oPlain.Text;
+            oType.SelectedIndex = 1;
+            oEditor.UpdateLayout();
+            Check(oEditor.ThisItem.ItemType == "richtext" && Utilities.GetRichText(oRich) == sOriginalText &&
+                oCopy.IsVisible && oRich.IsVisible && !oPlain.IsVisible &&
+                oCopy.CommandTarget == oRich &&
+                ((StackPanel)oEditor.FindName("oRichTextToolbar")).IsVisible,
+                "Changing to rich text keeps the secret and shows its editor and in-box copy action");
+
+            // Encrypted RTF retains character formatting and copies only visible plain text.
+            oRich.Document.Blocks.Clear();
+            Paragraph oParagraph = new Paragraph { Margin = new Thickness(0) };
+            oParagraph.Inlines.Add(new Run("Bold ") { FontWeight = FontWeights.Bold });
+            oParagraph.Inlines.Add(new Run("ordinary"));
+            oRich.Document.Blocks.Add(oParagraph);
+            byte[] oRtf;
+            App.ApplyTheme(true);
+            try
+            {
+                oRtf = (byte[])typeof(ItemEditor).GetMethod("SaveRichText",
+                    BindingFlags.Instance | BindingFlags.NonPublic).Invoke(oEditor, null);
+            }
+            finally
+            {
+                App.ApplyTheme(false);
+            }
+            byte[] oDecrypted = null;
+            try
+            {
+                Item oProtected = new Item { Label = "Rich text", ItemType = "richtext" };
+                ItemCryptography.Encrypt(oProtected, oRtf, null, PrincipalProtection.LocalUserDescriptor);
+                oDecrypted = ItemCryptography.Decrypt(oProtected);
+                RichTextBox oReloaded = new RichTextBox
+                {
+                    Style = (Style)Application.Current.Resources["Crypture.SecretRichText"]
+                };
+                using (MemoryStream oStream = new MemoryStream(oDecrypted, false))
+                    new TextRange(oReloaded.Document.ContentStart, oReloaded.Document.ContentEnd)
+                        .Load(oStream, DataFormats.Rtf);
+                Utilities.NormalizeRichTextAppearance(oReloaded);
+                string sCopied = null;
+                Utilities.EnableClipboardTimeout(oReloaded, sText => { sCopied = sText; return true; });
+                ApplicationCommands.Copy.Execute("All", oReloaded);
+                TextPointer oFirstText = oReloaded.Document.ContentStart;
+                while (oFirstText.GetPointerContext(LogicalDirection.Forward) != TextPointerContext.Text)
+                    oFirstText = oFirstText.GetNextContextPosition(LogicalDirection.Forward);
+                object oWeight = new TextRange(oFirstText, oFirstText.GetPositionAtOffset(1))
+                    .GetPropertyValue(TextElement.FontWeightProperty);
+                object oForeground = new TextRange(oFirstText, oFirstText.GetPositionAtOffset(1))
+                    .GetPropertyValue(TextElement.ForegroundProperty);
+                Color oLightText = ((SolidColorBrush)Application.Current.Resources["Crypture.TextBrush"]).Color;
+                Check(Utilities.GetRichText(oReloaded) == "Bold ordinary" &&
+                    oWeight is FontWeight nWeight && nWeight == FontWeights.Bold &&
+                    oForeground is SolidColorBrush oBrush && oBrush.Color == oLightText &&
+                    sCopied == "Bold ordinary" && oRtf.SequenceEqual(oDecrypted),
+                    "Rich text keeps formatting but adopts the current theme after encryption");
+            }
+            finally
+            {
+                Array.Clear(oRtf, 0, oRtf.Length);
+                if (oDecrypted != null) Array.Clear(oDecrypted, 0, oDecrypted.Length);
+            }
+
+            oType.SelectedIndex = 2;
+            oEditor.UpdateLayout();
+            Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
+                "Copy is hidden when the item displays an authenticator");
+            oEditor.SetEditingControls(false);
+            oEditor.UpdateLayout();
+            Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
+                "Copy is hidden when secret text is locked");
+        }
+        finally
+        {
+            oEditor.ThisItem.ItemType = sOriginalType;
+            oEditor.SetEditingControls(true);
+            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(oEditor, false);
+            oEditor.Width = nOriginalWidth;
+            oEditor.FontSize = nOriginalFontSize;
         }
     }
 

@@ -227,7 +227,7 @@ namespace Crypture
     public partial class Item
     {
         public string ItemTypeDisplay => ItemType == "totp" ? "TOTP" :
-            ItemType == "text" ? "Text Secret" : "File Attachment";
+            ItemType == "text" ? "Text Secret" : ItemType == "richtext" ? "Rich Text Secret" : "File Attachment";
         public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";
         public string ProtectionDisplay => Cipher == null ? "Unknown" :
             Cipher.CipherParams == ItemCryptography.RecoveryFormat

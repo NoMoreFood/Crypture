@@ -53,22 +53,25 @@
             <ScrollViewer Width="380" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                 DockPanel.Dock="Left">
                 <StackPanel Margin="14,8,14,12">
-                    <Label Content="Item _Label:" Target="{Binding ElementName=oItemLabel}" Padding="0,3"
+                    <Label x:Name="oItemLabelTitle" Content="Item _Label:"
+                        Target="{Binding ElementName=oItemLabel}" Padding="0,3"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8EC;" />
                     <TextBox x:Name="oItemLabel" MinHeight="28" Padding="5,3"
                         Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" TextChanged="oItemChanged"
                         ToolTip="Labels are visible in the Vault and are not encrypted." />
-                    <Label Content="Item _Type:" Target="{Binding ElementName=oItemTypeSelector}"
+                    <Label x:Name="oItemTypeTitle" Content="Item _Type:"
+                        Target="{Binding ElementName=oItemTypeSelector}" Padding="0,3"
                         Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" Margin="0,6,0,0" />
                     <ComboBox x:Name="oItemTypeSelector" MinHeight="28"
                         SelectionChanged="oItemTypeChanged" AutomationProperties.Name="Item Type">
                         <ComboBoxItem Content="Text Secret" />
+                        <ComboBoxItem Content="Rich Text Secret" />
                         <ComboBoxItem Content="TOTP Authenticator" />
                         <ComboBoxItem Content="File Attachment" />
                     </ComboBox>
                     <Grid Margin="0,8,0,10">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
@@ -76,15 +79,16 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Label Content="Created:" Margin="0,2" Padding="0"
+                        <Label x:Name="oCreatedTitle" Content="Created:" Margin="0,2,8,2" Padding="0"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE787;" />
                         <TextBlock x:Name="oItemCreatedDate" Grid.Column="1" Margin="0,2"
                             Text="{Binding CreatedDate, Converter={StaticResource CheckIfDateIsNotSetConverter}, StringFormat='yyyy-MM-dd HH:mm:ss'}" />
-                        <Label Grid.Row="1" Content="Modified:" Margin="0,2" Padding="0"
+                        <Label x:Name="oModifiedTitle" Grid.Row="1" Content="Modified:" Margin="0,2,8,2" Padding="0"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE823;" />
                         <TextBlock x:Name="oItemModifiedDate" Grid.Row="1" Grid.Column="1" Margin="0,2"
                             Text="{Binding ModifiedDate, Converter={StaticResource CheckIfDateIsNotSetConverter}, StringFormat='yyyy-MM-dd HH:mm:ss'}" />
-                        <Label Grid.Row="2" Content="Modified By:" Margin="0,2" Padding="0"
+                        <Label x:Name="oModifiedByTitle" Grid.Row="2" Content="Modified By:"
+                            Margin="0,2,8,2" Padding="0"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
                         <TextBlock x:Name="oItemModifiedBy" Grid.Row="2" Grid.Column="1" Margin="0,2"
                             Text="{Binding ModifiedByDisplay}" TextTrimming="CharacterEllipsis"
@@ -197,19 +201,35 @@
             <Border Width="1" Background="{DynamicResource Crypture.BorderBrush}" DockPanel.Dock="Left" />
             <DockPanel DockPanel.Dock="Right">
                 <StackPanel DockPanel.Dock="Top" Margin="10,5,10,0">
-                    <DockPanel>
-                        <Button x:Name="oCopyContentButton" DockPanel.Dock="Right"
-                            Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy Item Content"
-                            Command="ApplicationCommands.Copy" CommandParameter="All"
-                            CommandTarget="{Binding ElementName=oItemData}"
-                            ToolTip="Copy all unlocked text. Clears automatically or when Crypture closes." />
-                        <Label x:Name="oContentTitle" HorizontalAlignment="Center" Content="Protected Item Content"
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
-                    </DockPanel>
+                    <Label x:Name="oContentTitle" Content="Protected Item Content" HorizontalAlignment="Center"
+                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE72E;" />
                     <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
                         <Label Content="Secret _Font:" Target="{Binding ElementName=oSecretFontSelector}"
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE185;" />
                         <local:SecretFontSelector x:Name="oSecretFontSelector" Width="210" />
+                    </StackPanel>
+                    <StackPanel x:Name="oRichTextToolbar" Orientation="Horizontal" Margin="0,5,0,0"
+                        Visibility="Collapsed">
+                        <Label Content="Format:" Padding="0,3" VerticalAlignment="Center" />
+                        <Button Content="B" Width="30" Height="28" FontWeight="Bold" Margin="4,0,0,0"
+                            Command="EditingCommands.ToggleBold" CommandTarget="{Binding ElementName=oRichItemData}"
+                            ToolTip="Bold (Ctrl+B)" AutomationProperties.Name="Bold" />
+                        <Button Content="I" Width="30" Height="28" FontStyle="Italic" Margin="4,0,0,0"
+                            Command="EditingCommands.ToggleItalic" CommandTarget="{Binding ElementName=oRichItemData}"
+                            ToolTip="Italic (Ctrl+I)" AutomationProperties.Name="Italic" />
+                        <Button Width="30" Height="28" Margin="4,0,0,0"
+                            Command="EditingCommands.ToggleUnderline"
+                            CommandTarget="{Binding ElementName=oRichItemData}"
+                            ToolTip="Underline (Ctrl+U)" AutomationProperties.Name="Underline">
+                            <TextBlock Text="U" TextDecorations="Underline" />
+                        </Button>
+                        <Button Content="•" Width="30" Height="28" Margin="8,0,0,0"
+                            Command="EditingCommands.ToggleBullets" CommandTarget="{Binding ElementName=oRichItemData}"
+                            ToolTip="Bulleted list" AutomationProperties.Name="Bulleted List" />
+                        <Button Content="1." Width="30" Height="28" Margin="4,0,0,0"
+                            Command="EditingCommands.ToggleNumbering"
+                            CommandTarget="{Binding ElementName=oRichItemData}"
+                            ToolTip="Numbered list" AutomationProperties.Name="Numbered List" />
                     </StackPanel>
                 </StackPanel>
                 <Grid Margin="10,5,10,10">
@@ -220,11 +240,29 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Image x:Name="oTextLockImage" MaxWidth="160" MaxHeight="180" Grid.Row="0" Grid.Column="0" Margin="10,10" HorizontalAlignment="Center" IsEnabled="False" Opacity="0.4" Source="pack://application:,,,/Crypture;component/Images/Save.png" Visibility="Collapsed" />
-                    <TextBox x:Name="oItemData" Grid.Row="0" Grid.Column="0" AcceptsReturn="True"
-                        AcceptsTab="True" Padding="8" IsUndoEnabled="False"
-                        Style="{StaticResource Crypture.SecretText}"
-                        ToolTip="Copied or cut text clears from the clipboard automatically or when Crypture closes."
-                        TextChanged="oItemChanged" AutomationProperties.Name="Protected Item Content" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Visibility="Collapsed" />
+                    <Grid x:Name="oTextContentPanel" Visibility="Collapsed">
+                        <TextBox x:Name="oItemData" AcceptsReturn="True" AcceptsTab="True" Padding="8,8,46,8"
+                            IsUndoEnabled="False" Style="{StaticResource Crypture.SecretText}"
+                            ToolTip="Copied or cut text clears automatically or when Crypture closes."
+                            TextChanged="oItemChanged" AutomationProperties.Name="Protected Item Content"
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                            ScrollViewer.VerticalScrollBarVisibility="Auto"
+                            TextWrapping="Wrap" Visibility="Collapsed" />
+                        <RichTextBox x:Name="oRichItemData" AcceptsTab="True" Padding="8,8,46,8"
+                            IsUndoEnabled="False" AllowDrop="False" Style="{StaticResource Crypture.SecretRichText}"
+                            ToolTip="Formatting stays encrypted with this item. Copies use protected plain text."
+                            TextChanged="oRichItemChanged" AutomationProperties.Name="Rich Text Secret Content"
+                            VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                            <FlowDocument PagePadding="0">
+                                <Paragraph Margin="0" />
+                            </FlowDocument>
+                        </RichTextBox>
+                        <Button x:Name="oCopyContentButton" HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,7,7,0" Panel.ZIndex="1" Style="{StaticResource Crypture.CopyButton}"
+                            AutomationProperties.Name="Copy Item Content" Command="ApplicationCommands.Copy"
+                            CommandParameter="All"
+                            ToolTip="Copy all unlocked text. Clears automatically or when Crypture closes." />
+                    </Grid>
                     <local:TotpPanel x:Name="oTotpPanel" Visibility="Collapsed" />
                     <Button x:Name="oDownloadPanel" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"
                         Click="oDownloadPanel_Click" Visibility="Collapsed" Padding="12" AutomationProperties.Name="Save Decrypted File">

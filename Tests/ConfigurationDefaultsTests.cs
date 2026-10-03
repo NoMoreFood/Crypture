@@ -22,8 +22,13 @@ internal static partial class RegressionTests
         App oApp = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         oApp.InitializeComponent();
         var oSettings = Crypture.Properties.Settings.Default;
-        bool bLoadLast = oSettings.LoadLastVaultOnStartup;
-        oSettings.LoadLastVaultOnStartup = false;
+        string sOriginalLastVault = oSettings.LastVault;
+        StringCollection oOriginalRecent = oSettings.RecentVaults;
+        string sExpectedVault = Environment.GetEnvironmentVariable("CRYPTURE_TEST_STARTUP_VAULT");
+        int nExpectedLimit = sExpectedVault == null ? 2 : 0;
+        oSettings.LastVault = sExpectedVault ?? "";
+        oSettings.RecentVaults = sExpectedVault == null ? new StringCollection() :
+            new StringCollection { Path.Combine(Path.GetTempPath(), "missing-startup-vault.cryptdb") };
         bool bPassed = false;
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
             new RoutedEventHandler((s, e) =>
@@ -39,17 +44,23 @@ internal static partial class RegressionTests
                 ItemBrowser oBrowser = (ItemBrowser)oApp.MainWindow;
                 Check(oBrowser.IsLoaded && ((CheckBox)oBrowser.FindName("oHideAccessible")).IsChecked == true &&
                     ((Ribbon)oBrowser.FindName("ribbon")).IsMinimized &&
-                    ItemBrowser.RecentVaultLimit == 2 && ClipboardExpiration.Timeout == TimeSpan.FromSeconds(2) &&
+                    ItemBrowser.RecentVaultLimit == nExpectedLimit &&
+                    ClipboardExpiration.Timeout == TimeSpan.FromSeconds(2) &&
                     App.PrivacyIdleTimeout == TimeSpan.FromMinutes(1) &&
                     ((System.Windows.Threading.DispatcherTimer)typeof(App).GetField("oPrivacyTimer",
                         BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oApp)).IsEnabled,
                     "Fresh application startup uses configured browser, clipboard, and idle defaults");
+                if (sExpectedVault != null)
+                    Check(CryptureEntities.Storage.DisplayName == sExpectedVault &&
+                        oSettings.LastVault == sExpectedVault && oSettings.RecentVaults.Count == 0,
+                        "Startup opens the saved Vault without retaining recent history");
                 bPassed = true;
             }
             catch (Exception oError) { Console.Error.WriteLine(oError); }
             finally
             {
-                oSettings.LoadLastVaultOnStartup = bLoadLast;
+                oSettings.LastVault = sOriginalLastVault;
+                oSettings.RecentVaults = oOriginalRecent;
                 oApp.MainWindow?.Close();
                 oApp.Shutdown(bPassed ? 0 : 1);
             }
@@ -64,6 +75,7 @@ internal static partial class RegressionTests
         string sConnection = CryptureEntities.ConnectionString;
         var oSettings = Crypture.Properties.Settings.Default;
         StringCollection oRecent = oSettings.RecentVaults;
+        string sLastVault = oSettings.LastVault;
         StringCollection oAutomatic = oSettings.AutomaticallyAddedCertificatesList;
         bool bCertificateProtection = oSettings.EnableCertificateProtection;
         bool bFileUpload = oSettings.ShowItemFileUpload;
@@ -235,7 +247,7 @@ internal static partial class RegressionTests
             Configure(("NewItemType", "File"));
             ItemEditor oFile = Keep(new ItemEditor());
             PumpUntil(() => oFile.CertificateLoading.IsCompleted);
-            Check(((ComboBox)oFile.FindName("oItemTypeSelector")).SelectedIndex == 2 &&
+            Check(((ComboBox)oFile.FindName("oItemTypeSelector")).SelectedIndex == 3 &&
                 !((RibbonButton)oFile.FindName("oSaveItemButton")).IsEnabled &&
                 ((Label)oFile.FindName("oDownloadTextBox")).Content.Equals("Choose File Attachment..."),
                 "A new file draft requests an attachment and cannot save an empty payload");
@@ -246,6 +258,12 @@ internal static partial class RegressionTests
             ItemEditor oNoUpload = Keep(new ItemEditor());
             Check(oNoUpload.ThisItem.ItemType == "text", "Disabled file uploads override the file-item default");
             oSettings["ShowItemFileUpload"] = bFileUpload;
+            Configure(("NewItemType", "RichText"));
+            ItemEditor oRichDefault = Keep(new ItemEditor());
+            Check(oRichDefault.ThisItem.ItemType == "richtext" &&
+                ((ComboBox)oRichDefault.FindName("oItemTypeSelector")).SelectedIndex == 1 &&
+                ((RichTextBox)oRichDefault.FindName("oRichItemData")).Visibility == Visibility.Visible,
+                "Rich text can be the configured new-item format");
 
             // Provider discovery applies configured choices to actual controls after asynchronous loading.
             const string sSoftware = "Microsoft Software Key Storage Provider";
@@ -341,6 +359,7 @@ internal static partial class RegressionTests
             ItemBrowser oBrowser = Keep(new ItemBrowser());
             VaultHealthWindow oHealth = Keep(new VaultHealthWindow(sVault));
             oSettings.RecentVaults = new StringCollection();
+            oSettings.LastVault = "";
             oBrowser.WindowStartupLocation = WindowStartupLocation.Manual;
             oBrowser.Left = oBrowser.Top = -20000;
             oBrowser.ShowActivated = oBrowser.ShowInTaskbar = false;
@@ -398,9 +417,25 @@ internal static partial class RegressionTests
                 oExpiration.ClearExpired();
                 Check(nClears == 1, "Configured expiration still preserves another application's newer copy");
             }
-            Configure(("RecentVaultLimit", "0"));
+            Configure(("HideMissingCertificateKeys", "True"), ("RibbonMinimized", "True"),
+                ("RecentVaultLimit", "0"), ("ClipboardTimeoutSeconds", "2"),
+                ("AutoConcealIdleMinutes", "1"));
             oBrowser.RememberRecentVault(sVault);
-            Check(oSettings.RecentVaults.Count == 0, "A zero history limit stops retaining Vault paths");
+            Check(oSettings.RecentVaults.Count == 0 && oSettings.LastVault == sVault,
+                "A zero history limit still remembers the last Vault for startup");
+            oStart.Environment["CRYPTURE_TEST_STARTUP_VAULT"] = sVault;
+            using (var oProcess = System.Diagnostics.Process.Start(oStart))
+            {
+                var oOutput = oProcess.StandardOutput.ReadToEndAsync();
+                var oErrors = oProcess.StandardError.ReadToEndAsync();
+                if (!oProcess.WaitForExit(15000))
+                {
+                    oProcess.Kill(true);
+                    throw new TimeoutException("The last-Vault startup check did not finish.");
+                }
+                Check(oProcess.ExitCode == 0, "Startup reopens the last Vault with recent history disabled: " +
+                    oOutput.GetAwaiter().GetResult().Trim() + oErrors.GetAwaiter().GetResult().Trim());
+            }
             Configure(("ClipboardTimeoutSeconds", "0"));
             Invalid(() => { _ = ClipboardExpiration.Timeout; }, "ClipboardTimeoutSeconds");
             Configure(("AutoConcealIdleMinutes", "0"));
@@ -441,6 +476,7 @@ internal static partial class RegressionTests
             oSettings.AllowSelfSignedCertificates = bSelfSigned;
             oSettings.PerformCertificateRevocationCheck = bRevocation;
             oSettings.RecentVaults = oRecent;
+            oSettings.LastVault = sLastVault;
             foreach (Window oWindow in oWindows)
             {
                 if (oWindow is ItemEditor)

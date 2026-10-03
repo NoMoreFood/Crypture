@@ -1,31 +1,36 @@
-﻿using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using System;
 
 namespace Crypture
 {
     public partial class CryptureEntities : DbContext
     {
+        private readonly IVaultStorage oStorage = Storage;
+
         public CryptureEntities()
         {
             // Explicit commits apply SQLite's lock waiting even to single-statement saves with RETURNING.
             Database.AutoTransactionBehavior = AutoTransactionBehavior.Always;
         }
 
-        public static string ConnectionString { get; set; } = "";
+        internal static IVaultStorage Storage { get; set; } = SqliteVaultStorage.FromConnectionString("");
+
+        public static string ConnectionString
+        {
+            get => Storage.ConnectionString;
+            set => Storage = SqliteVaultStorage.FromConnectionString(value);
+        }
 
         public static string DatabasePath
         {
-            set => ConnectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = value, Mode = SqliteOpenMode.ReadWrite, ForeignKeys = true, Pooling = false
-            }.ConnectionString;
+            set => Storage = new SqliteVaultStorage(value);
         }
 
         protected override void OnConfiguring(DbContextOptionsBuilder oOptions)
         {
-            if (String.IsNullOrEmpty(ConnectionString)) throw new InvalidOperationException("Open a Vault first.");
-            oOptions.UseSqlite(ConnectionString);
+            if (String.IsNullOrEmpty(oStorage.ConnectionString))
+                throw new InvalidOperationException("Open a Vault first.");
+            oStorage.Configure(oOptions);
         }
 
         protected override void OnModelCreating(ModelBuilder oModel)
@@ -36,7 +41,7 @@ namespace Crypture
                 oUser.ToTable("User");
                 oUser.HasKey(u => u.UserId);
                 oUser.Property(u => u.Certificate).IsRequired();
-                oUser.HasIndex(u => u.Certificate).IsUnique();
+                if (!oStorage.IsSqlServer) oUser.HasIndex(u => u.Certificate).IsUnique();
             });
             oModel.Entity<Item>(oItem =>
             {
@@ -45,9 +50,11 @@ namespace Crypture
                 oItem.Property(i => i.Label).IsRequired();
                 oItem.Property(i => i.ItemType).IsRequired();
                 oItem.HasOne(i => i.User).WithMany(u => u.Items).HasForeignKey(i => i.ModifiedBy)
-                    .OnDelete(DeleteBehavior.SetNull);
+                    .OnDelete(oStorage.IsSqlServer ? DeleteBehavior.ClientSetNull : DeleteBehavior.SetNull);
                 oItem.HasOne(i => i.Cipher).WithOne(c => c.Item).HasForeignKey<Cipher>(c => c.ItemId)
                     .OnDelete(DeleteBehavior.Cascade);
+                if (oStorage.IsSqlServer) oItem.Property(i => i.RowVersion).IsRowVersion();
+                else oItem.Ignore(i => i.RowVersion);
             });
             oModel.Entity<Cipher>(oCipher =>
             {

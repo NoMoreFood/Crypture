@@ -31,13 +31,13 @@ namespace Crypture.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
-        public bool LoadLastVaultOnStartup {
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastVault {
             get {
-                return ((bool)(this["LoadLastVaultOnStartup"]));
+                return ((string)(this["LastVault"]));
             }
             set {
-                this["LoadLastVaultOnStartup"] = value;
+                this["LastVault"] = value;
             }
         }
 

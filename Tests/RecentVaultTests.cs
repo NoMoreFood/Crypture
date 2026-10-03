@@ -11,6 +11,7 @@ internal static partial class RegressionTests
     {
         Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
         StringCollection oOriginal = oSettings.RecentVaults;
+        string sOriginalLastVault = oSettings.LastVault;
         MethodInfo oLoadVault = typeof(ItemBrowser).GetMethod("LoadDatabase",
             BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -20,7 +21,8 @@ internal static partial class RegressionTests
 
             // Successful opens update history; path aliases deduplicate and reopening promotes to the front.
             oLoadVault.Invoke(oBrowser, new object[] { sDatabase, true });
-            Check(oSettings.RecentVaults.Count == 1 && oSettings.RecentVaults[0] == Path.GetFullPath(sDatabase),
+            Check(oSettings.RecentVaults.Count == 1 && oSettings.RecentVaults[0] == Path.GetFullPath(sDatabase) &&
+                oSettings.LastVault == Path.GetFullPath(sDatabase),
                 "Opening a Vault adds its absolute path to recent history");
             string sSecond = Path.Combine(sDirectory, "Recent_Vault \u00e9.cryptdb");
             DatabaseOperations.CreateDatabase(sSecond, File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
@@ -49,11 +51,17 @@ internal static partial class RegressionTests
             oSaved.Reload();
             Check(oSaved.RecentVaults.Cast<string>().SequenceEqual(oSettings.RecentVaults.Cast<string>()),
                 "Recent history persists immediately outside the Vault");
+            typeof(ItemBrowser).GetMethod("oClearRecentVaults_Click", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(oBrowser, new object[] { null,
+                    new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent) });
+            Check(oSettings.RecentVaults.Count == 0 && oSettings.LastVault == sSecond,
+                "Clearing recent history preserves automatic reopening of the last Vault");
         }
         finally
         {
             oLoadVault.Invoke(oBrowser, new object[] { sDatabase, true });
             oSettings.RecentVaults = oOriginal;
+            oSettings.LastVault = sOriginalLastVault;
             oSettings.Save();
         }
     }

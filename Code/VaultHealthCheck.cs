@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 using System.DirectoryServices;
 using System.Linq;
 using System.Security.Cryptography;
@@ -54,27 +54,27 @@ namespace Crypture
     internal static class VaultHealthCheck
     {
         internal static VaultHealthReport Run(string sPath, bool bAllowSelfSigned, bool bCheckRevocation,
+            CancellationToken oCancellation, IProgress<string> oProgress = null) =>
+            Run(new SqliteVaultStorage(sPath), bAllowSelfSigned, bCheckRevocation, oCancellation, oProgress);
+
+        internal static VaultHealthReport Run(IVaultStorage oStorage, bool bAllowSelfSigned, bool bCheckRevocation,
             CancellationToken oCancellation, IProgress<string> oProgress = null)
         {
             oCancellation.ThrowIfCancellationRequested();
             oProgress?.Report("Reading saved Vault recipients...");
             List<User> oUsers = new List<User>();
             Dictionary<long, Item> oItems = new Dictionary<long, Item>();
-            SqliteConnectionStringBuilder oBuilder = new SqliteConnectionStringBuilder
-            {
-                DataSource = sPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false
-            };
-            using (SqliteConnection oConnection = new SqliteConnection(oBuilder.ConnectionString))
+            using (DbConnection oConnection = oStorage.OpenHealthConnection())
             {
                 oConnection.Open();
-                using (SqliteTransaction oTransaction = oConnection.BeginTransaction(deferred: true))
-                using (SqliteCommand oCommand = oConnection.CreateCommand())
+                using (DbTransaction oTransaction = oStorage.BeginHealthSnapshot(oConnection))
+                using (DbCommand oCommand = oConnection.CreateCommand())
                 {
                     oCommand.Transaction = oTransaction;
                     oCommand.CommandText = "SELECT i.ItemId, i.Label, c.CipherParams, " +
                         "c.ProtectionDescriptor, c.ProtectedKey, c.ContentSuite " +
                         "FROM Item i LEFT JOIN Cipher c ON i.ItemId = c.ItemId";
-                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
+                    using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
@@ -91,7 +91,7 @@ namespace Crypture
                         }
                     }
                     oCommand.CommandText = "SELECT UserId, Certificate, Sid FROM [User]";
-                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
+                    using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
@@ -105,7 +105,7 @@ namespace Crypture
                         }
                     }
                     oCommand.CommandText = "SELECT ItemId, UserId FROM Instance";
-                    using (SqliteDataReader oReader = oCommand.ExecuteReader())
+                    using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
                         while (oReader.Read())
                         {
