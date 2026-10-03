@@ -39,6 +39,20 @@ namespace Crypture
             }
         }
 
+        internal static void DeleteItem(long nItemId)
+        {
+            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+            {
+                SqlServerItemOperations.Delete(oSqlServer, nItemId);
+                return;
+            }
+            using CryptureEntities oContent = new CryptureEntities();
+            Item oStored = oContent.Items.Find(nItemId);
+            if (oStored == null) return;
+            oContent.Items.Remove(oStored);
+            oContent.SaveChanges();
+        }
+
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null)
         {
@@ -52,6 +66,29 @@ namespace Crypture
                     if (!CertificateOperations.CheckCertificateStatus(oCert))
                         throw new InvalidOperationException("The emergency recovery certificate is not valid for " +
                             "encryption. Check its expiry, trust, and certificate validation settings.");
+            }
+            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+            {
+                // SQL Server saves encrypted rows through a recipient-checked procedure.
+                if (oRecovery.Certificate != null)
+                {
+                    using CryptureEntities oDirectory = new CryptureEntities();
+                    User oRecoveryUser = oDirectory.Users.ToList().FirstOrDefault(u =>
+                        u.Certificate.SequenceEqual(oRecovery.Certificate));
+                    if (oRecoveryUser == null)
+                    {
+                        oRecoveryUser = new User { Certificate = oRecovery.Certificate,
+                            Sid = CertificateOperations.CurrentUserSid };
+                        oDirectory.Users.Add(oRecoveryUser);
+                        oDirectory.SaveChanges();
+                    }
+                    if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
+                }
+                Item oSqlEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
+                ItemCryptography.Encrypt(oSqlEncrypted, oPlainText, oUsers,
+                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite);
+                SqlServerItemOperations.Save(oSqlServer, oItem, oSqlEncrypted);
+                return;
             }
             Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
             using (CryptureEntities oContent = new CryptureEntities())
@@ -254,6 +291,17 @@ namespace Crypture
         internal static void RemoveCertificate(long nUserId)
         {
             RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+            {
+                using CryptureEntities oDirectory = new CryptureEntities();
+                User oCertificate = oDirectory.Users.Find(nUserId);
+                if (oCertificate == null) return;
+                if (oRecovery.Certificate != null && oCertificate.Certificate.SequenceEqual(oRecovery.Certificate))
+                    throw new InvalidOperationException(
+                        "The configured emergency recovery certificate cannot be removed.");
+                SqlServerItemOperations.RemoveCertificate(oSqlServer, nUserId);
+                return;
+            }
             using (CryptureEntities oContent = new CryptureEntities())
             using (var oTransaction = CryptureEntities.Storage.IsSqlServer
                 ? oContent.Database.BeginTransaction(IsolationLevel.Serializable)

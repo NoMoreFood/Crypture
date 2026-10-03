@@ -2,6 +2,8 @@ using System;
 using System.Data;
 using System.Data.Common;
 using System.IO;
+using System.Security.Principal;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -99,6 +101,8 @@ namespace Crypture
             oBuilder = new SqlConnectionStringBuilder(sConnection) { PersistSecurityInfo = false, Pooling = false };
             if (String.IsNullOrWhiteSpace(oBuilder.DataSource) || String.IsNullOrWhiteSpace(oBuilder.InitialCatalog))
                 throw new ArgumentException("Enter a SQL Server name and database name.");
+            if (!oBuilder.IntegratedSecurity || oBuilder.UserID.Length != 0 || oBuilder.Password.Length != 0)
+                throw new ArgumentException("SQL Server Vaults require Windows integrated authentication.");
             ConnectionString = oBuilder.ConnectionString;
         }
 
@@ -107,15 +111,7 @@ namespace Crypture
         public bool IsSqlServer => true;
         public bool SupportsCompact => false;
         internal string DatabaseName => oBuilder.InitialCatalog;
-        internal string RecentConnection
-        {
-            get
-            {
-                SqlConnectionStringBuilder oRecent = new SqlConnectionStringBuilder(ConnectionString);
-                oRecent.Remove("Password");
-                return oRecent.ConnectionString;
-            }
-        }
+        internal string RecentConnection => ConnectionString;
 
         public void Configure(DbContextOptionsBuilder oOptions) => oOptions.UseSqlServer(ConnectionString);
 
@@ -139,6 +135,19 @@ namespace Crypture
                 oCreate.ExecuteNonQuery();
             try
             {
+                // Provision the domain's Users group with the limited Vault role.
+                string sDomainUsers = GetDomainUsersName();
+                string sQuotedLogin = sDomainUsers == null ? null :
+                    "[" + sDomainUsers.Replace("]", "]]", StringComparison.Ordinal) + "]";
+                if (sDomainUsers != null)
+                {
+                    using SqlCommand oLogin = new SqlCommand(
+                        "IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE [name] = @name) " +
+                        "EXEC(N'CREATE LOGIN " + sQuotedLogin.Replace("'", "''", StringComparison.Ordinal) +
+                        " FROM WINDOWS')", oConnection);
+                    oLogin.Parameters.AddWithValue("@name", sDomainUsers);
+                    oLogin.ExecuteNonQuery();
+                }
                 using SqlConnection oVault = new SqlConnection(ConnectionString);
                 oVault.Open();
                 using SqlTransaction oTransaction = oVault.BeginTransaction();
@@ -146,6 +155,18 @@ namespace Crypture
                     .GetManifestResourceStream("Crypture.SqlServerSchema"));
                 using SqlCommand oSchema = new SqlCommand(oReader.ReadToEnd(), oVault, oTransaction);
                 oSchema.ExecuteNonQuery();
+                using StreamReader oSecurityReader = new StreamReader(typeof(SqlServerVaultStorage).Assembly
+                    .GetManifestResourceStream("Crypture.SqlServerSecurity"));
+                foreach (string sBatch in Regex.Split(oSecurityReader.ReadToEnd(), @"(?im)^[ \t]*GO[ \t]*\r?$"))
+                {
+                    if (String.IsNullOrWhiteSpace(sBatch)) continue;
+                    using SqlCommand oBatch = new SqlCommand(sBatch, oVault, oTransaction);
+                    oBatch.ExecuteNonQuery();
+                }
+                if (sQuotedLogin != null)
+                    using (SqlCommand oGrant = new SqlCommand("CREATE USER " + sQuotedLogin + " FOR LOGIN " +
+                        sQuotedLogin + "; ALTER ROLE [crypture_domain] ADD MEMBER " + sQuotedLogin, oVault,
+                        oTransaction)) oGrant.ExecuteNonQuery();
                 oTransaction.Commit();
             }
             catch
@@ -159,7 +180,7 @@ namespace Crypture
         public void Validate()
         {
             const int VaultMarkerId = 1;
-            const int SupportedSchemaVersion = 1;
+            const int SupportedSchemaVersion = 2;
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);
             oConnection.Open();
@@ -168,6 +189,14 @@ namespace Crypture
             oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
             if (oCommand.ExecuteScalar() is not int nVersion || nVersion != SupportedSchemaVersion)
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+        }
+
+        private static string GetDomainUsersName()
+        {
+            using WindowsIdentity oIdentity = WindowsIdentity.GetCurrent();
+            SecurityIdentifier oDomain = oIdentity.User?.AccountDomainSid;
+            if (!PrincipalProtection.IsDomainJoined || oDomain == null) return null;
+            return new SecurityIdentifier(oDomain.Value + "-513").Translate(typeof(NTAccount)).Value;
         }
 
         public void ReadSnapshot(CryptureEntities oContent, Action oRead)
@@ -192,6 +221,15 @@ namespace Crypture
                 " TO DISK = @destination WITH COPY_ONLY, CHECKSUM", oConnection) { CommandTimeout = 0 };
             oCommand.Parameters.AddWithValue("@destination", sDestination);
             oCommand.ExecuteNonQuery();
+        }
+
+        internal bool CanBackup()
+        {
+            using SqlConnection oConnection = new SqlConnection(ConnectionString);
+            oConnection.Open();
+            using SqlCommand oCommand = new SqlCommand(
+                "SELECT HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'BACKUP DATABASE')", oConnection);
+            return oCommand.ExecuteScalar() is int nPermission && nPermission == 1;
         }
 
         public void Compact() => throw new NotSupportedException("SQL Server manages database maintenance separately.");

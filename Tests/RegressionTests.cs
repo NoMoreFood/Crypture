@@ -770,6 +770,20 @@ internal static partial class RegressionTests
             oEditor.Close();
             oEditor = null;
             CryptureEntities.DatabasePath = sDatabase;
+
+            // Exercise the recipient list through WPF layout with more than one certificate.
+            oEditor = new ItemEditor(oItem)
+            {
+                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
+                ShowActivated = false, ShowInTaskbar = false
+            };
+            oEditor.UserListSelected.Add(new User { Certificate = oEditor.UserListSelected.Single().Certificate });
+            oEditor.Show();
+            PumpUntil(() => oEditor.IsLoaded);
+            Check(oEditor.UserListSelected.Count == 2, "Editor displays multiple certificate recipients");
+            oEditor.Close();
+            oEditor = null;
+
             TestRichTextVaultRoundTrip(sDirectory);
 
             // Keep persistence and security assertions independently of menu and dialog presentation.

@@ -22,6 +22,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.7" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
@@ -29,6 +30,7 @@
     <Resource Include="Safe.ico;Images\*.png" />
     <EmbeddedResource Include="Data\SQLite.sql" LogicalName="Crypture.SqliteSchema" />
     <EmbeddedResource Include="Data\SqlServer.sql" LogicalName="Crypture.SqlServerSchema" />
+    <EmbeddedResource Include="Data\SqlServerSecurity.sql" LogicalName="Crypture.SqlServerSecurity" />
     <EmbeddedResource Include="Data\License - DotNet Libraries.txt" LogicalName="Crypture.RuntimeNotices" />
     <EmbeddedResource Include="$(RuntimeNoticesFile)" LogicalName="Crypture.RuntimeThirdPartyNotices"
         Condition="'$(RuntimeNoticesFile)' != ''" />

@@ -120,8 +120,8 @@
                                     <ComboBoxItem x:Name="oDomainScope" Content="Domain Users and Groups"
                                         ToolTip="Requires Active Directory domain credentials and key distribution."
                                         ToolTipService.ShowOnDisabled="True" />
-                                    <ComboBoxItem Content="Saving Account's Local Windows Profile" />
-                                    <ComboBoxItem Content="All Users on This Computer" />
+                                    <ComboBoxItem x:Name="oLocalUserScope" Content="Saving Account's Local Windows Profile" />
+                                    <ComboBoxItem x:Name="oLocalMachineScope" Content="All Users on This Computer" />
                                 </ComboBox>
                                 <TextBlock x:Name="oDomainNotice" TextWrapping="Wrap" Margin="0,8,0,4"
                                     Foreground="{DynamicResource Crypture.MutedBrush}" Visibility="Collapsed"

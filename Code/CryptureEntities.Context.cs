@@ -58,7 +58,8 @@ namespace Crypture
             });
             oModel.Entity<Cipher>(oCipher =>
             {
-                oCipher.ToTable("Cipher");
+                if (oStorage.IsSqlServer) oCipher.ToView("AuthorizedCipher");
+                else oCipher.ToTable("Cipher");
                 oCipher.HasKey(c => c.ItemId);
                 oCipher.Property(c => c.ItemId).ValueGeneratedNever();
                 oCipher.Property(c => c.CipherText).IsRequired();
@@ -66,7 +67,8 @@ namespace Crypture
             });
             oModel.Entity<Instance>(oInstance =>
             {
-                oInstance.ToTable("Instance");
+                if (oStorage.IsSqlServer) oInstance.ToView("AuthorizedInstance");
+                else oInstance.ToTable("Instance");
                 oInstance.HasKey(i => i.InstanceId);
                 oInstance.Property(i => i.CipherKey).IsRequired();
                 oInstance.Property(i => i.Signature).IsRequired();

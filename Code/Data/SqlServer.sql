@@ -2,7 +2,7 @@ CREATE TABLE [dbo].[CryptureVault] (
     [Id] int NOT NULL CONSTRAINT [PK_CryptureVault] PRIMARY KEY CHECK ([Id] = 1),
     [SchemaVersion] int NOT NULL
 );
-INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 1);
+INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 2);
 
 CREATE TABLE [dbo].[User] (
     [UserId] bigint IDENTITY(1,1) NOT NULL CONSTRAINT [PK_User] PRIMARY KEY,

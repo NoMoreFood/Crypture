@@ -73,7 +73,8 @@ namespace Crypture
                     oCommand.Transaction = oTransaction;
                     oCommand.CommandText = "SELECT i.ItemId, i.Label, c.CipherParams, " +
                         "c.ProtectionDescriptor, c.ProtectedKey, c.ContentSuite " +
-                        "FROM Item i LEFT JOIN Cipher c ON i.ItemId = c.ItemId";
+                        "FROM Item i LEFT JOIN " + (oStorage.IsSqlServer ? "AuthorizedCipher" : "Cipher") +
+                        " c ON i.ItemId = c.ItemId";
                     using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
                         const int ItemIdColumn = 0;
@@ -120,7 +121,8 @@ namespace Crypture
                             });
                         }
                     }
-                    oCommand.CommandText = "SELECT ItemId, UserId FROM Instance";
+                    oCommand.CommandText = "SELECT ItemId, UserId FROM " +
+                        (oStorage.IsSqlServer ? "AuthorizedInstance" : "Instance");
                     using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
                         const int ItemIdColumn = 0;

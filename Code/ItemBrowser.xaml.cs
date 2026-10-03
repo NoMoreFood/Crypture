@@ -66,10 +66,15 @@ namespace Crypture
                     "Ownership Confirmation",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 
+                string sOwnerSid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid
+                    ? sIdentifier : null;
+                if (CryptureEntities.Storage.IsSqlServer && sOwnerSid == null)
+                    throw new InvalidOperationException("SQL Server recipients need a Windows account SID. " +
+                        "Add this certificate from Active Directory or confirm that you own it.");
                 User oUser = new User()
                 {
                     Certificate = oCert.GetRawCertData(),
-                    Sid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid ? sIdentifier : null
+                    Sid = sOwnerSid
                 };
                 oContent.Users.Add(oUser);
                 oContent.SaveChanges();
@@ -137,11 +142,7 @@ namespace Crypture
             Utilities.TryOperation(this, () =>
             {
                 if (oObject is User oUser) DatabaseOperations.RemoveCertificate(oUser.UserId);
-                else using (CryptureEntities oContent = new CryptureEntities())
-                {
-                    oContent.Entry(oObject).State = EntityState.Deleted;
-                    oContent.SaveChanges();
-                }
+                else DatabaseOperations.DeleteItem(((Item)oObject).ItemId);
                 oRefreshItemButton_Click();
             });
         }
@@ -458,7 +459,8 @@ namespace Crypture
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(bCertData))
                         CertificateKeyProtection.ValidateForEncryption(oCert);
                     // create new item to add
-                    User oUser = new User { Certificate = bCertData, Sid = null };
+                    User oUser = new User { Certificate = bCertData,
+                        Sid = CryptureEntities.Storage.IsSqlServer ? CertificateOperations.CurrentUserSid : null };
                     oContent.Users.Add(oUser);
                     oUsers.Add(oUser);
                 }
@@ -494,7 +496,12 @@ namespace Crypture
                     Properties.Settings.Default.EnableCertificateProtection);
                 oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
                 oCertificatesTab.IsEnabled = bEnableControls;
+                oClaimCertButton.Visibility = oStorage.IsSqlServer ? Visibility.Collapsed : Visibility.Visible;
                 oAdvancedTab.IsEnabled = bEnableControls;
+
+                // Offer server-side backup only to accounts permitted to perform it.
+                bool bCanBackup = oStorage is not SqlServerVaultStorage oSqlBackup || oSqlBackup.CanBackup();
+                oBackupDatabaseButton.Visibility = bCanBackup ? Visibility.Visible : Visibility.Collapsed;
                 oBackupDatabaseButton.IsEnabled = bEnableControls;
                 oBackupDatabaseButton.ToolTip = oStorage.IsSqlServer
                     ? "Create a backup on the SQL Server host." : "Create a consistent copy of the encrypted Vault.";
@@ -564,7 +571,7 @@ namespace Crypture
 
         private void RememberRecentEntry(string sEntry)
         {
-            // Keep the last Vault even when recent history is disabled; SQL login passwords are omitted.
+            // Keep the last Vault even when recent history is disabled.
             Properties.Settings.Default.LastVault = sEntry;
             StringCollection oRecent = new StringCollection();
             oRecent.AddRange(new[] { sEntry }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
@@ -650,13 +657,7 @@ namespace Crypture
             try
             {
                 SqlServerVaultStorage oStorage = new SqlServerVaultStorage(sConnection);
-                if (new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(sConnection).IntegratedSecurity)
-                {
-                    OpenSqlVault(oStorage, false);
-                    return;
-                }
-                SqlServerVaultDialog oDialog = new SqlServerVaultDialog(oStorage.RecentConnection) { Owner = this };
-                if (oDialog.ShowDialog() == true) OpenSqlVault(oDialog.Storage, false);
+                OpenSqlVault(oStorage, false);
             }
             catch (ArgumentException oError)
             {

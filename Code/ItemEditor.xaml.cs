@@ -99,20 +99,21 @@ namespace Crypture
                 if (!bLoading && bEditing) bHasChanges = true;
             };
 
-            // setup sorting for the drop down list of certs
+            // Sort recipient displays by the certificate name, including the templated list.
             oItemSharedWith.Items.IsLiveSorting = true;
             oItemSharedWith.Items.SortDescriptions.Add(
-                new SortDescription(oItemSharedWith.DisplayMemberPath, ListSortDirection.Ascending));
+                new SortDescription(nameof(User.Name), ListSortDirection.Ascending));
 
-            // setup sorting for the shared with list
             oAddCertDropDown.Items.IsLiveSorting = true;
             oAddCertDropDown.Items.SortDescriptions.Add(
-                new SortDescription(oAddCertDropDown.DisplayMemberPath, ListSortDirection.Ascending));
+                new SortDescription(nameof(User.Name), ListSortDirection.Ascending));
 
             // add in our keys by default
             if (bNewItem && bCertificatesEnabled) LoadUsers(true);
-            oDpapiNgProtection.IsEnabled = bDpapiNgEnabled;
-            oDpapiNgProtection.Visibility = bDpapiNgEnabled ? Visibility.Visible : Visibility.Collapsed;
+            bool bSqlWindowsProtection = !CryptureEntities.Storage.IsSqlServer || bDomainJoined;
+            oDpapiNgProtection.IsEnabled = bDpapiNgEnabled && bSqlWindowsProtection;
+            oDpapiNgProtection.Visibility = oDpapiNgProtection.IsEnabled
+                ? Visibility.Visible : Visibility.Collapsed;
             oCertificateProtection.IsEnabled = bCertificatesEnabled;
             oCertificateProtection.Visibility = bCertificatesEnabled ? Visibility.Visible : Visibility.Collapsed;
             oPrincipalList.ItemsSource = PrincipalList;
@@ -135,6 +136,14 @@ namespace Crypture
                 else if (sProtection == "UserBased" && bDpapiNgEnabled &&
                     CertificateOperations.GetAutomaticCertificates().Count == 0)
                     oProtectionMode.SelectedIndex = UserProtectionIndex;
+            }
+            if (CryptureEntities.Storage.IsSqlServer)
+            {
+                oLocalUserScope.IsEnabled = false;
+                oLocalMachineScope.IsEnabled = false;
+                oPrincipalScope.SelectedIndex = bDomainJoined ? DomainScopeIndex : -1;
+                if (!bDomainJoined && oProtectionMode.SelectedIndex == UserProtectionIndex)
+                    oProtectionMode.SelectedIndex = bCertificatesEnabled ? CertificateProtectionIndex : -1;
             }
 
             // show certificate generator based on settings file
@@ -576,7 +585,8 @@ namespace Crypture
             if (oPrincipalPanel == null || oPrincipalHint == null || oCertificatePanel == null) return;
             bool bPrincipals = oProtectionMode.SelectedIndex == UserProtectionIndex;
             bool bCertificates = oProtectionMode.SelectedIndex == CertificateProtectionIndex;
-            bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
+            bool bProtectionEnabled = bPrincipals && oDpapiNgProtection.IsEnabled ||
+                bCertificates && bCertificatesEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
                 (!bCertificates || !bLoadingCertificates) &&
                 (ThisItem.ItemType is "text" or "richtext" or "totp" || BinaryItemData != null);
@@ -734,12 +744,7 @@ namespace Crypture
 
             if (!Utilities.TryOperation(this, () =>
             {
-                using (CryptureEntities oContent = new CryptureEntities())
-                {
-                    Item oStored = oContent.Items.Find(ThisItem.ItemId);
-                    if (oStored != null) oContent.Items.Remove(oStored);
-                    oContent.SaveChanges();
-                }
+                DatabaseOperations.DeleteItem(ThisItem.ItemId);
             })) return;
             bCompleted = true;
             Close();
