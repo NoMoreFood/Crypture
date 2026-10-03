@@ -57,9 +57,15 @@ namespace Crypture
 
     internal static class RecoveryProtection
     {
+        // Recovery envelope version, recipient count, and framing limits.
         private const int EnvelopeVersion = 1;
-        private const int MaxEnvelopeLength = PrincipalProtection.MaxProtectedKeyLength * 2 +
-            PrincipalProtection.MaxDescriptorLength * 8 + 32;
+        private const int MaximumRecipients = 2;
+        private const int MaximumUtf8BytesPerCharacter = 4;
+        private const int EnvelopeHeaderBytes = sizeof(int) * 2;
+        private const int EnvelopeFramingAllowanceBytes = 32;
+        private const int MaxEnvelopeLength = PrincipalProtection.MaxProtectedKeyLength * MaximumRecipients +
+            PrincipalProtection.MaxDescriptorLength * MaximumUtf8BytesPerCharacter * MaximumRecipients +
+            EnvelopeFramingAllowanceBytes;
         private static readonly UTF8Encoding DescriptorEncoding = new UTF8Encoding(false, true);
 
         internal static byte[] WrapWindowsKeys(byte[] oKeys, string sPrimaryDescriptor, string sRecoveryDescriptor)
@@ -90,7 +96,7 @@ namespace Crypture
             try
             {
                 byte[] oData = oCipher.ProtectedKey;
-                if (oData == null || oData.Length < 8 || oData.Length > MaxEnvelopeLength)
+                if (oData == null || oData.Length < EnvelopeHeaderBytes || oData.Length > MaxEnvelopeLength)
                     throw new CryptographicException("The recovery key envelope is missing or invalid.");
                 using (MemoryStream oStream = new MemoryStream(oData, false))
                 using (BinaryReader oReader = new BinaryReader(oStream, DescriptorEncoding))
@@ -98,13 +104,14 @@ namespace Crypture
                     if (oReader.ReadInt32() != EnvelopeVersion)
                         throw new CryptographicException("The recovery key envelope version is unsupported.");
                     int nCount = oReader.ReadInt32();
-                    if (nCount < 1 || nCount > 2)
+                    if (nCount < 1 || nCount > MaximumRecipients)
                         throw new CryptographicException("The recovery key envelope has invalid recipients.");
                     List<KeyValuePair<string, byte[]>> oEntries = new List<KeyValuePair<string, byte[]>>();
                     for (int nIndex = 0; nIndex < nCount; nIndex++)
                     {
                         int nLength = oReader.ReadInt32();
-                        if (nLength < 1 || nLength > PrincipalProtection.MaxDescriptorLength * 4 ||
+                        if (nLength < 1 || nLength >
+                            PrincipalProtection.MaxDescriptorLength * MaximumUtf8BytesPerCharacter ||
                             nLength > oStream.Length - oStream.Position)
                             throw new CryptographicException("The recovery protection descriptor is damaged.");
                         string sDescriptor = DescriptorEncoding.GetString(oReader.ReadBytes(nLength));

@@ -24,6 +24,25 @@ namespace Crypture
 {
     public partial class ItemEditor : Window
     {
+        // Item format selector positions.
+        private const int PlainTextTypeIndex = 0;
+        private const int RichTextTypeIndex = 1;
+        private const int TotpTypeIndex = 2;
+        private const int FileTypeIndex = 3;
+
+        // Encryption method selector positions.
+        private const int UserProtectionIndex = 0;
+        private const int CertificateProtectionIndex = 1;
+
+        // Windows principal scope selector positions.
+        private const int DomainScopeIndex = 0;
+        private const int LocalUserScopeIndex = 1;
+        private const int LocalMachineScopeIndex = 2;
+
+        // Principal matching selector positions.
+        private const int AnyPrincipalIndex = 0;
+        private const int AllPrincipalsIndex = 1;
+
         public Item ThisItem { get; set; } = new Item();
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
         public ObservableCollection<User> UserListSelected { get; set; } = new ObservableCollection<User>();
@@ -99,20 +118,23 @@ namespace Crypture
             oPrincipalList.ItemsSource = PrincipalList;
             oDomainScope.IsEnabled = bDomainJoined;
             oPrincipalScope.SelectedIndex = !bDomainJoined || String.Equals(Environment.UserDomainName,
-                Environment.MachineName, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                Environment.MachineName, StringComparison.OrdinalIgnoreCase) ? LocalUserScopeIndex : DomainScopeIndex;
             if (bNewItem)
             {
-                if (sScope != "Automatic") oPrincipalScope.SelectedIndex = sScope == "LocalMachine" ? 2
-                    : sScope == "Domain" && bDomainJoined ? 0 : 1;
-                oPrincipalMatch.SelectedIndex = bRequireAll ? 1 : 0;
+                if (sScope != "Automatic") oPrincipalScope.SelectedIndex = sScope == "LocalMachine"
+                    ? LocalMachineScopeIndex : sScope == "Domain" && bDomainJoined ? DomainScopeIndex
+                    : LocalUserScopeIndex;
+                oPrincipalMatch.SelectedIndex = bRequireAll ? AllPrincipalsIndex : AnyPrincipalIndex;
                 if (bIncludeCurrentUser)
                     PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
                 oProtectionMode.SelectedIndex = bCertificatesEnabled &&
                     (!bDpapiNgEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
-                    ? 1 : bDpapiNgEnabled ? 0 : -1;
-                if (sProtection == "CertificateBased" && bCertificatesEnabled) oProtectionMode.SelectedIndex = 1;
+                    ? CertificateProtectionIndex : bDpapiNgEnabled ? UserProtectionIndex : -1;
+                if (sProtection == "CertificateBased" && bCertificatesEnabled)
+                    oProtectionMode.SelectedIndex = CertificateProtectionIndex;
                 else if (sProtection == "UserBased" && bDpapiNgEnabled &&
-                    CertificateOperations.GetAutomaticCertificates().Count == 0) oProtectionMode.SelectedIndex = 0;
+                    CertificateOperations.GetAutomaticCertificates().Count == 0)
+                    oProtectionMode.SelectedIndex = UserProtectionIndex;
             }
 
             // show certificate generator based on settings file
@@ -238,7 +260,8 @@ namespace Crypture
                 ThisItem.ItemId == 0 && BinaryItemData == null);
             bool bWasLoading = bLoading;
             bLoading = true;
-            oItemTypeSelector.SelectedIndex = bPlainText ? 0 : bRichText ? 1 : ThisItem.ItemType == "totp" ? 2 : 3;
+            oItemTypeSelector.SelectedIndex = bPlainText ? PlainTextTypeIndex : bRichText ? RichTextTypeIndex
+                : ThisItem.ItemType == "totp" ? TotpTypeIndex : FileTypeIndex;
             bLoading = bWasLoading;
             oItemLabel.IsReadOnly = !bEnabled;
             oUploadAFile.IsEnabled = bEnabled;
@@ -264,7 +287,7 @@ namespace Crypture
             oTotpPanel.SetActive(bEnabled && ThisItem.ItemType == "totp");
             oContentTitle.Content = ThisItem.ItemType == "totp" ? "TOTP Authenticator" : "Protected Item Content";
             oItemStatus.Text = !bEnabled ? "Locked - decrypt to view or edit this item."
-                : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == 0
+                : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == ItemCryptography.LegacyFormat
                 ? "Legacy encryption - save this item to add tamper detection." : "Unlocked - content is visible.";
             UpdateProtectionControls();
         }
@@ -292,18 +315,22 @@ namespace Crypture
                             "The item text provided does not satisfy the content filter.");
 
                     string sDescriptor = null;
-                    if (oProtectionMode.SelectedIndex == 0)
+                    if (oProtectionMode.SelectedIndex == UserProtectionIndex)
                     {
                         if (CertificateOperations.GetAutomaticCertificates().Count != 0)
                             throw new InvalidOperationException(
                                 "Required recipient certificates are configured. Use Certificate Based encryption " +
                                 "or ask the administrator to update that configuration.");
-                        if (oPrincipalScope.SelectedIndex == 0 && !String.IsNullOrWhiteSpace(oPrincipalName.Text))
+                        if (oPrincipalScope.SelectedIndex == DomainScopeIndex &&
+                            !String.IsNullOrWhiteSpace(oPrincipalName.Text))
                             throw new InvalidOperationException("Add the entered account to the recipient list, " +
                                 "or clear the account field before saving.");
-                        sDescriptor = oPrincipalScope.SelectedIndex == 1 ? PrincipalProtection.LocalUserDescriptor
-                            : oPrincipalScope.SelectedIndex == 2 ? PrincipalProtection.LocalMachineDescriptor
-                            : PrincipalProtection.CreateDescriptor(PrincipalList, oPrincipalMatch.SelectedIndex == 1);
+                        sDescriptor = oPrincipalScope.SelectedIndex == LocalUserScopeIndex
+                            ? PrincipalProtection.LocalUserDescriptor
+                            : oPrincipalScope.SelectedIndex == LocalMachineScopeIndex
+                            ? PrincipalProtection.LocalMachineDescriptor
+                            : PrincipalProtection.CreateDescriptor(PrincipalList,
+                                oPrincipalMatch.SelectedIndex == AllPrincipalsIndex);
                     }
                     else
                     {
@@ -437,6 +464,11 @@ namespace Crypture
                     }
                     if (oPlainText == null)
                     {
+                        // Cancellation codes from the smart card, cryptography, and Windows APIs.
+                        const uint SmartCardUserCancelledHResult = 0x8010006E;
+                        const uint CryptographyUserCancelledHResult = 0x80090036;
+                        const uint WindowsUserCancelledHResult = 0x800704C7;
+
                         // select all the certs associated with this user
                         using (X509Certificate2 oCert = GetUserKey(UserListSelected))
                         {
@@ -447,8 +479,10 @@ namespace Crypture
                             {
                                 oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem, oInstance, oCert));
                             }
-                            catch (CryptographicException oError) when ((uint)oError.HResult == 0x8010006E ||
-                                (uint)oError.HResult == 0x80090036 || (uint)oError.HResult == 0x800704C7)
+                            catch (CryptographicException oError) when (
+                                (uint)oError.HResult == SmartCardUserCancelledHResult ||
+                                (uint)oError.HResult == CryptographyUserCancelledHResult ||
+                                (uint)oError.HResult == WindowsUserCancelledHResult)
                             {
                                 return;
                             }
@@ -518,16 +552,17 @@ namespace Crypture
             try
             {
                 bool bPrincipals = ItemCryptography.UsesWindowsProtection(ThisItem.Cipher);
-                oProtectionMode.SelectedIndex = bPrincipals ? 0 : 1;
+                oProtectionMode.SelectedIndex = bPrincipals ? UserProtectionIndex : CertificateProtectionIndex;
                 PrincipalList.Clear();
                 if (!bPrincipals) return;
                 string sDescriptor = ThisItem.Cipher.ProtectionDescriptor;
                 bool bRequireAll;
                 foreach (ProtectionPrincipal oPrincipal in PrincipalProtection.ParseDescriptor(
                     sDescriptor, out bRequireAll)) PrincipalList.Add(oPrincipal);
-                oPrincipalScope.SelectedIndex = sDescriptor == PrincipalProtection.LocalUserDescriptor ? 1
-                    : sDescriptor == PrincipalProtection.LocalMachineDescriptor ? 2 : 0;
-                oPrincipalMatch.SelectedIndex = bRequireAll ? 1 : 0;
+                oPrincipalScope.SelectedIndex = sDescriptor == PrincipalProtection.LocalUserDescriptor
+                    ? LocalUserScopeIndex : sDescriptor == PrincipalProtection.LocalMachineDescriptor
+                    ? LocalMachineScopeIndex : DomainScopeIndex;
+                oPrincipalMatch.SelectedIndex = bRequireAll ? AllPrincipalsIndex : AnyPrincipalIndex;
             }
             finally
             {
@@ -539,8 +574,8 @@ namespace Crypture
         private void UpdateProtectionControls()
         {
             if (oPrincipalPanel == null || oPrincipalHint == null || oCertificatePanel == null) return;
-            bool bPrincipals = oProtectionMode.SelectedIndex == 0;
-            bool bCertificates = oProtectionMode.SelectedIndex == 1;
+            bool bPrincipals = oProtectionMode.SelectedIndex == UserProtectionIndex;
+            bool bCertificates = oProtectionMode.SelectedIndex == CertificateProtectionIndex;
             bool bProtectionEnabled = bPrincipals && bDpapiNgEnabled || bCertificates && bCertificatesEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
                 (!bCertificates || !bLoadingCertificates) &&
@@ -550,7 +585,7 @@ namespace Crypture
                 ? "Both encryption methods are disabled in Crypture.exe.config. Existing items can still be decrypted."
                 : "This encryption method is disabled in Crypture.exe.config. " +
                     "Decrypt the item, then select an enabled encryption method before saving.";
-            bool bLocal = oPrincipalScope.SelectedIndex != 0;
+            bool bLocal = oPrincipalScope.SelectedIndex != DomainScopeIndex;
             bool bRequiredCertificates = CertificateOperations.GetAutomaticCertificates().Count != 0;
             oRequiredCertificateNotice.Visibility = bRequiredCertificates ? Visibility.Visible : Visibility.Collapsed;
             UpdateRecoveryNotice();
@@ -560,7 +595,7 @@ namespace Crypture
             oCertificateSharingGroup.Visibility = oCertificatePanel.Visibility;
             oPrincipalTargets.Visibility = bLocal ? Visibility.Collapsed : Visibility.Visible;
             oDomainNotice.Visibility = bDomainJoined ? Visibility.Collapsed : Visibility.Visible;
-            oPrincipalHint.Text = oPrincipalScope.SelectedIndex == 2
+            oPrincipalHint.Text = oPrincipalScope.SelectedIndex == LocalMachineScopeIndex
                 ? "Every user on the computer used to encrypt this item can decrypt it " +
                     "if they can read the Vault. This grants access to all local users, " +
                     "not a selected group. Copying it to another computer does not grant access."
@@ -797,9 +832,10 @@ namespace Crypture
 
         private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not (0 or 1 or 2 or 3))
+            if (bLoading || bBusy || !bEditing || oItemTypeSelector.SelectedIndex is not
+                (PlainTextTypeIndex or RichTextTypeIndex or TotpTypeIndex or FileTypeIndex))
                 return;
-            if (oItemTypeSelector.SelectedIndex == 3)
+            if (oItemTypeSelector.SelectedIndex == FileTypeIndex)
             {
                 SetEditingControls(true);
                 oUploadAFile_Click(sender, e);
@@ -807,8 +843,8 @@ namespace Crypture
             }
             string sNewType = oItemTypeSelector.SelectedIndex switch
             {
-                1 => "richtext",
-                2 => "totp",
+                RichTextTypeIndex => "richtext",
+                TotpTypeIndex => "totp",
                 _ => "text"
             };
 
@@ -821,7 +857,7 @@ namespace Crypture
                     MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
                 {
                     bLoading = true;
-                    oItemTypeSelector.SelectedIndex = 1;
+                    oItemTypeSelector.SelectedIndex = RichTextTypeIndex;
                     bLoading = false;
                     return;
                 }

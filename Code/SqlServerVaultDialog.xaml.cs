@@ -7,6 +7,9 @@ namespace Crypture
 {
     public partial class SqlServerVaultDialog : Window
     {
+        private const int WindowsAuthenticationIndex = 0;
+        private const int SqlLoginAuthenticationIndex = 1;
+
         internal SqlServerVaultStorage Storage { get; private set; }
         internal bool CreateDatabase { get; private set; }
 
@@ -16,13 +19,15 @@ namespace Crypture
             ConfigurationDefaults oDefaults = new ConfigurationDefaults();
             oServer.Text = oDefaults.Text("SqlServerDefaultServer", "");
             oDatabase.Text = oDefaults.Text("SqlServerDefaultDatabase", "");
-            oAuthentication.SelectedIndex = oDefaults.Text("SqlServerAuthentication", "Windows") == "SqlLogin" ? 1 : 0;
+            oAuthentication.SelectedIndex = oDefaults.Text("SqlServerAuthentication", "Windows") == "SqlLogin"
+                ? SqlLoginAuthenticationIndex : WindowsAuthenticationIndex;
             oTrustCertificate.IsChecked = oDefaults.Flag("SqlServerTrustServerCertificate", false);
             if (sRecentConnection == null) return;
             SqlConnectionStringBuilder oRecent = new SqlConnectionStringBuilder(sRecentConnection);
             oServer.Text = oRecent.DataSource;
             oDatabase.Text = oRecent.InitialCatalog;
-            oAuthentication.SelectedIndex = oRecent.IntegratedSecurity ? 0 : 1;
+            oAuthentication.SelectedIndex = oRecent.IntegratedSecurity
+                ? WindowsAuthenticationIndex : SqlLoginAuthenticationIndex;
             oUserName.Text = oRecent.UserID;
             oTrustCertificate.IsChecked = oRecent.TrustServerCertificate;
         }
@@ -30,7 +35,7 @@ namespace Crypture
         private void oAuthentication_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (oUserName == null || oPassword == null) return;
-            bool bSqlLogin = oAuthentication.SelectedIndex == 1;
+            bool bSqlLogin = oAuthentication.SelectedIndex == SqlLoginAuthenticationIndex;
             oUserName.IsEnabled = bSqlLogin;
             oPassword.IsEnabled = bSqlLogin;
         }
@@ -39,9 +44,10 @@ namespace Crypture
         {
             Utilities.TryOperation(this, () =>
             {
+                const int ConnectionTimeoutSeconds = 10;
                 if (String.IsNullOrWhiteSpace(oServer.Text) || String.IsNullOrWhiteSpace(oDatabase.Text))
                     throw new InvalidOperationException("Enter a server and database name.");
-                if (oAuthentication.SelectedIndex == 1 &&
+                if (oAuthentication.SelectedIndex == SqlLoginAuthenticationIndex &&
                     (String.IsNullOrWhiteSpace(oUserName.Text) || oPassword.Password.Length == 0))
                     throw new InvalidOperationException("Enter the SQL Server user name and password.");
 
@@ -49,10 +55,10 @@ namespace Crypture
                 SqlConnectionStringBuilder oBuilder = new SqlConnectionStringBuilder
                 {
                     DataSource = oServer.Text.Trim(), InitialCatalog = oDatabase.Text.Trim(),
-                    IntegratedSecurity = oAuthentication.SelectedIndex == 0,
+                    IntegratedSecurity = oAuthentication.SelectedIndex == WindowsAuthenticationIndex,
                     Encrypt = SqlConnectionEncryptOption.Mandatory,
                     TrustServerCertificate = oTrustCertificate.IsChecked == true,
-                    ConnectTimeout = 10, ApplicationName = "Crypture", Pooling = false
+                    ConnectTimeout = ConnectionTimeoutSeconds, ApplicationName = "Crypture", Pooling = false
                 };
                 if (!oBuilder.IntegratedSecurity)
                 {

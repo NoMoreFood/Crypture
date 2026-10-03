@@ -471,6 +471,7 @@ namespace Crypture
 
         private bool LoadVault(IVaultStorage oStorage, bool bCreate, bool bEnableControls = true)
         {
+            const int SchemaProbeRows = 1;
             IVaultStorage oPreviousStorage = CryptureEntities.Storage;
             string sPreviousPath = sDatabasePath;
             try
@@ -480,10 +481,10 @@ namespace Crypture
                 CryptureEntities.Storage = oStorage;
                 using (CryptureEntities oContent = new CryptureEntities())
                 {
-                    oContent.Items.Take(1).Load();
-                    oContent.Users.Take(1).Load();
-                    oContent.Ciphers.Take(1).Load();
-                    oContent.Instances.Take(1).Load();
+                    oContent.Items.Take(SchemaProbeRows).Load();
+                    oContent.Users.Take(SchemaProbeRows).Load();
+                    oContent.Ciphers.Take(SchemaProbeRows).Load();
+                    oContent.Instances.Take(SchemaProbeRows).Load();
                 }
                 AddAutomaticCertificates();
                 sDatabasePath = oStorage.DisplayName;

@@ -55,9 +55,10 @@ namespace Crypture
                 SystemEvents.SessionSwitch += OnSessionSwitch;
                 if (oIdleTimeout > TimeSpan.Zero)
                 {
+                    TimeSpan oPrivacyCheckInterval = TimeSpan.FromSeconds(15);
                     oLastActivityUtc = DateTime.UtcNow;
                     InputManager.Current.PreProcessInput += OnInput;
-                    oPrivacyTimer = new DispatcherTimer(TimeSpan.FromSeconds(15), DispatcherPriority.Background,
+                    oPrivacyTimer = new DispatcherTimer(oPrivacyCheckInterval, DispatcherPriority.Background,
                         (s, args) =>
                         {
                             if (DateTime.UtcNow - oLastActivityUtc >= oIdleTimeout) ConcealOpenSecrets();
@@ -192,14 +193,18 @@ namespace Crypture
 
         private static void ApplyTitleBarTheme(Window oWindow)
         {
+            // DWM title-bar attribute identifiers.
+            const int ImmersiveDarkModeAttribute = 20;
+            const int CaptionColorAttribute = 35;
+            const int CaptionTextColorAttribute = 36;
             IntPtr hWindow = new WindowInteropHelper(oWindow).Handle;
             if (hWindow == IntPtr.Zero) return;
             int nDark = IsDarkMode ? 1 : 0;
             int nCaption = IsDarkMode ? 0x001E1E1E : -1;
             int nText = IsDarkMode ? 0x00F1F1F1 : -1;
-            DwmSetWindowAttribute(hWindow, 20, ref nDark, sizeof(int));
-            DwmSetWindowAttribute(hWindow, 35, ref nCaption, sizeof(int));
-            DwmSetWindowAttribute(hWindow, 36, ref nText, sizeof(int));
+            DwmSetWindowAttribute(hWindow, ImmersiveDarkModeAttribute, ref nDark, sizeof(int));
+            DwmSetWindowAttribute(hWindow, CaptionColorAttribute, ref nCaption, sizeof(int));
+            DwmSetWindowAttribute(hWindow, CaptionTextColorAttribute, ref nText, sizeof(int));
         }
 
         [DllImport("dwmapi.dll")]

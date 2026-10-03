@@ -69,11 +69,15 @@ namespace Crypture
 
         internal List<string> GetCharacterGroups()
         {
-            if (MinimumLength < 1 || MaximumLength > 1024 || MinimumLength > MaximumLength)
+            const int MaximumPasswordLength = 1024;
+            const int MaximumSymbolCharacters = 94;
+            const int MaximumExcludedCharacters = 256;
+            if (MinimumLength < 1 || MaximumLength > MaximumPasswordLength || MinimumLength > MaximumLength)
                 throw new InvalidOperationException(
                     "Lengths must be between 1 and 1024, with minimum at most maximum.");
             if (SymbolCharacters == null || ExcludedCharacters == null ||
-                SymbolCharacters.Length > 94 || ExcludedCharacters.Length > 256)
+                SymbolCharacters.Length > MaximumSymbolCharacters ||
+                ExcludedCharacters.Length > MaximumExcludedCharacters)
                 throw new InvalidOperationException("The symbol or exclusion list is missing or too long.");
             if (IncludeSymbols && SymbolCharacters.Any(c => c < '!' || c > '~' || Char.IsLetterOrDigit(c)))
                 throw new InvalidOperationException(
@@ -130,10 +134,11 @@ namespace Crypture
         internal static int NextInt(RandomNumberGenerator oRandom, int nExclusiveMaximum)
         {
             if (nExclusiveMaximum < 1) throw new ArgumentOutOfRangeException(nameof(nExclusiveMaximum));
-            byte[] oBytes = new byte[4];
+            byte[] oBytes = new byte[sizeof(uint)];
             try
             {
-                ulong nRange = 1UL << 32;
+                const int RandomWordBits = sizeof(uint) * 8;
+                ulong nRange = 1UL << RandomWordBits;
                 ulong nLimit = nRange - nRange % (uint)nExclusiveMaximum;
                 uint nValue;
                 // Discard the incomplete interval so remainder arithmetic does not favor any choice.

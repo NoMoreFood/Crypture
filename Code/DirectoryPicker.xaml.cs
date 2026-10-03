@@ -24,8 +24,10 @@ namespace Crypture
 
         internal static string BuildFilter(string sQuery, bool bUsersOnly, bool bExact = false)
         {
+            // Maximum account search input length.
+            const int MaximumQueryCharacters = 256;
             sQuery = sQuery?.Trim();
-            if (String.IsNullOrEmpty(sQuery) || sQuery.Length > 256)
+            if (String.IsNullOrEmpty(sQuery) || sQuery.Length > MaximumQueryCharacters)
                 throw new InvalidOperationException("Enter a name, account, UPN, or SID (up to 256 characters).");
             if (sQuery.Contains('\\'))
                 sQuery = new NTAccount(sQuery).Translate(typeof(SecurityIdentifier)).Value;
@@ -47,15 +49,22 @@ namespace Crypture
                 sMatch = "(|(displayName=" + sPattern + ")(name=" + sPattern + ")(sAMAccountName=" +
                     sPattern + ")(userPrincipalName=" + sPattern + ")(distinguishedName=" + sValue + "))";
             }
+            // LDAP bitwise flag for security-enabled groups.
+            const string SecurityEnabledGroupFlag = "2147483648";
             string sTypes = bUsersOnly ? "(&(objectCategory=person)(objectClass=user))" :
                 "(|(&(objectCategory=person)(objectClass=user))(objectClass=computer)" +
-                "(&(objectCategory=group)(groupType:1.2.840.113556.1.4.803:=2147483648)))";
+                "(&(objectCategory=group)(groupType:1.2.840.113556.1.4.803:=" +
+                SecurityEnabledGroupFlag + ")))";
             return "(&(objectSid=*)" + sTypes + sMatch + ")";
         }
 
         internal static DirectorySearchResult Search(string sQuery, bool bUsersOnly, CancellationToken oToken,
             bool bExact = false)
         {
+            // Directory search page size and time limits.
+            const int DirectoryPageSize = 100;
+            const int ServerTimeoutSeconds = 15;
+            const int ClientTimeoutSeconds = 20;
             oToken.ThrowIfCancellationRequested();
             string sFilter = BuildFilter(sQuery, bUsersOnly, bExact);
 
@@ -68,10 +77,10 @@ namespace Crypture
             oSearcher.Filter = sFilter;
             oSearcher.SearchScope = SearchScope.Subtree;
             oSearcher.ReferralChasing = ReferralChasingOption.None;
-            oSearcher.PageSize = 100;
+            oSearcher.PageSize = DirectoryPageSize;
             oSearcher.SizeLimit = MaxResults + 1;
-            oSearcher.ServerTimeLimit = TimeSpan.FromSeconds(15);
-            oSearcher.ClientTimeout = TimeSpan.FromSeconds(20);
+            oSearcher.ServerTimeLimit = TimeSpan.FromSeconds(ServerTimeoutSeconds);
+            oSearcher.ClientTimeout = TimeSpan.FromSeconds(ClientTimeoutSeconds);
             oSearcher.PropertiesToLoad.AddRange(["displayName", "name", "sAMAccountName", "userPrincipalName",
                 "objectClass", "objectSid", "distinguishedName"]);
             if (bUsersOnly) oSearcher.PropertiesToLoad.Add("userCertificate");

@@ -75,14 +75,21 @@ namespace Crypture
             GetAvailableProviders = oGetAvailableProviders;
 
             // Validate one configuration snapshot before initializing event-driven controls.
+            // Supported key-length input range.
+            const int MaximumKeyLengthBits = 16384;
+
+            // Supported certificate validity input ranges.
+            const int MaximumValidityDays = 36500;
+            const int MaximumValidityYears = 100;
             ConfigurationDefaults oDefaults = new ConfigurationDefaults("CertificateGenerator");
             sDefaultProvider = oDefaults.Text("Provider", DefaultProviderName).Trim();
             sDefaultSignature = oDefaults.Text("KeyAlgorithm", "RSA").Trim().ToUpperInvariant();
             sDefaultHash = oDefaults.Text("HashAlgorithm", "SHA256").Trim().ToUpperInvariant();
-            nDefaultKeyLength = oDefaults.Number("KeyLength", 2048, 1, 16384);
-            int nStartOffset = oDefaults.Number("StartOffsetDays", 0, -36500, 36500);
-            int nYears = oDefaults.Number("ValidityYears", 3, 0, 100);
-            int nDays = oDefaults.Number("ValidityDays", 0, 0, 36500);
+            nDefaultKeyLength = oDefaults.Number("KeyLength", CertificateKeyProtection.MinimumRsaKeyBits,
+                1, MaximumKeyLengthBits);
+            int nStartOffset = oDefaults.Number("StartOffsetDays", 0, -MaximumValidityDays, MaximumValidityDays);
+            int nYears = oDefaults.Number("ValidityYears", 3, 0, MaximumValidityYears);
+            int nDays = oDefaults.Number("ValidityDays", 0, 0, MaximumValidityDays);
             string sStore = oDefaults.Choice("Store", "CurrentUser", "CurrentUser", "LocalMachine");
             bool bSelfSigned = oDefaults.Flag("SelfSigned", true);
             bool bHardware = oDefaults.Flag("ShowHardwareProviders", true);
@@ -92,7 +99,7 @@ namespace Crypture
             bool bPasswordProtect = oDefaults.Flag("PasswordProtectKey", false);
             if (sDefaultProvider.Length == 0 || sDefaultSignature.Length == 0 || sDefaultHash.Length == 0 ||
                 nYears + nDays == 0 || !bHardware && !bSoftware ||
-                sDefaultSignature == "RSA" && nDefaultKeyLength < 2048)
+                sDefaultSignature == "RSA" && nDefaultKeyLength < CertificateKeyProtection.MinimumRsaKeyBits)
                 throw oDefaults.Error("CertificateGenerator defaults need a provider, algorithms, a positive " +
                     "validity period, at least one provider type, and an RSA key length of at least 2048 bits.");
             HashSet<string> oEnhancedUsages;
@@ -239,6 +246,11 @@ namespace Crypture
 
         private static ProviderDetails ReadProviderDetails(dynamic oCsp)
         {
+            // CertEnroll algorithm interface identifiers.
+            const int HashInterface = 2;
+            const int AsymmetricEncryptionInterface = 3;
+            const int SecretAgreementInterface = 4;
+            const int SignatureInterface = 5;
             // create a structure for display purposes
             ProviderDetails oOpt = new ProviderDetails();
             oOpt.IsHardware = oCsp.IsSmartCard || oCsp.IsHardwareDevice;
@@ -258,16 +270,16 @@ namespace Crypture
                             oAlg.Name != "ECDH_P256" && oAlg.Name != "ECDH_P384" && oAlg.Name != "ECDH_P521") continue;
 
                         // hash algorithms
-                        if (oAlg.Type == 2)
+                        if (oAlg.Type == HashInterface)
                         {
                             if (oOpt.HashAlgorithmns.Contains(oAlg.Name)) continue;
                             oOpt.HashAlgorithmns.Add(oAlg.Name);
                         }
 
                         // signature algorithms
-                        else if (oAlg.Type == 5 ||
-                            oAlg.Type == 3 ||
-                            (oAlg.Type == 4 &&
+                        else if (oAlg.Type == SignatureInterface ||
+                            oAlg.Type == AsymmetricEncryptionInterface ||
+                            (oAlg.Type == SecretAgreementInterface &&
                                 oAlg.Name.StartsWith("ECDH", StringComparison.Ordinal)))
                         {
                             if (oOpt.SignatureAlgorithmns.Contains(oAlg.Name)) continue;
@@ -446,7 +458,8 @@ namespace Crypture
                     MinLength.ToString(), MaxLength.ToString());
                 oKeyLengthTextBox.IsEnabled = true;
                 oKeyLengthTextBox.Text = Math.Max(MinLength, Math.Min(MaxLength,
-                    SelectedSignature == "RSA" ? Math.Max(2048, nDefaultKeyLength) : nDefaultKeyLength))
+                    SelectedSignature == "RSA" ? Math.Max(CertificateKeyProtection.MinimumRsaKeyBits,
+                        nDefaultKeyLength) : nDefaultKeyLength))
                     .ToString(CultureInfo.InvariantCulture);
             }
         }
@@ -465,7 +478,7 @@ namespace Crypture
                     !Int32.TryParse(oKeyLengthTextBox.Text, out nKeyLength) ||
                     nKeyLength < oProvider.SignatureMinLengths[SelectedSignature] ||
                     nKeyLength > oProvider.SignatureMaxLengths[SelectedSignature] ||
-                    (SelectedSignature == "RSA" && nKeyLength < 2048) ||
+                    (SelectedSignature == "RSA" && nKeyLength < CertificateKeyProtection.MinimumRsaKeyBits) ||
                     String.IsNullOrWhiteSpace(oSubjectTextBox.Text) ||
                     (bSelfSigned && (!oValidFromDatePicker.SelectedDate.HasValue ||
                         !oValidUntilDatePicker.SelectedDate.HasValue ||
@@ -510,24 +523,40 @@ namespace Crypture
                         0, 0);
                     oPrivateKey.MachineContext = oCertificateStoreMachineRadio.IsChecked == true;
                     oPrivateKey.Length = nKeyLength;
+
+                    // CertEnroll key specification and usage flags.
+                    const int KeyExchangeSpecification = 1;
+                    const int DecryptKeyUsage = 1;
+                    const int SigningKeyUsage = 2;
+                    const int KeyAgreementUsage = 4;
                     if (SelectedSignature == "RSA")
                     {
-                        oPrivateKey.KeySpec = 1;
-                        oPrivateKey.KeyUsage = 3;
+                        oPrivateKey.KeySpec = KeyExchangeSpecification;
+                        oPrivateKey.KeyUsage = DecryptKeyUsage | SigningKeyUsage;
                     }
                     else if (SelectedSignature.StartsWith("ECDH", StringComparison.Ordinal))
                     {
-                        oPrivateKey.KeyUsage = 6;
+                        oPrivateKey.KeyUsage = SigningKeyUsage | KeyAgreementUsage;
                     }
-                    oPrivateKey.KeyProtection = oPasswordProtectCheckbox.IsChecked == true ? 1 : 0;
-                    oPrivateKey.ExportPolicy = oKeyExportableCheckbox.IsChecked == true ? 3 : 0;
+
+                    // CertEnroll key protection and export policy flags.
+                    const int ProtectKeyUi = 1;
+                    const int AllowKeyExport = 1;
+                    const int AllowPlaintextKeyExport = 2;
+                    oPrivateKey.KeyProtection = oPasswordProtectCheckbox.IsChecked == true ? ProtectKeyUi : 0;
+                    oPrivateKey.ExportPolicy = oKeyExportableCheckbox.IsChecked == true
+                        ? AllowKeyExport | AllowPlaintextKeyExport : 0;
                     oPrivateKey.Create();
                     bCreated = true;
 
                     // set the signature mechanism for the certificate
                     dynamic oHash = oProviderInfo.CspAlgorithms.ItemByName[SelectedHash].GetAlgorithmOid(
                         0, 0);
-                    int oContext = oPrivateKey.MachineContext ? 2 : 1;
+
+                    // CertEnroll distinguishes user and machine enrollment contexts.
+                    const int UserEnrollmentContext = 1;
+                    const int MachineEnrollmentContext = 2;
+                    int oContext = oPrivateKey.MachineContext ? MachineEnrollmentContext : UserEnrollmentContext;
 
                     // create a certificate request with the requested info
                     dynamic oCertRequestInfo;
@@ -582,16 +611,22 @@ namespace Crypture
                     // install certificate into selected certificate store
                     if (bSelfSigned)
                     {
+                        // Accept the locally issued certificate response.
+                        const int AllowUntrustedCertificate = 2;
+
+                        // Decode the response as Base64.
+                        const int Base64Encoding = 1;
                         string sCertRequestString = oEnrollRequest.CreateRequest();
                         oEnrollRequest.InstallResponse(
-                            2,
-                            sCertRequestString, 1, "");
+                            AllowUntrustedCertificate,
+                            sCertRequestString, Base64Encoding, "");
                     }
                     // produce request file
                     else
                     {
+                        const int Base64RequestHeaderEncoding = 3;
                         string sCertRequestString = oEnrollRequest.CreateRequest(
-                            3);
+                            Base64RequestHeaderEncoding);
                         System.IO.File.WriteAllText(sRequestPath, sCertRequestString, Encoding.ASCII);
                     }
                     bSaved = true;

@@ -17,10 +17,22 @@ namespace Crypture
 
     internal static class ItemCryptography
     {
+        // Stored item protection formats.
+        internal const long LegacyFormat = 0;
         internal const long AuthenticatedFormat = 1;
         internal const long PrincipalFormat = 2;
         internal const long CertificateFormat = 3;
         internal const long RecoveryFormat = 4;
+
+        // The content key contains separate AES and authentication keys.
+        internal const int ContentKeyBytes = 64;
+        internal const int AesKeyBytes = 32;
+        private const int AuthenticationKeyBytes = 32;
+
+        // Cipher suite nonce, tag, and block sizes.
+        private const int GcmNonceBytes = 12;
+        private const int GcmTagBytes = 16;
+        private const int CbcBlockBytes = 16;
 
         internal static bool UsesWindowsProtection(Cipher oCipher) => oCipher?.CipherParams == PrincipalFormat ||
             oCipher?.CipherParams == RecoveryFormat && oCipher.ProtectionDescriptor != null;
@@ -76,14 +88,14 @@ namespace Crypture
                 .Select(g => g.First()).ToList();
             bool bRecovery = sRecoveryDescriptor != null || bPrincipals && oUsers.Count != 0;
             long nFormat = bRecovery ? RecoveryFormat : bPrincipals ? PrincipalFormat : CertificateFormat;
-            byte[] oKeys = new byte[64];
-            byte[] oEncryptionKey = new byte[32];
-            byte[] oAuthenticationKey = new byte[32];
+            byte[] oKeys = new byte[ContentKeyBytes];
+            byte[] oEncryptionKey = new byte[AesKeyBytes];
+            byte[] oAuthenticationKey = new byte[AuthenticationKeyBytes];
             try
             {
                 using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oKeys);
-                Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, 32);
-                Buffer.BlockCopy(oKeys, 32, oAuthenticationKey, 0, 32);
+                Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);
+                Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
                 oItem.Cipher = new Cipher
                 {
                     CipherParams = nFormat,
@@ -94,10 +106,10 @@ namespace Crypture
                 // Encrypt once with fresh keys and a fresh nonce, then share the keys with each recipient.
                 if (nContentSuite == ContentEncryptionSuite.Aes256Gcm)
                 {
-                    oItem.Cipher.CipherVector = RandomNumberGenerator.GetBytes(12);
+                    oItem.Cipher.CipherVector = RandomNumberGenerator.GetBytes(GcmNonceBytes);
                     oItem.Cipher.CipherText = new byte[oPlainText.Length];
-                    oItem.Cipher.AuthenticationTag = new byte[16];
-                    using (AesGcm oAes = new AesGcm(oEncryptionKey, 16))
+                    oItem.Cipher.AuthenticationTag = new byte[GcmTagBytes];
+                    using (AesGcm oAes = new AesGcm(oEncryptionKey, GcmTagBytes))
                         oAes.Encrypt(oItem.Cipher.CipherVector, oPlainText, oItem.Cipher.CipherText,
                             oItem.Cipher.AuthenticationTag, GetAssociatedData(oItem));
                 }
@@ -168,21 +180,21 @@ namespace Crypture
             // Validate the stored suite and its lengths before opening any private or Windows-protected keys.
             if ((oInstance == null) != (oCert == null) ||
                 oCipher == null || !HasSupportedContentSuite(oCipher) || oCipher.CipherVector == null ||
-                oCipher.CipherVector.Length != (bGcm ? 12 : 16) || oCipher.CipherText == null ||
-                (bGcm ? oCipher.CipherText.Length > nMaxSize || oCipher.AuthenticationTag?.Length != 16
-                    : oCipher.CipherText.Length == 0 || oCipher.CipherText.Length % 16 != 0 ||
-                        oCipher.CipherText.Length > nMaxSize + 16 || oCipher.AuthenticationTag != null) ||
+                oCipher.CipherVector.Length != (bGcm ? GcmNonceBytes : CbcBlockBytes) || oCipher.CipherText == null ||
+                (bGcm ? oCipher.CipherText.Length > nMaxSize || oCipher.AuthenticationTag?.Length != GcmTagBytes
+                    : oCipher.CipherText.Length == 0 || oCipher.CipherText.Length % CbcBlockBytes != 0 ||
+                        oCipher.CipherText.Length > nMaxSize + CbcBlockBytes || oCipher.AuthenticationTag != null) ||
                 ((!bPrincipals && !bRecovery || bRecovery && bCertificate) &&
                 (oInstance == null || oCert == null ||
                 oCipher.CipherParams != oInstance.CipherParams ||
-                (oCipher.CipherParams != 0 && oCipher.CipherParams != AuthenticatedFormat &&
+                (oCipher.CipherParams != LegacyFormat && oCipher.CipherParams != AuthenticatedFormat &&
                     oCipher.CipherParams != CertificateFormat && oCipher.CipherParams != RecoveryFormat))))
                 throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
             if (bPrincipals) PrincipalProtection.ParseDescriptor(oCipher.ProtectionDescriptor, out _, false);
 
             byte[] oKeys = null;
-            byte[] oEncryptionKey = new byte[32];
-            byte[] oAuthenticationKey = new byte[32];
+            byte[] oEncryptionKey = new byte[AesKeyBytes];
+            byte[] oAuthenticationKey = new byte[AuthenticationKeyBytes];
             try
             {
                 if (bRecovery) RecoveryProtection.ReadWindowsKeys(oCipher);
@@ -200,17 +212,17 @@ namespace Crypture
                     }
                 }
 
-                bool bAuthenticated = oCipher.CipherParams != 0;
+                bool bAuthenticated = oCipher.CipherParams != LegacyFormat;
                 byte[] oSignature = bPrincipals || bRecovery && !bCertificate
                     ? oCipher.Signature : oInstance.Signature;
-                if (oKeys.Length != (bAuthenticated ? 64 : 32) || oSignature == null ||
-                    oSignature.Length != (bAuthenticated ? 32 : 0))
+                if (oKeys.Length != (bAuthenticated ? ContentKeyBytes : AesKeyBytes) || oSignature == null ||
+                    oSignature.Length != (bAuthenticated ? AuthenticationKeyBytes : 0))
                     throw new CryptographicException("The encrypted item is damaged.");
 
-                Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, 32);
+                Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);
                 if (bAuthenticated)
                 {
-                    Buffer.BlockCopy(oKeys, 32, oAuthenticationKey, 0, 32);
+                    Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
                     byte[] oExpected = ComputeSignature(oItem, oAuthenticationKey,
                         bRecovery && !bCertificate ? null : oInstance);
                     int nDifference = 0;
@@ -225,7 +237,7 @@ namespace Crypture
                 if (bGcm)
                 {
                     byte[] oPlainText = new byte[oCipher.CipherText.Length];
-                    using (AesGcm oAes = new AesGcm(oEncryptionKey, 16))
+                    using (AesGcm oAes = new AesGcm(oEncryptionKey, GcmTagBytes))
                         oAes.Decrypt(oCipher.CipherVector, oCipher.CipherText, oCipher.AuthenticationTag,
                             oPlainText, GetAssociatedData(oItem));
                     return oPlainText;

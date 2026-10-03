@@ -23,6 +23,17 @@ namespace Crypture
 
     internal static class CertificateKeyProtection
     {
+        // Minimum RSA certificate strength.
+        internal const int MinimumRsaKeyBits = 2048;
+
+        // ECC public points contain X and Y coordinates.
+        private const int EccCoordinateCount = 2;
+
+        // Recipient envelope framing and authenticated wrapping sizes.
+        private const int EnvelopeHeaderBytes = sizeof(int) * 2;
+        private const int WrappingKeyBytes = 32;
+        private const int GcmNonceBytes = 12;
+        private const int GcmTagBytes = 16;
         private static readonly byte[] KeyLabel = Encoding.ASCII.GetBytes("Crypture Recipient Key v3");
         internal static bool IsPostQuantumSupported => MLKem.IsSupported;
         public static string AvailabilityDescription => IsPostQuantumSupported
@@ -31,24 +42,37 @@ namespace Crypture
 
         internal static RecipientAlgorithm GetAlgorithm(X509Certificate2 oCert)
         {
+            // Public-key algorithm identifiers.
+            const string RsaPublicKeyOid = "1.2.840.113549.1.1.1";
+            const string EcPublicKeyOid = "1.2.840.10045.2.1";
+
+            // Supported named ECC curves.
+            const string P256CurveOid = "1.2.840.10045.3.1.7";
+            const string P384CurveOid = "1.3.132.0.34";
+            const string P521CurveOid = "1.3.132.0.35";
+
+            // ML-KEM parameter-set identifiers.
+            const string MlKem512Oid = "2.16.840.1.101.3.4.4.1";
+            const string MlKem768Oid = "2.16.840.1.101.3.4.4.2";
+            const string MlKem1024Oid = "2.16.840.1.101.3.4.4.3";
             switch (oCert.PublicKey.Oid.Value)
             {
-                case "1.2.840.113549.1.1.1":
+                case RsaPublicKeyOid:
                     using (RSA oRsa = oCert.GetRSAPublicKey())
                     {
-                        if (oRsa == null || oRsa.KeySize < 2048)
+                        if (oRsa == null || oRsa.KeySize < MinimumRsaKeyBits)
                             throw new CryptographicException("RSA encryption certificates need at least 2048 bits.");
                     }
                     return RecipientAlgorithm.Rsa;
-                case "1.2.840.10045.2.1":
+                case EcPublicKeyOid:
                     string sCurve = GetCurveOid(oCert);
-                    if (sCurve == "1.2.840.10045.3.1.7") return RecipientAlgorithm.EcdhP256;
-                    if (sCurve == "1.3.132.0.34") return RecipientAlgorithm.EcdhP384;
-                    if (sCurve == "1.3.132.0.35") return RecipientAlgorithm.EcdhP521;
+                    if (sCurve == P256CurveOid) return RecipientAlgorithm.EcdhP256;
+                    if (sCurve == P384CurveOid) return RecipientAlgorithm.EcdhP384;
+                    if (sCurve == P521CurveOid) return RecipientAlgorithm.EcdhP521;
                     throw new CryptographicException("ECC encryption requires the P-256, P-384, or P-521 curve.");
-                case "2.16.840.1.101.3.4.4.1": return RecipientAlgorithm.MlKem512;
-                case "2.16.840.1.101.3.4.4.2": return RecipientAlgorithm.MlKem768;
-                case "2.16.840.1.101.3.4.4.3": return RecipientAlgorithm.MlKem1024;
+                case MlKem512Oid: return RecipientAlgorithm.MlKem512;
+                case MlKem768Oid: return RecipientAlgorithm.MlKem768;
+                case MlKem1024Oid: return RecipientAlgorithm.MlKem1024;
                 default:
                     throw new CryptographicException("Select an RSA, ECDH, or ML-KEM encryption certificate. " +
                         "Signature-only algorithms cannot encrypt Vault items.");
@@ -98,6 +122,20 @@ namespace Crypture
         internal static bool IsEcdh(RecipientAlgorithm oAlgorithm) =>
             oAlgorithm >= RecipientAlgorithm.EcdhP256 && oAlgorithm <= RecipientAlgorithm.EcdhP521;
 
+        private static int GetEcdhCoordinateBytes(RecipientAlgorithm oAlgorithm)
+        {
+            const int P256CoordinateBytes = 32;
+            const int P384CoordinateBytes = 48;
+            const int P521CoordinateBytes = 66;
+            return oAlgorithm switch
+            {
+                RecipientAlgorithm.EcdhP256 => P256CoordinateBytes,
+                RecipientAlgorithm.EcdhP384 => P384CoordinateBytes,
+                RecipientAlgorithm.EcdhP521 => P521CoordinateBytes,
+                _ => throw new CryptographicException("Unsupported ECDH curve.")
+            };
+        }
+
         internal static MLKemAlgorithm GetMlKemAlgorithm(RecipientAlgorithm oAlgorithm)
         {
             if (!IsPostQuantumSupported)
@@ -122,11 +160,13 @@ namespace Crypture
 
         internal static ECDiffieHellmanCng GetEcdhPublicKey(X509Certificate2 oCert)
         {
+            const int UncompressedPointPrefixBytes = 1;
+            const byte UncompressedPointMarker = 4;
             RecipientAlgorithm oAlgorithm = GetAlgorithm(oCert);
-            int nSize = oAlgorithm == RecipientAlgorithm.EcdhP256 ? 32
-                : oAlgorithm == RecipientAlgorithm.EcdhP384 ? 48 : 66;
+            int nSize = GetEcdhCoordinateBytes(oAlgorithm);
             byte[] oPoint = oCert.GetPublicKey();
-            if (!IsEcdh(oAlgorithm) || oPoint.Length != 1 + 2 * nSize || oPoint[0] != 4)
+            if (oPoint.Length != UncompressedPointPrefixBytes + EccCoordinateCount * nSize ||
+                oPoint[0] != UncompressedPointMarker)
                 throw new CryptographicException("The ECC certificate has an invalid public key.");
             ECDiffieHellmanCng oKey = new ECDiffieHellmanCng();
             try
@@ -136,7 +176,8 @@ namespace Crypture
                     Curve = ECCurve.CreateFromValue(GetCurveOid(oCert)),
                     Q = new ECPoint
                     {
-                        X = oPoint.Skip(1).Take(nSize).ToArray(), Y = oPoint.Skip(1 + nSize).ToArray()
+                        X = oPoint.Skip(UncompressedPointPrefixBytes).Take(nSize).ToArray(),
+                        Y = oPoint.Skip(UncompressedPointPrefixBytes + nSize).ToArray()
                     }
                 });
                 return oKey;
@@ -165,13 +206,16 @@ namespace Crypture
 
         internal static CngKey GetPrivateKey(X509Certificate2 oCert)
         {
+            // Acquisition flags require a cached CNG key handle.
+            const uint CacheAcquiredKey = 0x00000001;
+            const uint RequireCngKey = 0x00040000;
             if (!oCert.HasPrivateKey)
                 throw new CryptographicException("The certificate's private key is unavailable in your Windows store.");
             SafeNCryptKeyHandle oHandle;
             uint nKeySpec;
             bool bCallerFrees;
-            bool bAcquired = NativeMethods.CryptAcquireCertificatePrivateKey(oCert.Handle, 0x40001, IntPtr.Zero,
-                out oHandle, out nKeySpec, out bCallerFrees);
+            bool bAcquired = NativeMethods.CryptAcquireCertificatePrivateKey(oCert.Handle,
+                CacheAcquiredKey | RequireCngKey, IntPtr.Zero, out oHandle, out nKeySpec, out bCallerFrees);
             int nError = Marshal.GetLastWin32Error();
             using (oHandle)
             {
@@ -180,8 +224,9 @@ namespace Crypture
                     if (!bAcquired)
                         throw new CryptographicException("Windows could not open the certificate's CNG private key.",
                             new CryptographicException(nError));
+                    const uint KeyProviderInfoProperty = 2;
                     uint nSize = 0;
-                    bool bPersisted = NativeMethods.CertGetCertificateContextProperty(oCert.Handle, 2,
+                    bool bPersisted = NativeMethods.CertGetCertificateContextProperty(oCert.Handle, KeyProviderInfoProperty,
                         IntPtr.Zero, ref nSize);
                     return CngKey.Open(oHandle, bPersisted
                         ? CngKeyHandleOpenOptions.None : CngKeyHandleOpenOptions.EphemeralKey);
@@ -237,9 +282,9 @@ namespace Crypture
                     oWriter.Write(oEncapsulation);
                     byte[] oContext = GetContext(oCert, oStream.ToArray());
                     oWrappingKey = SP800108HmacCounterKdf.DeriveBytes(oSecret, HashAlgorithmName.SHA256,
-                        KeyLabel, oContext, 32);
-                    byte[] oNonce = new byte[12];
-                    byte[] oTag = new byte[16];
+                        KeyLabel, oContext, WrappingKeyBytes);
+                    byte[] oNonce = new byte[GcmNonceBytes];
+                    byte[] oTag = new byte[GcmTagBytes];
                     byte[] oCipherText = new byte[oKeys.Length];
                     using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oNonce);
                     using (AesGcm oAes = new AesGcm(oWrappingKey, oTag.Length))
@@ -259,11 +304,13 @@ namespace Crypture
 
         internal static byte[] Unwrap(X509Certificate2 oCert, byte[] oEnvelope)
         {
-            if (oEnvelope == null || oEnvelope.Length < 8 || oEnvelope.Length > 4096)
+            const int MaximumEnvelopeBytes = 4096;
+            if (oEnvelope == null || oEnvelope.Length < EnvelopeHeaderBytes ||
+                oEnvelope.Length > MaximumEnvelopeBytes)
                 throw new CryptographicException("The recipient key envelope is damaged.");
             byte[] oSecret = null;
             byte[] oWrappingKey = null;
-            byte[] oKeys = new byte[64];
+            byte[] oKeys = new byte[ItemCryptography.ContentKeyBytes];
             bool bSuccess = false;
             try
             {
@@ -272,25 +319,29 @@ namespace Crypture
                 {
                     RecipientAlgorithm oAlgorithm = (RecipientAlgorithm)oReader.ReadInt32();
                     int nLength = oReader.ReadInt32();
-                    if (oAlgorithm != GetAlgorithm(oCert) || nLength <= 0 || nLength > oEnvelope.Length - 8)
+                    if (oAlgorithm != GetAlgorithm(oCert) || nLength <= 0 ||
+                        nLength > oEnvelope.Length - EnvelopeHeaderBytes)
                         throw new CryptographicException("The recipient algorithm or key envelope is invalid.");
                     if (oAlgorithm == RecipientAlgorithm.Rsa)
                     {
+                        const int BitsPerByte = 8;
                         using (RSA oPrivate = oCert.GetRSAPrivateKey())
                         {
-                            if (oPrivate == null || nLength != oPrivate.KeySize / 8 || oEnvelope.Length != nLength + 8)
+                            if (oPrivate == null || nLength != oPrivate.KeySize / BitsPerByte ||
+                                oEnvelope.Length != nLength + EnvelopeHeaderBytes)
                                 throw new CryptographicException("The RSA private key or recipient envelope is invalid.");
                             return oPrivate.Decrypt(oReader.ReadBytes(nLength), RSAEncryptionPadding.OaepSHA1);
                         }
                     }
+                    const int EccPublicBlobHeaderBytes = 8;
                     int nExpected = IsEcdh(oAlgorithm)
-                        ? oAlgorithm == RecipientAlgorithm.EcdhP256 ? 72
-                            : oAlgorithm == RecipientAlgorithm.EcdhP384 ? 104 : 140
+                        ? EccPublicBlobHeaderBytes + EccCoordinateCount * GetEcdhCoordinateBytes(oAlgorithm)
                         : GetMlKemAlgorithm(oAlgorithm).CiphertextSizeInBytes;
-                    if (nLength != nExpected || oEnvelope.Length != 8 + nLength + 12 + 64 + 16)
+                    if (nLength != nExpected || oEnvelope.Length != EnvelopeHeaderBytes + nLength +
+                        GcmNonceBytes + ItemCryptography.ContentKeyBytes + GcmTagBytes)
                         throw new CryptographicException("The recipient key envelope is damaged.");
                     byte[] oEncapsulation = oReader.ReadBytes(nLength);
-                    byte[] oContext = GetContext(oCert, oEnvelope.Take(8 + nLength).ToArray());
+                    byte[] oContext = GetContext(oCert, oEnvelope.Take(EnvelopeHeaderBytes + nLength).ToArray());
                     using (CngKey oPrivate = GetPrivateKey(oCert))
                     {
                         if (IsEcdh(oAlgorithm))
@@ -310,10 +361,10 @@ namespace Crypture
                         }
                     }
                     oWrappingKey = SP800108HmacCounterKdf.DeriveBytes(oSecret, HashAlgorithmName.SHA256,
-                        KeyLabel, oContext, 32);
-                    byte[] oNonce = oReader.ReadBytes(12);
-                    byte[] oCipherText = oReader.ReadBytes(64);
-                    byte[] oTag = oReader.ReadBytes(16);
+                        KeyLabel, oContext, WrappingKeyBytes);
+                    byte[] oNonce = oReader.ReadBytes(GcmNonceBytes);
+                    byte[] oCipherText = oReader.ReadBytes(ItemCryptography.ContentKeyBytes);
+                    byte[] oTag = oReader.ReadBytes(GcmTagBytes);
                     using (AesGcm oAes = new AesGcm(oWrappingKey, oTag.Length))
                         oAes.Decrypt(oNonce, oCipherText, oTag, oKeys, oContext);
                     bSuccess = true;

@@ -9,7 +9,16 @@ namespace Crypture
 {
     internal sealed class TotpSecret : IDisposable
     {
+        // Supported TOTP digit counts and validation bounds.
+        internal const int SixDigitCount = 6;
+        internal const int EightDigitCount = 8;
+        internal const int MaximumPeriodSeconds = 3600;
+        internal const int MaximumLabelCharacters = 256;
+
+        // Base32 alphabet and bit widths shared by encoding and decoding.
         private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        private const int BitsPerByte = 8;
+        private const int Base32BitsPerCharacter = 5;
         private byte[] oKey;
         internal string Issuer { get; }
         internal string Account { get; }
@@ -25,11 +34,13 @@ namespace Crypture
             Algorithm = (sAlgorithm ?? "").ToUpperInvariant();
             Digits = nDigits;
             Period = nPeriod;
-            if (Algorithm is not ("SHA1" or "SHA256" or "SHA512") || Digits is not (6 or 8) ||
-                Period < 1 || Period > 3600)
+            if (Algorithm is not ("SHA1" or "SHA256" or "SHA512") ||
+                Digits is not (SixDigitCount or EightDigitCount) ||
+                Period < 1 || Period > MaximumPeriodSeconds)
                 throw new InvalidOperationException("Choose SHA-1, SHA-256, or SHA-512, 6 or 8 digits, " +
                     "and a rotation period between 1 and 3600 seconds.");
-            if (Issuer.Length > 256 || Account.Length > 256 || Issuer.Contains(':') || Account.Contains(':') ||
+            if (Issuer.Length > MaximumLabelCharacters || Account.Length > MaximumLabelCharacters ||
+                Issuer.Contains(':') || Account.Contains(':') ||
                 Issuer.Any(Char.IsControl) || Account.Any(Char.IsControl))
                 throw new InvalidOperationException("Issuer and account names must be at most 256 characters " +
                     "and cannot contain colons or control characters.");
@@ -38,7 +49,8 @@ namespace Crypture
 
         internal static TotpSecret Parse(string sInput)
         {
-            if (String.IsNullOrWhiteSpace(sInput) || sInput.Length > 4096)
+            const int MaximumSetupLinkCharacters = 4096;
+            if (String.IsNullOrWhiteSpace(sInput) || sInput.Length > MaximumSetupLinkCharacters)
                 throw new InvalidOperationException("Enter a Base32 secret or a TOTP setup link.");
             sInput = sInput.Trim();
             if (!sInput.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase)) return new TotpSecret(sInput);
@@ -93,12 +105,19 @@ namespace Crypture
 
         internal string GetCode(DateTimeOffset oTime)
         {
+            // HOTP dynamic truncation masks.
+            const int HotpOffsetMask = 0x0F;
+            const uint HotpValueMask = 0x7FFFFFFF;
+
+            // Decimal moduli for the supported TOTP code widths.
+            const uint SixDigitModulus = 1_000_000;
+            const uint EightDigitModulus = 100_000_000;
             ObjectDisposedException.ThrowIf(oKey == null, this);
             long nSeconds = oTime.ToUnixTimeSeconds();
             if (nSeconds < 0) throw new InvalidOperationException("TOTP requires a date after the Unix epoch.");
 
             // RFC 6238 uses the current Unix time step as the big-endian HOTP counter.
-            Span<byte> oCounter = stackalloc byte[8];
+            Span<byte> oCounter = stackalloc byte[sizeof(ulong)];
             BinaryPrimitives.WriteUInt64BigEndian(oCounter, (ulong)(nSeconds / Period));
             byte[] oHash = Algorithm switch
             {
@@ -108,10 +127,11 @@ namespace Crypture
             };
             try
             {
-                int nOffset = oHash[^1] & 15;
-                uint nValue = BinaryPrimitives.ReadUInt32BigEndian(oHash.AsSpan(nOffset, 4)) & 0x7FFFFFFF;
-                return (nValue % (Digits == 6 ? 1000000u : 100000000u))
-                    .ToString(Digits == 6 ? "D6" : "D8", CultureInfo.InvariantCulture);
+                int nOffset = oHash[^1] & HotpOffsetMask;
+                uint nValue = BinaryPrimitives.ReadUInt32BigEndian(oHash.AsSpan(nOffset, sizeof(uint))) &
+                    HotpValueMask;
+                return (nValue % (Digits == SixDigitCount ? SixDigitModulus : EightDigitModulus))
+                    .ToString(Digits == SixDigitCount ? "D6" : "D8", CultureInfo.InvariantCulture);
             }
             finally
             {
@@ -121,18 +141,24 @@ namespace Crypture
 
         internal double SecondsRemaining(DateTimeOffset oTime)
         {
+            const int MillisecondsPerSecond = 1000;
             long nMilliseconds = oTime.ToUnixTimeMilliseconds();
             if (nMilliseconds < 0) throw new InvalidOperationException("TOTP requires a date after the Unix epoch.");
-            return (Period * 1000 - nMilliseconds % (Period * 1000)) / 1000.0;
+            return (Period * MillisecondsPerSecond - nMilliseconds % (Period * MillisecondsPerSecond)) /
+                (double)MillisecondsPerSecond;
         }
 
         internal static string Generate(string sAlgorithm)
         {
+            // Match generated secret sizes to the selected HMAC hash output.
+            const int Sha1GeneratedSecretBytes = 20;
+            const int Sha256GeneratedSecretBytes = 32;
+            const int Sha512GeneratedSecretBytes = 64;
             byte[] oBytes = RandomNumberGenerator.GetBytes(sAlgorithm switch
             {
-                "SHA256" => 32,
-                "SHA512" => 64,
-                _ => 20
+                "SHA256" => Sha256GeneratedSecretBytes,
+                "SHA512" => Sha512GeneratedSecretBytes,
+                _ => Sha1GeneratedSecretBytes
             });
             try
             {
@@ -146,15 +172,27 @@ namespace Crypture
 
         private static byte[] DecodeBase32(string sInput)
         {
-            if (String.IsNullOrWhiteSpace(sInput) || sInput.Length > 512)
+            // Bounds for accepted Base32 secrets.
+            const int MinimumSecretBytes = 10;
+            const int MaximumSecretBytes = 128;
+            const int MaximumEncodedSecretCharacters = 512;
+
+            // A Base32 quantum represents five bytes in eight characters.
+            const int Base32QuantumCharacters = 8;
+            if (String.IsNullOrWhiteSpace(sInput) || sInput.Length > MaximumEncodedSecretCharacters)
                 throw new InvalidOperationException("Enter a Base32 secret containing 10 to 128 bytes.");
             string sValue = new string(sInput.Where(c => !Char.IsWhiteSpace(c) && c != '-')
                 .Select(Char.ToUpperInvariant).ToArray());
             int nPadding = sValue.IndexOf('=');
             int nLength = nPadding < 0 ? sValue.Length : nPadding;
-            int nBytes = nLength * 5 / 8;
-            if (nBytes < 10 || nBytes > 128 || nLength % 8 is 1 or 3 or 6 ||
-                nPadding >= 0 && (sValue.Length % 8 != 0 || sValue.Length - nLength != (8 - nLength % 8) % 8 ||
+            int nBytes = nLength * Base32BitsPerCharacter / BitsPerByte;
+            int nQuantumRemainder = nLength % Base32QuantumCharacters;
+            ReadOnlySpan<int> oInvalidBase32QuantumRemainders = [1, 3, 6];
+            bool bInvalidQuantumLength = oInvalidBase32QuantumRemainders.Contains(nQuantumRemainder);
+            if (nBytes < MinimumSecretBytes || nBytes > MaximumSecretBytes || bInvalidQuantumLength ||
+                nPadding >= 0 && (sValue.Length % Base32QuantumCharacters != 0 ||
+                    sValue.Length - nLength !=
+                        (Base32QuantumCharacters - nQuantumRemainder) % Base32QuantumCharacters ||
                     sValue.AsSpan(nLength).ContainsAnyExcept('=')))
                 throw new InvalidOperationException("The Base32 secret has an invalid length or padding.");
             byte[] oBytes = new byte[nBytes];
@@ -167,10 +205,10 @@ namespace Crypture
                 {
                     int nDigit = Alphabet.IndexOf(sValue[nCharacter]);
                     if (nDigit < 0) throw new InvalidOperationException("Base32 secrets use only A-Z and 2-7.");
-                    nBuffer = (nBuffer << 5) | (uint)nDigit;
-                    nBits += 5;
-                    if (nBits < 8) continue;
-                    nBits -= 8;
+                    nBuffer = (nBuffer << Base32BitsPerCharacter) | (uint)nDigit;
+                    nBits += Base32BitsPerCharacter;
+                    if (nBits < BitsPerByte) continue;
+                    nBits -= BitsPerByte;
                     oBytes[nIndex++] = (byte)(nBuffer >> nBits);
                 }
                 if ((nBuffer & ((1u << nBits) - 1)) != 0)
@@ -186,21 +224,24 @@ namespace Crypture
 
         private static string EncodeBase32(ReadOnlySpan<byte> oBytes)
         {
-            char[] oCharacters = new char[(oBytes.Length * 8 + 4) / 5];
+            const int Base32AlphabetMask = (1 << Base32BitsPerCharacter) - 1;
+            char[] oCharacters = new char[(oBytes.Length * BitsPerByte + Base32BitsPerCharacter - 1) /
+                Base32BitsPerCharacter];
             uint nBuffer = 0;
             int nBits = 0;
             int nIndex = 0;
             foreach (byte nByte in oBytes)
             {
-                nBuffer = (nBuffer << 8) | nByte;
-                nBits += 8;
-                while (nBits >= 5)
+                nBuffer = (nBuffer << BitsPerByte) | nByte;
+                nBits += BitsPerByte;
+                while (nBits >= Base32BitsPerCharacter)
                 {
-                    nBits -= 5;
-                    oCharacters[nIndex++] = Alphabet[(int)(nBuffer >> nBits) & 31];
+                    nBits -= Base32BitsPerCharacter;
+                    oCharacters[nIndex++] = Alphabet[(int)(nBuffer >> nBits) & Base32AlphabetMask];
                 }
             }
-            if (nBits != 0) oCharacters[nIndex] = Alphabet[(int)(nBuffer << (5 - nBits)) & 31];
+            if (nBits != 0) oCharacters[nIndex] = Alphabet[(int)(nBuffer <<
+                (Base32BitsPerCharacter - nBits)) & Base32AlphabetMask];
             return new string(oCharacters);
         }
 

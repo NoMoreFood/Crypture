@@ -169,11 +169,12 @@ namespace Crypture
 
         internal static byte[] Decompress(byte[] oInputArray)
         {
+            const int CopyBufferBytes = 81920;
             using (MemoryStream oInputStream = new MemoryStream(oInputArray))
             using (GZipStream oZipStream = new GZipStream(oInputStream, CompressionMode.Decompress))
             using (MemoryStream oOutputSream = new MemoryStream())
             {
-                byte[] oBuffer = new byte[81920];
+                byte[] oBuffer = new byte[CopyBufferBytes];
                 try
                 {
                     int nRead;

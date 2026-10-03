@@ -28,13 +28,14 @@ namespace Crypture
 
         public TotpPanel()
         {
+            const int CodeRefreshIntervalMilliseconds = 250;
             InitializeComponent();
             Utilities.EnableClipboardTimeout(oCurrentCode);
             Utilities.EnableClipboardTimeout(oSecretInput);
             Utilities.EnableClipboardTimeout(oImportInput);
             oTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
             {
-                Interval = TimeSpan.FromMilliseconds(250)
+                Interval = TimeSpan.FromMilliseconds(CodeRefreshIntervalMilliseconds)
             };
             oTimer.Tick += (s, e) => RefreshCode();
             Loaded += (s, e) => UpdateTimer();
@@ -114,10 +115,11 @@ namespace Crypture
             ConfigurationDefaults oDefaults = new ConfigurationDefaults("Totp");
             string sAlgorithm = oDefaults.Choice("Algorithm", "SHA1", "SHA1", "SHA256", "SHA512");
             int nDigits = Int32.Parse(oDefaults.Choice("Digits", "6", "6", "8"), CultureInfo.InvariantCulture);
-            int nPeriod = oDefaults.Number("PeriodSeconds", 30, 1, 3600);
+            int nPeriod = oDefaults.Number("PeriodSeconds", 30, 1, TotpSecret.MaximumPeriodSeconds);
             string sIssuer = oDefaults.Text("Issuer", "").Trim();
             string sAccount = oDefaults.Text("Account", "").Trim();
-            if (sIssuer.Length > 256 || sAccount.Length > 256 || sIssuer.Contains(':') || sAccount.Contains(':') ||
+            if (sIssuer.Length > TotpSecret.MaximumLabelCharacters ||
+                sAccount.Length > TotpSecret.MaximumLabelCharacters || sIssuer.Contains(':') || sAccount.Contains(':') ||
                 sIssuer.Any(Char.IsControl) || sAccount.Any(Char.IsControl))
                 throw oDefaults.Error("TotpIssuer and TotpAccount must be at most 256 characters, " +
                     "without colons or control characters.");
@@ -240,13 +242,15 @@ namespace Crypture
 
         internal static TotpSecret ReadQrImage(BitmapSource oImage)
         {
-            if (oImage == null || (long)oImage.PixelWidth * oImage.PixelHeight > Utilities.MaxItemSize / 4)
+            const int BgraBytesPerPixel = 4;
+            if (oImage == null ||
+                (long)oImage.PixelWidth * oImage.PixelHeight > Utilities.MaxItemSize / BgraBytesPerPixel)
                 throw new InvalidOperationException("Choose an image containing a setup QR code, " +
                     "and crop it to the code if the image is too large.");
 
             // Normalize WPF image formats, including transparency, without external imaging dependencies.
             FormatConvertedBitmap oBitmap = new FormatConvertedBitmap(oImage, PixelFormats.Bgra32, null, 0);
-            int nStride = oBitmap.PixelWidth * 4;
+            int nStride = oBitmap.PixelWidth * BgraBytesPerPixel;
             byte[] oPixels = new byte[nStride * oBitmap.PixelHeight];
             try
             {

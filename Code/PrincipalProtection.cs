@@ -52,11 +52,18 @@ namespace Crypture
 
     internal static class PrincipalProtection
     {
+        // Windows protection descriptor syntax.
+        private const string SidPrefix = "SID=";
         internal const string LocalUserDescriptor = "LOCAL=user";
         internal const string LocalMachineDescriptor = "LOCAL=machine";
+
+        // Limits for principal lists, descriptors, and protected key blobs.
         internal const int MaxPrincipals = 100;
         internal const int MaxDescriptorLength = 16000;
         internal const int MaxProtectedKeyLength = 1024 * 1024;
+
+        // NCrypt suppresses provider UI during protect and unprotect operations.
+        private const int SilentOperationFlag = 0x40;
 
         internal static bool IsDomainJoined
         {
@@ -73,7 +80,7 @@ namespace Crypture
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.Ordinal).ToArray();
             if (oSids.Length == 0 || oSids.Length > MaxPrincipals)
                 throw new InvalidOperationException("Select between 1 and 100 Windows users or security groups.");
-            return String.Join(bRequireAll ? " AND " : " OR ", oSids.Select(s => "SID=" + s));
+            return String.Join(bRequireAll ? " AND " : " OR ", oSids.Select(s => SidPrefix + s));
         }
 
         internal static List<ProtectionPrincipal> ParseDescriptor(string sDescriptor, out bool bRequireAll,
@@ -87,10 +94,11 @@ namespace Crypture
             bRequireAll = sDescriptor.Contains(" AND ");
             string[] oParts = sDescriptor.Split(new[] { bRequireAll ? " AND " : " OR " },
                 StringSplitOptions.None);
-            if (oParts.Length > MaxPrincipals || oParts.Any(p => !p.StartsWith("SID=", StringComparison.Ordinal)))
+            if (oParts.Length > MaxPrincipals ||
+                oParts.Any(p => !p.StartsWith(SidPrefix, StringComparison.Ordinal)))
                 throw new CryptographicException("The Windows protection policy is not supported.");
-            return oParts.Select(p => new ProtectionPrincipal(p.Substring(4),
-                bResolveNames ? null : p.Substring(4))).ToList();
+            return oParts.Select(p => new ProtectionPrincipal(p.Substring(SidPrefix.Length),
+                bResolveNames ? null : p.Substring(SidPrefix.Length))).ToList();
         }
 
         internal static void ValidateCustomDescriptor(string sDescriptor)
@@ -106,7 +114,7 @@ namespace Crypture
         {
             if (bCustomDescriptor) ValidateCustomDescriptor(sDescriptor);
             else ParseDescriptor(sDescriptor, out _, false);
-            if (oKeys == null || oKeys.Length != 64)
+            if (oKeys == null || oKeys.Length != ItemCryptography.ContentKeyBytes)
                 throw new CryptographicException("The item encryption keys are invalid.");
             if (!bCustomDescriptor && sDescriptor != LocalUserDescriptor &&
                 sDescriptor != LocalMachineDescriptor && !IsDomainJoined)
@@ -118,7 +126,7 @@ namespace Crypture
             using (oDescriptor)
             {
                 ThrowIfFailed(nStatus, "create the Windows protection policy");
-                nStatus = NCryptProtectSecret(oDescriptor, 0x40, oKeys, oKeys.Length, IntPtr.Zero,
+                nStatus = NCryptProtectSecret(oDescriptor, SilentOperationFlag, oKeys, oKeys.Length, IntPtr.Zero,
                     IntPtr.Zero, out LocalBuffer oBuffer, out int nLength);
                 using (oBuffer)
                 {
@@ -136,13 +144,13 @@ namespace Crypture
         {
             if (oProtected == null || oProtected.Length == 0 || oProtected.Length > MaxProtectedKeyLength)
                 throw new CryptographicException("The protected item key is missing or damaged.");
-            int nStatus = NCryptUnprotectSecret(IntPtr.Zero, 0x40, oProtected, oProtected.Length,
+            int nStatus = NCryptUnprotectSecret(IntPtr.Zero, SilentOperationFlag, oProtected, oProtected.Length,
                 IntPtr.Zero, IntPtr.Zero, out LocalBuffer oBuffer, out int nLength);
             using (oBuffer)
             {
                 oBuffer.ClearLength = nLength;
                 ThrowIfFailed(nStatus, "decrypt this item with your Windows account");
-                if (nLength != 64 || oBuffer.IsInvalid)
+                if (nLength != ItemCryptography.ContentKeyBytes || oBuffer.IsInvalid)
                     throw new CryptographicException("The protected item key is damaged.");
                 byte[] oKeys = new byte[nLength];
                 Marshal.Copy(oBuffer.DangerousGetHandle(), oKeys, 0, nLength);
@@ -233,7 +241,8 @@ namespace Crypture
             Cipher.CipherParams == ItemCryptography.RecoveryFormat
             ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based") + " + Recovery"
             : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
-            Cipher.CipherParams == 0 || Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
+            Cipher.CipherParams == ItemCryptography.LegacyFormat ||
+            Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
             Cipher.CipherParams == ItemCryptography.CertificateFormat
             ? "Certificate Based" : "Unsupported";
     }

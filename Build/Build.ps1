@@ -37,8 +37,11 @@ try
     $version = [string] $projectSource.Project.PropertyGroup[0].Version
     $packageName = "Crypture-$version-portable.zip"
     $destination = Join-Path $OutputDirectory $packageName
+    $runtimePrefix = 'win-'
     $runtimes = @($RuntimeIdentifier | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
-    $installerNames = @($runtimes | ForEach-Object { "Crypture-$($_.Substring(4))-$version-installer.msi" })
+    $installerNames = @($runtimes | ForEach-Object {
+        "Crypture-$($_.Substring($runtimePrefix.Length))-$version-installer.msi"
+    })
     foreach ($name in @($packageName) + $installerNames)
     {
         $output = Join-Path $OutputDirectory $name
@@ -131,7 +134,7 @@ try
 
     foreach ($runtimeId in $runtimes)
     {
-        $architecture = $runtimeId.Substring(4)
+        $architecture = $runtimeId.Substring($runtimePrefix.Length)
         $publishDirectory = Join-Path (Join-Path $stage 'Publish') $architecture
         New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
         Invoke-Tool $dotnet @('restore', $project, '--runtime', $runtimeId, '--verbosity', 'minimal',

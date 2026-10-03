@@ -35,12 +35,13 @@ namespace Crypture
 
             using (X509Chain oChain = new X509Chain())
             {
+                const int ChainRetrievalTimeoutSeconds = 10;
                 Properties.Settings oSettings = Properties.Settings.Default;
                 oChain.ChainPolicy.TrustMode = X509ChainTrustMode.System;
                 oChain.ChainPolicy.RevocationMode = oSettings.PerformCertificateRevocationCheck
                     ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
                 oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
-                oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(10);
+                oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(ChainRetrievalTimeoutSeconds);
 
                 // build the chain based on the specified policy
                 if (oChain.Build(oCert)) return true;
@@ -83,8 +84,13 @@ namespace Crypture
 
         internal static bool IsSelfSigned(X509Certificate2 oCert)
         {
+            // Wincrypt signature verification encoding and certificate subject types.
+            const uint X509AsnEncoding = 1;
+            const uint CertificateSubjectType = 2;
+            const uint CertificateIssuerType = 2;
             return oCert.SubjectName.RawData.SequenceEqual(oCert.IssuerName.RawData) &&
-                NativeMethods.CryptVerifyCertificateSignatureEx(IntPtr.Zero, 1, 2, oCert.Handle, 2,
+                NativeMethods.CryptVerifyCertificateSignatureEx(IntPtr.Zero, X509AsnEncoding,
+                    CertificateSubjectType, oCert.Handle, CertificateIssuerType,
                     oCert.Handle, 0, IntPtr.Zero);
         }
 
@@ -185,7 +191,8 @@ namespace Crypture
             HashSet<string> oUsages = oEnhancedUsage == null ? new HashSet<string>() :
                 oEnhancedUsage.EnhancedKeyUsages.Cast<Oid>().Select(o => o.Value).ToHashSet(StringComparer.Ordinal);
             if (oExcludedEnhancedUsages.Overlaps(oUsages)) return false;
-            bool bUnrestricted = oUsages.Count == 0 || oUsages.Contains("2.5.29.37.0");
+            const string AnyExtendedKeyUsageOid = "2.5.29.37.0";
+            bool bUnrestricted = oUsages.Count == 0 || oUsages.Contains(AnyExtendedKeyUsageOid);
             return bUnrestricted ? bAllowUnrestrictedEnhancedUsage :
                 oIncludedEnhancedUsages.Count == 0 || oIncludedEnhancedUsages.Overlaps(oUsages);
         }

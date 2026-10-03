@@ -76,16 +76,28 @@ namespace Crypture
                         "FROM Item i LEFT JOIN Cipher c ON i.ItemId = c.ItemId";
                     using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
+                        const int ItemIdColumn = 0;
+                        const int LabelColumn = 1;
+                        const int CipherFormatColumn = 2;
+                        const int ProtectionDescriptorColumn = 3;
+                        const int ProtectedKeyColumn = 4;
+                        const int ContentSuiteColumn = 5;
                         while (oReader.Read())
                         {
                             oCancellation.ThrowIfCancellationRequested();
-                            Item oItem = new Item { ItemId = oReader.GetInt64(0), Label = oReader.GetString(1) };
-                            if (!oReader.IsDBNull(2)) oItem.Cipher = new Cipher
+                            Item oItem = new Item
                             {
-                                CipherParams = oReader.GetInt64(2),
-                                ProtectionDescriptor = oReader.IsDBNull(3) ? null : oReader.GetString(3),
-                                ProtectedKey = oReader.IsDBNull(4) ? null : (byte[])oReader.GetValue(4),
-                                ContentSuite = oReader.IsDBNull(5) ? null : oReader.GetInt64(5)
+                                ItemId = oReader.GetInt64(ItemIdColumn), Label = oReader.GetString(LabelColumn)
+                            };
+                            if (!oReader.IsDBNull(CipherFormatColumn)) oItem.Cipher = new Cipher
+                            {
+                                CipherParams = oReader.GetInt64(CipherFormatColumn),
+                                ProtectionDescriptor = oReader.IsDBNull(ProtectionDescriptorColumn) ? null
+                                    : oReader.GetString(ProtectionDescriptorColumn),
+                                ProtectedKey = oReader.IsDBNull(ProtectedKeyColumn) ? null
+                                    : (byte[])oReader.GetValue(ProtectedKeyColumn),
+                                ContentSuite = oReader.IsDBNull(ContentSuiteColumn) ? null
+                                    : oReader.GetInt64(ContentSuiteColumn)
                             };
                             oItems.Add(oItem.ItemId, oItem);
                         }
@@ -93,25 +105,31 @@ namespace Crypture
                     oCommand.CommandText = "SELECT UserId, Certificate, Sid FROM [User]";
                     using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
+                        const int RecipientIdColumn = 0;
+                        const int CertificateColumn = 1;
+                        const int SidColumn = 2;
                         while (oReader.Read())
                         {
                             oCancellation.ThrowIfCancellationRequested();
                             oUsers.Add(new User
                             {
-                                UserId = oReader.GetInt64(0),
-                                Certificate = oReader.IsDBNull(1) ? null : (byte[])oReader.GetValue(1),
-                                Sid = oReader.IsDBNull(2) ? null : oReader.GetString(2)
+                                UserId = oReader.GetInt64(RecipientIdColumn),
+                                Certificate = oReader.IsDBNull(CertificateColumn) ? null
+                                    : (byte[])oReader.GetValue(CertificateColumn),
+                                Sid = oReader.IsDBNull(SidColumn) ? null : oReader.GetString(SidColumn)
                             });
                         }
                     }
                     oCommand.CommandText = "SELECT ItemId, UserId FROM Instance";
                     using (DbDataReader oReader = oCommand.ExecuteReader())
                     {
+                        const int ItemIdColumn = 0;
+                        const int RecipientIdColumn = 1;
                         while (oReader.Read())
                         {
                             oCancellation.ThrowIfCancellationRequested();
-                            if (oItems.TryGetValue(oReader.GetInt64(0), out Item oItem))
-                                oItem.Instances.Add(new Instance { UserId = oReader.GetInt64(1) });
+                            if (oItems.TryGetValue(oReader.GetInt64(ItemIdColumn), out Item oItem))
+                                oItem.Instances.Add(new Instance { UserId = oReader.GetInt64(RecipientIdColumn) });
                         }
                     }
                     oTransaction.Commit();
@@ -199,7 +217,7 @@ namespace Crypture
                     oReport.Findings.Add(oPolicy);
                     continue;
                 }
-                if (oItem.Cipher.CipherParams != 0 &&
+                if (oItem.Cipher.CipherParams != ItemCryptography.LegacyFormat &&
                     oItem.Cipher.CipherParams != ItemCryptography.AuthenticatedFormat &&
                     oItem.Cipher.CipherParams != ItemCryptography.CertificateFormat)
                     oPolicy.Add(HealthStatus.Error, "The saved protection format is not supported.");
@@ -299,6 +317,7 @@ namespace Crypture
 
         internal static HealthCheckFinding CheckPrincipal(string sSid, IEnumerable<Item> oItems)
         {
+            const int AccountDisabledFlag = 0x2;
             HealthCheckFinding oResult = Finding("Windows Principal", sSid, sSid, oItems);
             try
             {
@@ -326,7 +345,8 @@ namespace Crypture
                         }
                         oResult.Add(HealthStatus.Passed, "Located in Active Directory: " +
                             oEntry.Properties["distinguishedName"].Value);
-                        if (oEntry.Properties["userAccountControl"].Value is int nFlags && (nFlags & 2) != 0)
+                        if (oEntry.Properties["userAccountControl"].Value is int nFlags &&
+                            (nFlags & AccountDisabledFlag) != 0)
                             oResult.Add(HealthStatus.Warning, "The directory account is disabled.");
                     }
                 }
@@ -354,6 +374,7 @@ namespace Crypture
         internal static HealthCheckFinding CheckCertificate(User oUser, IEnumerable<Item> oItems,
             bool bAllowSelfSigned, bool bCheckRevocation, DateTime oNow)
         {
+            const int ExpiryWarningDays = 30;
             HealthCheckFinding oResult = Finding("Certificate", "Certificate #" + oUser.UserId,
                 "Certificate #" + oUser.UserId, oItems);
             try
@@ -372,7 +393,7 @@ namespace Crypture
                         oResult.Add(HealthStatus.Error, "The certificate is not yet valid.");
                     if (oCert.NotAfter.ToUniversalTime() < oNow)
                         oResult.Add(HealthStatus.Error, "The certificate has expired.");
-                    else if (oCert.NotAfter.ToUniversalTime() <= oNow.AddDays(30))
+                    else if (oCert.NotAfter.ToUniversalTime() <= oNow.AddDays(ExpiryWarningDays))
                         oResult.Add(HealthStatus.Warning, "The certificate expires within 30 days.");
                     try
                     {
@@ -391,10 +412,11 @@ namespace Crypture
                     }
                     using (X509Chain oChain = new X509Chain())
                     {
+                        const int ChainRetrievalTimeoutSeconds = 10;
                         oChain.ChainPolicy.RevocationMode = bCheckRevocation
                             ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
                         oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
-                        oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(10);
+                        oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(ChainRetrievalTimeoutSeconds);
                         oChain.ChainPolicy.VerificationTime = oNow;
                         bool bValid = oChain.Build(oCert);
                         bool bAllowedSelfSigned = bAllowSelfSigned && oChain.ChainElements.Count == 1 &&

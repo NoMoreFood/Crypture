@@ -158,12 +158,15 @@ namespace Crypture
 
         public void Validate()
         {
+            const int VaultMarkerId = 1;
+            const int SupportedSchemaVersion = 1;
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);
             oConnection.Open();
             using SqlCommand oCommand = new SqlCommand(
-                "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = 1", oConnection);
-            if (oCommand.ExecuteScalar() is not int nVersion || nVersion != 1)
+                "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = @id", oConnection);
+            oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
+            if (oCommand.ExecuteScalar() is not int nVersion || nVersion != SupportedSchemaVersion)
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
         }
 

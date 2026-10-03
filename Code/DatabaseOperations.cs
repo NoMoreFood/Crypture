@@ -126,6 +126,8 @@ namespace Crypture
 
         internal static void EnsureProtectionSchema(string sPath)
         {
+            // Each schema descriptor starts with its table name.
+            const int TableNameIndex = 0;
             using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = sPath, ForeignKeys = true, Mode = SqliteOpenMode.ReadWrite, Pooling = false
@@ -143,13 +145,14 @@ namespace Crypture
                         new[] { "User", "UserId", "Certificate", "Sid" }
                     })
                     {
-                        string sTable = oTable[0];
+                        const int FirstRequiredColumnIndex = 1;
+                        string sTable = oTable[TableNameIndex];
                         HashSet<string> oNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         using (SqliteCommand oCommand = new SqliteCommand(
                             "PRAGMA table_info([" + sTable + "])", oConnection, oTransaction))
                         using (SqliteDataReader oReader = oCommand.ExecuteReader())
-                            while (oReader.Read()) oNames.Add(oReader.GetString(1));
-                        if (oTable.Skip(1).Any(c => !oNames.Contains(c)))
+                            while (oReader.Read()) oNames.Add(oReader.GetString(oReader.GetOrdinal("name")));
+                        if (oTable.Skip(FirstRequiredColumnIndex).Any(c => !oNames.Contains(c)))
                             throw new InvalidDataException("This is not a supported Crypture Vault.");
                         oColumns.Add(sTable, oNames);
                     }
@@ -163,9 +166,13 @@ namespace Crypture
                         new[] { "Cipher", "Signature", "blob" }
                     })
                     {
-                        if (oColumns[oColumn[0]].Contains(oColumn[1])) continue;
-                        using (SqliteCommand oCommand = new SqliteCommand("ALTER TABLE [" + oColumn[0] +
-                            "] ADD COLUMN [" + oColumn[1] + "] " + oColumn[2] + " NULL", oConnection, oTransaction))
+                        // Upgrade entries contain a table, column name, and SQL type.
+                        const int ColumnNameIndex = 1;
+                        const int ColumnTypeIndex = 2;
+                        if (oColumns[oColumn[TableNameIndex]].Contains(oColumn[ColumnNameIndex])) continue;
+                        using (SqliteCommand oCommand = new SqliteCommand("ALTER TABLE [" + oColumn[TableNameIndex] +
+                            "] ADD COLUMN [" + oColumn[ColumnNameIndex] + "] " +
+                            oColumn[ColumnTypeIndex] + " NULL", oConnection, oTransaction))
                             oCommand.ExecuteNonQuery();
                     }
                     using (SqliteCommand oCommand = new SqliteCommand(
