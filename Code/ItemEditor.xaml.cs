@@ -460,11 +460,23 @@ namespace Crypture
         private void SetBusy(bool bEnabled, string sStatus = null)
         {
             bBusy = bEnabled;
-            ribbon.IsEnabled = !bEnabled;
-            oEditorPanels.IsEnabled = !bEnabled;
+            bool bConcealed = oPrivacyShield.Visibility == Visibility.Visible;
+            ribbon.IsEnabled = !bEnabled && !bConcealed;
+            oEditorPanels.IsEnabled = !bEnabled && !bConcealed;
             Cursor = bEnabled ? Cursors.Wait : null;
             if (bEnabled) oItemStatus.Text = sStatus;
-            else SetEditingControls(bEditing);
+            else
+            {
+                SetEditingControls(bEditing);
+                if (bConcealed && !bHasChanges && ThisItem.ItemId != 0 && bEditing)
+                {
+                    LockItem();
+                    oPrivacyMessage.Text = "This saved item was locked. Choose Reveal to return to the editor.";
+                }
+                else if (bConcealed) oPrivacyMessage.Text = bEditing
+                    ? "This editor is concealed. Unsaved edits remain here. Choose Reveal to continue."
+                    : "This item is locked. Choose Reveal to return to the editor.";
+            }
         }
 
         private void LoadProtection()
@@ -695,6 +707,11 @@ namespace Crypture
         private void oLockItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (!ConfirmDiscard()) return;
+            LockItem();
+        }
+
+        private void LockItem()
+        {
             ClearPlainText();
             bLoading = true;
             ThisItem.Label = sStoredLabel;
@@ -710,6 +727,37 @@ namespace Crypture
             SetEditingControls(false);
             bHasChanges = false;
             bLoading = false;
+        }
+
+        internal void ConcealSecrets()
+        {
+            if (oPrivacyShield.Visibility == Visibility.Visible || !bEditing && !bBusy) return;
+
+            // Preserve drafts and in-flight operations behind an opaque, disabled view.
+            bool bCanLock = !bBusy && !bHasChanges && ThisItem.ItemId != 0;
+            oPrivacyMessage.Text = bCanLock
+                ? "This saved item was locked. Choose Reveal to return to the editor."
+                : bBusy ? "The current operation is finishing. Choose Reveal when it completes."
+                : "This editor is concealed. Unsaved edits remain here. Choose Reveal to continue.";
+            oPrivacyShield.Visibility = Visibility.Visible;
+            ribbon.IsEnabled = false;
+            oEditorPanels.IsEnabled = false;
+            oEditorPanels.Visibility = Visibility.Collapsed;
+            Keyboard.ClearFocus();
+            oRevealButton.Focus();
+            if (bCanLock) LockItem();
+        }
+
+        private void oRevealButton_Click(object sender, RoutedEventArgs e)
+        {
+            oEditorPanels.Visibility = Visibility.Visible;
+            oPrivacyShield.Visibility = Visibility.Collapsed;
+            ribbon.IsEnabled = !bBusy;
+            oEditorPanels.IsEnabled = !bBusy;
+            if (bEditing && bHasChanges) oItemStatus.Text = "Unsaved edits restored. Encrypt & Save to keep them.";
+            else if (!bBusy) SetEditingControls(bEditing);
+            if (bEditing) oItemData.Focus();
+            else oLoadItemButton.Focus();
         }
 
         private void oItemTypeChanged(object sender, SelectionChangedEventArgs e)
@@ -733,6 +781,11 @@ namespace Crypture
 
         private void oRootWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (oPrivacyShield.Visibility == Visibility.Visible)
+            {
+                if (!oRevealButton.IsKeyboardFocusWithin) e.Handled = true;
+                return;
+            }
             if (bBusy || Keyboard.Modifiers != ModifierKeys.Control) return;
             if (e.Key == Key.S && oSaveItemButton.IsEnabled) oSaveItemButton_Click(sender, e);
             else if (e.Key == Key.L && oLockItemButton.IsEnabled) oLockItemButton_Click(sender, e);

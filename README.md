@@ -90,10 +90,9 @@ Crypture follows the Windows app color setting by default. **View → Appearance
 Setting**, **Light**, and **Dark**; your choice is remembered per Windows account. Windows-owned dialogs retain
 their system appearance.
 
-Copying or cutting protected text or a generated password starts an automatic **five-minute clipboard timeout**.
-Newer clipboard contents are left alone. Closing the editor or generator keeps the timer active; exiting Crypture
-also attempts to clear its unchanged clipboard content. Clipboard history, managers, and already pasted copies are
-unaffected.
+Copying or cutting protected text or a generated password starts a clipboard timeout configured by `ClipboardTimeoutSeconds` (five minutes by default). Crypture marks these copies to exclude them from Windows clipboard history and cloud sync. It leaves newer clipboard contents alone, keeps the timer active if the editor or generator closes, and attempts to clear its unchanged copy when Crypture exits. Other clipboard managers and already pasted copies may retain the text.
+
+Windows session lock or disconnect conceals open secrets. Crypture also conceals them after `AutoConcealIdleMinutes` of inactivity in the app (ten minutes by default; set it to `0` to disable idle concealment). Saved items with no unsaved changes are locked and cleared. Unsaved edits and generated passwords stay in memory behind a disabled, opaque view until you choose **Reveal**; closing an editor still prompts before discarding unsaved edits.
 
 ## Vault Health Check
 
@@ -126,11 +125,7 @@ settings. Lookups run in the background and can be cancelled between requests.
 
 ## Encryption and Privacy
 
-Saving an item uses **AES-256-CBC with HMAC-SHA256**, authenticating the label, item type, IV, and ciphertext before
-decryption. Windows protection wraps both keys with DPAPI-NG and also authenticates the descriptor and protected key
-blob. Certificate items use authenticated recipient envelopes: RSA-OAEP-SHA1 for provider compatibility, or
-ECDH/ML-KEM with SP800-108 HMAC-SHA256 key derivation and AES-256-GCM key wrapping. Cryptographic operations use
-Windows/.NET primitives.
+New saves use **AES-256-GCM** by default. Set `ContentEncryptionSuite` to `Aes256CbcHmacSha256` to use **AES-256-CBC with HMAC-SHA256** for new saves instead. Both suites authenticate the item's metadata and encrypted content before revealing plaintext. Each saved item records its suite, so changing the default does not change existing items until they are saved again. Windows protection wraps content keys with DPAPI-NG and authenticates the descriptor and protected key blob. Certificate items use authenticated recipient envelopes: RSA-OAEP-SHA1 for provider compatibility, or ECDH/ML-KEM with SP800-108 HMAC-SHA256 key derivation and AES-256-GCM key wrapping. Cryptographic operations use Windows/.NET primitives.
 
 Labels, timestamps, modifier identities, recipient certificates, and Windows protection descriptors remain visible.
 Certificate access depends on the private key, not its account label. Legacy items remain readable and show a notice

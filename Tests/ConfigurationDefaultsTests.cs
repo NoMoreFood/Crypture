@@ -39,8 +39,11 @@ internal static partial class RegressionTests
                 ItemBrowser oBrowser = (ItemBrowser)oApp.MainWindow;
                 Check(oBrowser.IsLoaded && ((CheckBox)oBrowser.FindName("oHideAccessible")).IsChecked == true &&
                     ((Ribbon)oBrowser.FindName("ribbon")).IsMinimized &&
-                    ItemBrowser.RecentVaultLimit == 2 && ClipboardExpiration.Timeout == TimeSpan.FromSeconds(2),
-                    "Fresh application startup uses configured browser and clipboard defaults");
+                    ItemBrowser.RecentVaultLimit == 2 && ClipboardExpiration.Timeout == TimeSpan.FromSeconds(2) &&
+                    App.PrivacyIdleTimeout == TimeSpan.FromMinutes(1) &&
+                    ((System.Windows.Threading.DispatcherTimer)typeof(App).GetField("oPrivacyTimer",
+                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oApp)).IsEnabled,
+                    "Fresh application startup uses configured browser, clipboard, and idle defaults");
                 bPassed = true;
             }
             catch (Exception oError) { Console.Error.WriteLine(oError); }
@@ -333,7 +336,8 @@ internal static partial class RegressionTests
 
             // Browser, report, and clipboard behavior use the same adjacent defaults.
             Configure(("HideMissingCertificateKeys", "True"), ("RibbonMinimized", "True"),
-                ("HealthCheckShowOnlyIssues", "True"), ("RecentVaultLimit", "2"), ("ClipboardTimeoutSeconds", "2"));
+                ("HealthCheckShowOnlyIssues", "True"), ("RecentVaultLimit", "2"),
+                ("ClipboardTimeoutSeconds", "2"), ("AutoConcealIdleMinutes", "1"));
             ItemBrowser oBrowser = Keep(new ItemBrowser());
             VaultHealthWindow oHealth = Keep(new VaultHealthWindow(sVault));
             oSettings.RecentVaults = new StringCollection();
@@ -399,6 +403,10 @@ internal static partial class RegressionTests
             Check(oSettings.RecentVaults.Count == 0, "A zero history limit stops retaining Vault paths");
             Configure(("ClipboardTimeoutSeconds", "0"));
             Invalid(() => { _ = ClipboardExpiration.Timeout; }, "ClipboardTimeoutSeconds");
+            Configure(("AutoConcealIdleMinutes", "0"));
+            Check(App.PrivacyIdleTimeout == TimeSpan.Zero, "Zero disables idle concealment");
+            Configure(("AutoConcealIdleMinutes", "1441"));
+            Invalid(() => { _ = App.PrivacyIdleTimeout; }, "AutoConcealIdleMinutes");
             Configure(("RecentVaultLimit", "invalid"));
             Invalid(() => Keep(new ItemBrowser()), "RecentVaultLimit");
             Configure(("HideMissingCertificateKeys", "yes"));
@@ -420,7 +428,8 @@ internal static partial class RegressionTests
                 ((TextBox)oBuiltInWizard.FindName("oKeyLengthTextBox")).Text == "2048" &&
                 ((DatePicker)oBuiltInWizard.FindName("oValidUntilDatePicker")).SelectedDate ==
                     DateTime.Today.AddYears(3) &&
-                ClipboardExpiration.Timeout == TimeSpan.FromMinutes(5) && ItemBrowser.RecentVaultLimit == 10 &&
+                ClipboardExpiration.Timeout == TimeSpan.FromMinutes(5) &&
+                App.PrivacyIdleTimeout == TimeSpan.FromMinutes(10) && ItemBrowser.RecentVaultLimit == 10 &&
                 !File.Exists(sPath), "Missing configuration retains built-in defaults without creating a file");
         }
         finally

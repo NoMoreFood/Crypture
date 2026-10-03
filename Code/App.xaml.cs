@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -23,6 +24,11 @@ namespace Crypture
         internal static bool IsDarkMode { get; private set; }
         private static bool bThemeApplied;
         private static readonly ClipboardExpiration oClipboardExpiration = new ClipboardExpiration();
+        private DispatcherTimer oPrivacyTimer;
+        private DateTime oLastActivityUtc;
+        internal const string ClipboardExclusionFormat = "ExcludeClipboardContentFromMonitorProcessing";
+        internal static TimeSpan PrivacyIdleTimeout => TimeSpan.FromMinutes(
+            new ConfigurationDefaults().Number("AutoConcealIdleMinutes", 10, 0, 1440));
 
         static App()
         {
@@ -40,9 +46,24 @@ namespace Crypture
             // Surface invalid startup defaults before opening the main window.
             try
             {
+                TimeSpan oIdleTimeout = PrivacyIdleTimeout;
                 ApplyThemePreference();
                 MainWindow = new ItemBrowser();
                 MainWindow.Show();
+
+                // Conceal secrets after Crypture inactivity or a Windows session disconnect.
+                SystemEvents.SessionSwitch += OnSessionSwitch;
+                if (oIdleTimeout > TimeSpan.Zero)
+                {
+                    oLastActivityUtc = DateTime.UtcNow;
+                    InputManager.Current.PreProcessInput += OnInput;
+                    oPrivacyTimer = new DispatcherTimer(TimeSpan.FromSeconds(15), DispatcherPriority.Background,
+                        (s, args) =>
+                        {
+                            if (DateTime.UtcNow - oLastActivityUtc >= oIdleTimeout) ConcealOpenSecrets();
+                        }, Dispatcher);
+                    oPrivacyTimer.Start();
+                }
             }
             catch (Exception oError)
             {
@@ -62,14 +83,28 @@ namespace Crypture
         {
             // Validate the timeout before placing any secret on the clipboard.
             TimeSpan oTimeout = ClipboardExpiration.Timeout;
-            Clipboard.SetText(sText);
+            Clipboard.SetDataObject(CreateProtectedClipboardData(sText), true);
             oClipboardExpiration.TrackCopy(oTimeout);
             return oTimeout;
+        }
+
+        internal static DataObject CreateProtectedClipboardData(string sText)
+        {
+            DataObject oData = new DataObject();
+            oData.SetText(sText);
+            oData.SetData(DataFormats.GetDataFormat(ClipboardExclusionFormat).Name, new byte[] { 0 }, false);
+            return oData;
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+            if (oPrivacyTimer != null)
+            {
+                oPrivacyTimer.Stop();
+                InputManager.Current.PreProcessInput -= OnInput;
+            }
             oClipboardExpiration.Dispose();
             base.OnExit(e);
         }
@@ -82,6 +117,30 @@ namespace Crypture
             {
                 if (!oApplication.Dispatcher.HasShutdownStarted) ApplyThemePreference();
             }), DispatcherPriority.Background);
+        }
+
+        private void OnInput(object sender, PreProcessInputEventArgs e)
+        {
+            if (e.StagingItem.Input is KeyEventArgs or MouseEventArgs or TouchEventArgs)
+                oLastActivityUtc = DateTime.UtcNow;
+        }
+
+        private static void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            if (e.Reason is not (SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or
+                SessionSwitchReason.RemoteDisconnect)) return;
+            Application oApplication = Current;
+            if (oApplication == null || oApplication.Dispatcher.HasShutdownStarted) return;
+            oApplication.Dispatcher.BeginInvoke(new Action(ConcealOpenSecrets), DispatcherPriority.Send);
+        }
+
+        internal static void ConcealOpenSecrets()
+        {
+            foreach (Window oWindow in Current.Windows)
+            {
+                if (oWindow is ItemEditor oEditor) oEditor.ConcealSecrets();
+                else if (oWindow is PasswordGenerator oGenerator) oGenerator.ConcealSecrets();
+            }
         }
 
         internal static void ApplyThemePreference()

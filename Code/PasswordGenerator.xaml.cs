@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Input;
 
 namespace Crypture
 {
@@ -107,6 +108,30 @@ namespace Crypture
             if (oGeneratedPassword.Text.Length == 0) return;
             SelectedPassword = oGeneratedPassword.Text;
             DialogResult = true;
+        }
+
+        internal void ConcealSecrets()
+        {
+            if (oGeneratedPassword.Text.Length == 0 || oPrivacyShield.Visibility == Visibility.Visible) return;
+
+            // Keep a generated password available without leaving it visible after inactivity.
+            oPrivacyShield.Visibility = Visibility.Visible;
+            oGeneratorContent.IsEnabled = false;
+            oGeneratorActions.IsEnabled = false;
+            oGeneratorContent.Visibility = Visibility.Collapsed;
+            oGeneratorActions.Visibility = Visibility.Collapsed;
+            Keyboard.ClearFocus();
+            oRevealButton.Focus();
+        }
+
+        private void oRevealButton_Click(object sender, RoutedEventArgs e)
+        {
+            oGeneratorContent.Visibility = Visibility.Visible;
+            oGeneratorActions.Visibility = Visibility.Visible;
+            oPrivacyShield.Visibility = Visibility.Collapsed;
+            oGeneratorContent.IsEnabled = true;
+            oGeneratorActions.IsEnabled = true;
+            oGeneratedPassword.Focus();
         }
 
         private void oWindow_Closed(object sender, EventArgs e)

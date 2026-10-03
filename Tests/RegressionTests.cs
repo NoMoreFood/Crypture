@@ -752,6 +752,7 @@ internal static partial class RegressionTests
                 .Invoke(oEditor, new object[] { null, null });
             Check(oContent.Text.Length == 0 && oEditor.BinaryItemData == null && oBuffer.All(b => b == 0),
                 "Lock clears text and binary buffers while Vault is unavailable");
+            TestPrivacyConcealment(oEditor);
             oEditor.Close();
             oEditor = null;
             CryptureEntities.DatabasePath = sDatabase;
@@ -969,6 +970,11 @@ internal static partial class RegressionTests
 
     private static void TestClipboardTimeout()
     {
+        DataObject oProtectedCopy = App.CreateProtectedClipboardData("Private clipboard value");
+        Check(oProtectedCopy.GetText() == "Private clipboard value" &&
+            oProtectedCopy.GetDataPresent(App.ClipboardExclusionFormat),
+            "Protected copies retain text and carry the Windows history and cloud exclusion format");
+
         DateTime oNow = new DateTime(2026, 9, 28, 12, 0, 0, DateTimeKind.Utc);
         uint nCurrent = 1;
         int nClears = 0, nAttempts = 0;
