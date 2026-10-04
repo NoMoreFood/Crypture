@@ -117,7 +117,7 @@
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
         </ribbon:Ribbon>
-        <DockPanel Grid.Row="1" Margin="12,8">
+        <DockPanel x:Name="oSearchPanel" Grid.Row="1" Margin="12,8">
             <Label Content="_Search:" Target="{Binding ElementName=oSearchTextBox}"
                 Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE721;" />
             <TextBox x:Name="oSearchTextBox" MinHeight="28" Padding="6,3" IsEnabled="False"
@@ -221,10 +221,23 @@
             HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" Margin="24"
             Foreground="{DynamicResource Crypture.MutedBrush}" IsHitTestVisible="False" />
         <StatusBar Grid.Row="3">
-            <StatusBarItem><TextBlock x:Name="oDatabaseStatus" Text="No Vault Open" MaxWidth="660"
-                TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" /></StatusBarItem>
-            <Separator />
-            <StatusBarItem><TextBlock x:Name="oCountStatus" /></StatusBarItem>
+            <StatusBar.ItemsPanel>
+                <ItemsPanelTemplate><DockPanel LastChildFill="True" /></ItemsPanelTemplate>
+            </StatusBar.ItemsPanel>
+            <StatusBarItem DockPanel.Dock="Right">
+                <Button x:Name="oCancelVaultOperationButton" Content="_Cancel" Padding="8,2"
+                    Visibility="Collapsed" Click="oCancelVaultOperationButton_Click" />
+            </StatusBarItem>
+            <StatusBarItem DockPanel.Dock="Right">
+                <ProgressBar x:Name="oVaultProgress" Width="70" Height="12" IsIndeterminate="True"
+                    Visibility="Collapsed" AutomationProperties.Name="Vault operation in progress" />
+            </StatusBarItem>
+            <StatusBarItem DockPanel.Dock="Right"><TextBlock x:Name="oCountStatus" /></StatusBarItem>
+            <Separator DockPanel.Dock="Right" />
+            <StatusBarItem HorizontalContentAlignment="Stretch">
+                <TextBlock x:Name="oDatabaseStatus" Text="No Vault Open" MaxWidth="660"
+                    TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+            </StatusBarItem>
         </StatusBar>
     </Grid>
 </Window>

@@ -752,7 +752,7 @@ namespace Crypture
 
             if (!Utilities.TryOperation(this, () =>
             {
-                DatabaseOperations.DeleteItem(ThisItem.ItemId);
+                DatabaseOperations.DeleteItem(ThisItem);
             })) return;
             bCompleted = true;
             Close();

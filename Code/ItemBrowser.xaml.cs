@@ -15,6 +15,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Ribbon;
@@ -41,6 +43,10 @@ namespace Crypture
         private bool bCanEnrollCertificates = true;
         private List<User> CertificateList = new List<User>();
         private HashSet<string> PrivateCertificates = new HashSet<string>();
+        private CancellationTokenSource oVaultCancellation;
+
+        private sealed record VaultView(List<Item> Items, List<User> Users, HashSet<string> PrivateCertificates,
+            string DisplayName, string Title, string RecentEntry, bool CanEnroll, bool CanBackup);
 
         internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier, bool bFromDirectory = false)
         {
@@ -153,7 +159,7 @@ namespace Crypture
             Utilities.TryOperation(this, () =>
             {
                 if (oObject is User oUser) DatabaseOperations.RemoveCertificate(oUser.UserId);
-                else DatabaseOperations.DeleteItem(((Item)oObject).ItemId);
+                else DatabaseOperations.DeleteItem((Item)oObject);
                 oRefreshItemButton_Click();
             });
         }
@@ -360,30 +366,45 @@ namespace Crypture
             });
         }
 
-        private void oRefreshItemButton_Click(object sender = null, RoutedEventArgs e = null)
+        private async void oRefreshItemButton_Click(object sender = null, RoutedEventArgs e = null)
         {
             if (String.IsNullOrEmpty(sDatabasePath)) return;
-            Utilities.TryOperation(this, RefreshData);
+            await RunVaultOperationAsync("Refreshing Vault...", async oCancellation =>
+            {
+                var oData = await ReadVaultDataAsync(CryptureEntities.Storage, oCancellation);
+                oCancellation.ThrowIfCancellationRequested();
+                ApplyVaultData(oData.Items, oData.Users, oData.PrivateCertificates);
+            });
         }
 
         private void RefreshData()
         {
-            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlStorage) oSqlStorage.RefreshEscrow();
+            var oData = ReadVaultDataAsync(CryptureEntities.Storage, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            ApplyVaultData(oData.Items, oData.Users, oData.PrivateCertificates);
+        }
+
+        private static async Task<(List<Item> Items, List<User> Users, HashSet<string> PrivateCertificates)>
+            ReadVaultDataAsync(IVaultStorage oStorage, CancellationToken oCancellation)
+        {
+            if (oStorage is SqlServerVaultStorage oSqlStorage)
+                await oSqlStorage.RefreshEscrowAsync(oCancellation).ConfigureAwait(false);
             List<Item> oItems = null;
             List<User> oUsers = null;
-            HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
-            using (CryptureEntities oContent = new CryptureEntities())
+            HashSet<string> oPrivate = await Task.Run(CertificateOperations.GetPrivateCertificateData, oCancellation)
+                .ConfigureAwait(false);
+            using (CryptureEntities oContent = new CryptureEntities(oStorage))
             {
                 // Keep item rows, recipients, and protection metadata in one read snapshot during concurrent saves.
-                CryptureEntities.Storage.ReadSnapshot(oContent, () =>
+                await oStorage.ReadSnapshotAsync(oContent, async () =>
                 {
-                    oItems = oContent.Items.Include(i => i.User).Include(i => i.Instances)
-                        .ThenInclude(j => j.User).ToList();
-                    oUsers = oContent.Users.ToList();
-                    var oProtection = oContent.Ciphers.Select(c => new
+                    oItems = await oContent.Items.Include(i => i.User).Include(i => i.Instances)
+                        .ThenInclude(j => j.User).ToListAsync(oCancellation).ConfigureAwait(false);
+                    oUsers = await oContent.Users.ToListAsync(oCancellation).ConfigureAwait(false);
+                    var oProtection = await oContent.Ciphers.Select(c => new
                     {
                         c.ItemId, c.CipherParams, c.ProtectionDescriptor, c.EscrowLabel
-                    }).ToDictionary(c => c.ItemId);
+                    }).ToDictionaryAsync(c => c.ItemId, oCancellation).ConfigureAwait(false);
                     foreach (Item oItem in oItems)
                     {
                         if (!oProtection.TryGetValue(oItem.ItemId, out var oPolicy)) continue;
@@ -393,10 +414,15 @@ namespace Crypture
                             EscrowLabel = oPolicy.EscrowLabel
                         };
                     }
-                });
+                }, oCancellation).ConfigureAwait(false);
             }
-            ItemList = new ObservableCollection<Item>(oItems.OrderBy(i => i.Label));
-            CertificateList = oUsers.OrderBy(u => u.Name).ToList();
+            return (oItems.OrderBy(i => i.Label).ToList(), oUsers.OrderBy(u => u.Name).ToList(), oPrivate);
+        }
+
+        private void ApplyVaultData(List<Item> oItems, List<User> oUsers, HashSet<string> oPrivate)
+        {
+            ItemList = new ObservableCollection<Item>(oItems);
+            CertificateList = oUsers;
             PrivateCertificates = oPrivate;
             ApplyFilter();
         }
@@ -482,11 +508,11 @@ namespace Crypture
             });
         }
 
-        private static void AddAutomaticCertificates()
+        private static void AddAutomaticCertificates(IVaultStorage oStorage)
         {
             // SQL Server certificates require explicit owner enrollment and cannot be inserted from local settings.
-            if (CryptureEntities.Storage.IsSqlServer) return;
-            using (CryptureEntities oContent = new CryptureEntities())
+            if (oStorage.IsSqlServer) return;
+            using (CryptureEntities oContent = new CryptureEntities(oStorage))
             {
                 List<User> oUsers = oContent.Users.ToList();
                 // cycle through mandatory certificates to add
@@ -510,63 +536,14 @@ namespace Crypture
 
         private bool LoadVault(IVaultStorage oStorage, bool bCreate, bool bEnableControls = true)
         {
-            const int SchemaProbeRows = 1;
-            IVaultStorage oPreviousStorage = CryptureEntities.Storage;
-            string sPreviousPath = sDatabasePath;
+            if (oVaultCancellation != null) return false;
+            VaultView oView;
             try
             {
-                if (bCreate) oStorage.Create();
-                else oStorage.Validate();
-                CryptureEntities.Storage = oStorage;
-                using (CryptureEntities oContent = new CryptureEntities())
-                {
-                    oContent.Items.Take(SchemaProbeRows).Load();
-                    oContent.Users.Take(SchemaProbeRows).Load();
-                    oContent.Ciphers.Take(SchemaProbeRows).Load();
-                    oContent.Instances.Take(SchemaProbeRows).Load();
-                }
-                AddAutomaticCertificates();
-                sDatabasePath = oStorage.DisplayName;
-                RefreshData();
-                oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
-                oAddItemButton.IsEnabled = bEnableControls && (Properties.Settings.Default.EnableDpapiNgProtection ||
-                    Properties.Settings.Default.EnableCertificateProtection);
-                oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
-                oCertificatesTab.IsEnabled = bEnableControls;
-                oClaimCertButton.Visibility = oStorage.IsSqlServer ? Visibility.Collapsed : Visibility.Visible;
-                oAffiliationColumn.Visibility = oStorage.IsSqlServer ? Visibility.Visible : Visibility.Collapsed;
-                bool bCanEnroll = oStorage is not SqlServerVaultStorage oSqlEnrollment ||
-                    oSqlEnrollment.CanEnrollCertificates();
-                bCanEnrollCertificates = bCanEnroll;
-                oAddCertificateGroup.Visibility = bCanEnroll ? Visibility.Visible : Visibility.Collapsed;
-                oAddFromStoreButton.IsEnabled = bCanEnroll;
-                oAddFromFileButton.IsEnabled = bCanEnroll;
-                oAddFromAdButton.IsEnabled = bCanEnroll && PrincipalProtection.IsDomainJoined;
-                oMarkEscrowButton.Visibility = oStorage.IsSqlServer && bCanEnroll &&
-                    PrincipalProtection.IsDomainJoined
-                    ? Visibility.Visible : Visibility.Collapsed;
-                oAdvancedTab.IsEnabled = bEnableControls;
-
-                // Offer server-side backup only to accounts permitted to perform it.
-                bool bCanBackup = oStorage is not SqlServerVaultStorage oSqlBackup || oSqlBackup.CanBackup();
-                oBackupDatabaseButton.Visibility = bCanBackup ? Visibility.Visible : Visibility.Collapsed;
-                oBackupDatabaseButton.IsEnabled = bEnableControls;
-                oBackupDatabaseButton.ToolTip = oStorage.IsSqlServer
-                    ? "Create a backup on the SQL Server host." : "Create a consistent copy of the encrypted Vault.";
-                oCompactDatabaseButton.Visibility = oStorage.SupportsCompact ? Visibility.Visible : Visibility.Collapsed;
-                oSearchTextBox.IsEnabled = bEnableControls;
-                oDatabaseStatus.Text = oStorage.DisplayName;
-                Title = sApplicationTitle + " - " + (oStorage.IsSqlServer
-                    ? oStorage.DisplayName : Path.GetFileName(oStorage.DisplayName));
-                if (oStorage is SqlServerVaultStorage oSqlServer)
-                    RememberRecentEntry(SqlRecentPrefix + oSqlServer.RecentConnection);
-                else RememberRecentVault(oStorage.DisplayName);
-                return true;
+                oView = PrepareVaultAsync(oStorage, bCreate, CancellationToken.None).GetAwaiter().GetResult();
             }
             catch (Exception eError)
             {
-                CryptureEntities.Storage = oPreviousStorage;
-                sDatabasePath = sPreviousPath;
                 Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
                 {
                     MessageBox.Show(this, "The Vault could not be opened: " +
@@ -575,6 +552,63 @@ namespace Crypture
                 }));
                 return false;
             }
+            ApplyVault(oStorage, oView, bEnableControls);
+            return true;
+        }
+
+        private static async Task<VaultView> PrepareVaultAsync(IVaultStorage oStorage, bool bCreate,
+            CancellationToken oCancellation)
+        {
+            if (bCreate) await oStorage.CreateAsync(oCancellation).ConfigureAwait(false);
+            else await oStorage.ValidateAsync(oCancellation).ConfigureAwait(false);
+            await Task.Run(() => AddAutomaticCertificates(oStorage), oCancellation).ConfigureAwait(false);
+            var oData = await ReadVaultDataAsync(oStorage, oCancellation).ConfigureAwait(false);
+            var oPermissions = await oStorage.ReadPermissionsAsync(oCancellation).ConfigureAwait(false);
+            string sDisplayName = oStorage.DisplayName;
+            string sTitle = sApplicationTitle + " - " + (oStorage.IsSqlServer
+                ? sDisplayName : Path.GetFileName(sDisplayName));
+            string sRecentEntry = oStorage is SqlServerVaultStorage oSqlServer
+                ? SqlRecentPrefix + oSqlServer.RecentConnection : Path.GetFullPath(sDisplayName);
+            return new VaultView(oData.Items, oData.Users, oData.PrivateCertificates, sDisplayName,
+                sTitle, sRecentEntry, oPermissions.CanEnroll, oPermissions.CanBackup);
+        }
+
+        private void ApplyVault(IVaultStorage oStorage, VaultView oView, bool bEnableControls)
+        {
+            // Publish a complete view and its storage together after all remote checks have succeeded.
+            oItemDataGrid.ItemsSource = null;
+            oCertDataGrid.ItemsSource = null;
+            CryptureEntities.Storage = oStorage;
+            sDatabasePath = oView.DisplayName;
+            oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
+            oAddItemButton.IsEnabled = bEnableControls && (Properties.Settings.Default.EnableDpapiNgProtection ||
+                Properties.Settings.Default.EnableCertificateProtection);
+            oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
+            oCertificatesTab.IsEnabled = bEnableControls;
+            oClaimCertButton.Visibility = oStorage.IsSqlServer ? Visibility.Collapsed : Visibility.Visible;
+            oAffiliationColumn.Visibility = oStorage.IsSqlServer ? Visibility.Visible : Visibility.Collapsed;
+            bool bCanEnroll = oView.CanEnroll;
+            bCanEnrollCertificates = bCanEnroll;
+            oAddCertificateGroup.Visibility = bCanEnroll ? Visibility.Visible : Visibility.Collapsed;
+            oAddFromStoreButton.IsEnabled = bCanEnroll;
+            oAddFromFileButton.IsEnabled = bCanEnroll;
+            oAddFromAdButton.IsEnabled = bCanEnroll && PrincipalProtection.IsDomainJoined;
+            oMarkEscrowButton.Visibility = oStorage.IsSqlServer && bCanEnroll &&
+                PrincipalProtection.IsDomainJoined
+                ? Visibility.Visible : Visibility.Collapsed;
+            oAdvancedTab.IsEnabled = bEnableControls;
+
+            // Offer server-side backup only to accounts permitted to perform it.
+            oBackupDatabaseButton.Visibility = oView.CanBackup ? Visibility.Visible : Visibility.Collapsed;
+            oBackupDatabaseButton.IsEnabled = bEnableControls;
+            oBackupDatabaseButton.ToolTip = oStorage.IsSqlServer
+                ? "Create a backup on the SQL Server host." : "Create a consistent copy of the encrypted Vault.";
+            oCompactDatabaseButton.Visibility = oStorage.SupportsCompact ? Visibility.Visible : Visibility.Collapsed;
+            oSearchTextBox.IsEnabled = bEnableControls;
+            oDatabaseStatus.Text = oView.DisplayName;
+            Title = oView.Title;
+            ApplyVaultData(oView.Items, oView.Users, oView.PrivateCertificates);
+            RememberRecentEntry(oView.RecentEntry);
         }
 
         private void oSqlServerButton_Click(object sender, RoutedEventArgs e)
@@ -586,20 +620,71 @@ namespace Crypture
 
         private async void OpenSqlVault(SqlServerVaultStorage oStorage, bool bCreate)
         {
-            // Paint connection feedback before opening a remote database.
+            bool bLoaded = await LoadVaultAsync(oStorage, bCreate);
+            if (bLoaded && bCreate) oAddItemButton_Click(this, null);
+        }
+
+        private Task<bool> LoadVaultAsync(IVaultStorage oStorage, bool bCreate) =>
+            RunVaultOperationAsync(bCreate ? "Creating Vault..." : "Connecting to Vault...", async oCancellation =>
+            {
+                VaultView oView = await PrepareVaultAsync(oStorage, bCreate, oCancellation);
+                oCancellation.ThrowIfCancellationRequested();
+                ApplyVault(oStorage, oView, true);
+            });
+
+        private async Task<bool> RunVaultOperationAsync(string sStatus, Func<CancellationToken, Task> oOperation)
+        {
+            if (oVaultCancellation != null) return false;
+            using CancellationTokenSource oCancellation = new CancellationTokenSource();
+            oVaultCancellation = oCancellation;
             string sPreviousStatus = oDatabaseStatus.Text;
             Cursor oPreviousCursor = Mouse.OverrideCursor;
-            oDatabaseStatus.Text = bCreate ? "Creating SQL Server Vault..." : "Connecting to SQL Server...";
+            bool bCancelled = false;
+
+            // Keep the window responsive while preventing actions against an incomplete view.
+            ribbon.IsEnabled = false;
+            oSearchPanel.IsEnabled = false;
+            oItemDataGrid.IsEnabled = false;
+            oCertDataGrid.IsEnabled = false;
+            oDatabaseStatus.Text = sStatus;
+            oVaultProgress.Visibility = Visibility.Visible;
+            oCancelVaultOperationButton.Visibility = Visibility.Visible;
+            oCancelVaultOperationButton.IsEnabled = true;
             Mouse.OverrideCursor = Cursors.Wait;
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            bool bLoaded = false;
             try
             {
-                bLoaded = LoadVault(oStorage, bCreate);
-                if (!bLoaded) oDatabaseStatus.Text = sPreviousStatus;
+                bool bSucceeded = await Utilities.TryOperationAsync(this, async () =>
+                {
+                    try { await oOperation(oCancellation.Token); }
+                    catch (Exception oError) when (oCancellation.IsCancellationRequested &&
+                        oError is OperationCanceledException or Microsoft.Data.SqlClient.SqlException { Number: 0 })
+                    {
+                        bCancelled = true;
+                    }
+                });
+                return bSucceeded && !bCancelled;
             }
-            finally { Mouse.OverrideCursor = oPreviousCursor; }
-            if (bLoaded && bCreate) oAddItemButton_Click(this, null);
+            finally
+            {
+                oVaultCancellation = null;
+                ribbon.IsEnabled = true;
+                oSearchPanel.IsEnabled = true;
+                oItemDataGrid.IsEnabled = true;
+                oCertDataGrid.IsEnabled = true;
+                oVaultProgress.Visibility = Visibility.Collapsed;
+                oCancelVaultOperationButton.Visibility = Visibility.Collapsed;
+                oDatabaseStatus.Text = sDatabasePath ?? sPreviousStatus;
+                Mouse.OverrideCursor = oPreviousCursor;
+            }
+        }
+
+        private async void oCancelVaultOperationButton_Click(object sender, RoutedEventArgs e)
+        {
+            CancellationTokenSource oCancellation = oVaultCancellation;
+            if (oCancellation == null) return;
+            oCancelVaultOperationButton.IsEnabled = false;
+            oDatabaseStatus.Text = "Cancelling...";
+            await oCancellation.CancelAsync();
         }
 
         private void oLoadDatabaseButton_Click(object sender, RoutedEventArgs e)
@@ -777,22 +862,20 @@ namespace Crypture
             });
         }
 
-        private void oBackupDatabaseButton_Click(object sender, RoutedEventArgs e)
+        private async void oBackupDatabaseButton_Click(object sender, RoutedEventArgs e)
         {
-            if (String.IsNullOrEmpty(sDatabasePath)) return;
-            Utilities.TryOperation(this, () =>
+            if (String.IsNullOrEmpty(sDatabasePath) || oVaultCancellation != null) return;
+            IVaultStorage oStorage = CryptureEntities.Storage;
+            string sDestination;
+            if (oStorage is SqlServerVaultStorage oSqlServer)
             {
-                if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
-                {
-                    SqlServerBackupDialog oSqlDialog = new SqlServerBackupDialog(oSqlServer.DatabaseName)
-                        { Owner = this };
-                    if (oSqlDialog.ShowDialog() != true) return;
-                    oSqlServer.Backup(oSqlDialog.BackupPath);
-                    MessageBox.Show(this, "SQL Server Vault backup created on the server. " +
-                        "Keep certificate private keys backed up separately.",
-                        "Backup Complete", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
+                SqlServerBackupDialog oSqlDialog = new SqlServerBackupDialog(oSqlServer.DatabaseName)
+                    { Owner = this };
+                if (oSqlDialog.ShowDialog() != true) return;
+                sDestination = oSqlDialog.BackupPath;
+            }
+            else
+            {
                 SaveFileDialog oDialog = new SaveFileDialog
                 {
                     Title = "Back Up Vault",
@@ -802,15 +885,26 @@ namespace Crypture
                     DefaultExt = ".cryptdb", AddExtension = true, OverwritePrompt = false
                 };
                 if (oDialog.ShowDialog(this) != true) return;
-                DatabaseOperations.BackupDatabase(sDatabasePath, oDialog.FileName);
-                MessageBox.Show(this, "Encrypted Vault backup created. " +
-                    "Keep your certificate private keys backed up separately.",
-                    "Backup Complete", MessageBoxButton.OK, MessageBoxImage.Information);
-            });
+                sDestination = oDialog.FileName;
+            }
+            if (!await RunVaultOperationAsync("Backing up Vault...", oCancellation =>
+                oStorage.BackupAsync(sDestination, oCancellation))) return;
+            MessageBox.Show(this, (oStorage.IsSqlServer ? "SQL Server Vault backup created on the server. "
+                : "Encrypted Vault backup created. ") + "Keep certificate private keys backed up separately.",
+                "Backup Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void oItemBrowser_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (oVaultCancellation != null)
+            {
+                if (e.Key == Key.Escape)
+                {
+                    oCancelVaultOperationButton_Click(sender, e);
+                    e.Handled = true;
+                }
+                return;
+            }
             if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.F)
             {
                 oSearchTextBox.Focus();
@@ -829,6 +923,12 @@ namespace Crypture
 
         private void oItemBrowser_Closing(object sender, CancelEventArgs e)
         {
+            if (oVaultCancellation != null)
+            {
+                oCancelVaultOperationButton_Click(sender, null);
+                e.Cancel = true;
+                return;
+            }
             Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
         }
 

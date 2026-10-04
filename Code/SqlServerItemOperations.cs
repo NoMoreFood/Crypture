@@ -58,9 +58,23 @@ namespace Crypture
             oItem.ItemId = (long)oItemId.Value;
         }
 
-        internal static void Delete(SqlServerVaultStorage oStorage, long nItemId)
+        internal static void Delete(SqlServerVaultStorage oStorage, Item oItem)
         {
-            ExecuteIdProcedure(oStorage, "[dbo].[DeleteItem]", "@itemId", nItemId);
+            using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
+            oConnection.Open();
+            using SqlCommand oCommand = new SqlCommand("[dbo].[DeleteItem]", oConnection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+            oCommand.Parameters.Add("@itemId", SqlDbType.BigInt).Value = oItem.ItemId;
+            oCommand.Parameters.Add("@expectedRowVersion", SqlDbType.Binary, 8).Value =
+                (object)oItem.RowVersion ?? DBNull.Value;
+            try { oCommand.ExecuteNonQuery(); }
+            catch (SqlException oError) when (oError.Number is 50010 or 1205)
+            {
+                throw new InvalidOperationException("This item changed or was removed by another user. " +
+                    "Refresh the list before removing it.", oError);
+            }
         }
 
         internal static void RemoveCertificate(SqlServerVaultStorage oStorage, long nUserId)

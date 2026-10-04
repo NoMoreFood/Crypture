@@ -9,7 +9,7 @@ CREATE TABLE [dbo].[CryptureVault] (
         ([EscrowCertificateUserId] IS NOT NULL AND [EscrowDescriptor] IS NULL AND [EscrowLabel] IS NOT NULL) OR
         ([EscrowCertificateUserId] IS NULL AND [EscrowDescriptor] IS NOT NULL AND [EscrowLabel] IS NOT NULL))
 );
-INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 7);
+INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 8);
 
 CREATE TABLE [dbo].[User] (
     [UserId] bigint IDENTITY(1,1) NOT NULL CONSTRAINT [PK_User] PRIMARY KEY,

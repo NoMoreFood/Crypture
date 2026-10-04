@@ -7,10 +7,14 @@ namespace Crypture
 {
     public partial class CryptureEntities : DbContext
     {
-        private readonly IVaultStorage oStorage = Storage;
+        private readonly IVaultStorage oStorage;
 
-        public CryptureEntities()
+        public CryptureEntities() : this(Storage) { }
+
+        internal CryptureEntities(IVaultStorage oVaultStorage)
         {
+            oStorage = oVaultStorage;
+
             // Explicit commits apply SQLite's lock waiting even to single-statement saves with RETURNING.
             Database.AutoTransactionBehavior = AutoTransactionBehavior.Always;
         }

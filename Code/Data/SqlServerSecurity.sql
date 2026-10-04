@@ -165,15 +165,16 @@ AS SELECT u.[UserId], u.[Certificate], u.[Sid],
     CONVERT(bit, CASE WHEN u.[UserId] = v.[EscrowCertificateUserId] THEN 1 ELSE 0 END) AS [IsEscrow]
 FROM [dbo].[User] AS u CROSS JOIN [dbo].[CryptureVault] AS v WHERE v.[Id] = 1;
 GO
-CREATE PROCEDURE [dbo].[DeleteItemCore] @itemId bigint
+CREATE PROCEDURE [dbo].[DeleteItemCore] @itemId bigint, @expectedRowVersion binary(8)
 WITH EXECUTE AS 'crypture_writer'
 AS
 BEGIN
     SET NOCOUNT ON;
-    DELETE FROM [dbo].[Item] WHERE [ItemId] = @itemId;
+    DELETE FROM [dbo].[Item] WHERE [ItemId] = @itemId AND [RowVersion] = @expectedRowVersion;
+    IF @@ROWCOUNT <> 1 THROW 50010, 'This item changed or was removed by another user.', 1;
 END;
 GO
-CREATE PROCEDURE [dbo].[DeleteItem] @itemId bigint
+CREATE PROCEDURE [dbo].[DeleteItem] @itemId bigint, @expectedRowVersion binary(8)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -183,7 +184,7 @@ BEGIN
         BEGIN TRANSACTION;
         IF NOT EXISTS (SELECT 1 FROM [dbo].[CanReadItem](@itemId))
             THROW 50011, 'You are not a recipient of this item.', 1;
-        EXEC [dbo].[DeleteItemCore] @itemId;
+        EXEC [dbo].[DeleteItemCore] @itemId, @expectedRowVersion;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH

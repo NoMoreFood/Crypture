@@ -22,18 +22,24 @@ namespace Crypture
             }
         }
 
-        internal static void DeleteItem(long nItemId)
+        internal static void DeleteItem(Item oItem)
         {
             if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
             {
-                SqlServerItemOperations.Delete(oSqlServer, nItemId);
+                SqlServerItemOperations.Delete(oSqlServer, oItem);
                 return;
             }
             using CryptureEntities oContent = new CryptureEntities();
-            Item oStored = oContent.Items.Find(nItemId);
-            if (oStored == null) return;
+
+            // Hold the SQLite writer lock while checking the displayed revision and deleting it.
+            using var oTransaction = oContent.Database.BeginTransaction();
+            Item oStored = oContent.Items.Find(oItem.ItemId);
+            if (oStored == null || oStored.ModifiedDate != oItem.ModifiedDate)
+                throw new InvalidOperationException("This item changed or was removed by another user. " +
+                    "Refresh the list before removing it.");
             oContent.Items.Remove(oStored);
             oContent.SaveChanges();
+            oTransaction.Commit();
         }
 
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,

@@ -54,6 +54,8 @@ internal static partial class RegressionTests
     [STAThread]
     private static int Main()
     {
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_AD_ROLE") is string sIdentityRole)
+            return RunSqlServerIdentityTests(sIdentityRole);
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_STARTUP") == "1")
             return RunConfiguredStartup();
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ROLE") is string sRole)
@@ -77,7 +79,8 @@ internal static partial class RegressionTests
                 return 0;
             }
             if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1" ||
-                Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1" ||
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
             {
                 Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 oApplication.Resources = new ResourceDictionary
@@ -86,7 +89,9 @@ internal static partial class RegressionTests
                 };
                 try
                 {
-                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
+                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
+                        TestVaultOperations(sDirectory);
+                    else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
                     {
                         TestPasswordGeneratorLayout();
                         TestPasswordGeneratorDefaults(sDirectory);
@@ -94,7 +99,7 @@ internal static partial class RegressionTests
                     else TestConfigurationDefaults(sDirectory);
                 }
                 finally { oApplication.Shutdown(); }
-                Console.WriteLine("Completed " + nChecks + " configuration regression checks.");
+                Console.WriteLine("Completed " + nChecks + " regression checks.");
                 return 0;
             }
             TestPortableExtraction(sDirectory);
@@ -920,6 +925,7 @@ internal static partial class RegressionTests
             oEditor = null;
             CryptureEntities.DatabasePath = sDatabase;
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
+            TestVaultOperations(sDirectory);
             TestTotpVault(sDirectory);
             TestCertificateUsageConfiguration(oBrowser, oItem);
             TestEditorCertificateLoading(sDirectory);

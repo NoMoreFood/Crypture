@@ -113,6 +113,14 @@ internal static partial class RegressionTests
             Check(oSaves.Single(t => t.Result != null).Result is InvalidOperationException oConflict &&
                 oConflict.Message.StartsWith("This item changed", StringComparison.Ordinal),
                 "A competing SQL Server edit reports a readable conflict");
+            Item oDeleteSnapshot = DatabaseOperations.LoadItem(nItemId);
+            Reject(() => DatabaseOperations.DeleteItem(oStale), "SQL Server rejects a stale item deletion");
+            Check(DatabaseOperations.LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
+                "A rejected deletion preserves the newer item");
+            Reject(() => SqlServerItemOperations.Delete(oStorage, new Item { ItemId = nItemId }),
+                "SQL Server requires a displayed row version before deleting an item");
+            Check(DatabaseOperations.LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
+                "A deletion without a revision preserves the saved item");
             PasswordOptions.SavePreferences(new PasswordOptions { MinimumLength = 26,
                 MaximumLength = 32 });
             Check(PasswordOptions.LoadPreferences().MinimumLength == 26,
@@ -131,7 +139,7 @@ internal static partial class RegressionTests
             oStorage.Backup(sBackup);
             Check(File.Exists(sBackup) && new FileInfo(sBackup).Length > 0,
                 "SQL Server creates a server-side backup");
-            DatabaseOperations.DeleteItem(nItemId);
+            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(nItemId));
             using (CryptureEntities oContext = new CryptureEntities())
                 Check(!oContext.Ciphers.Any() && !oContext.Instances.Any(),
                     "SQL Server cascades item deletion to encrypted records");
@@ -256,7 +264,7 @@ internal static partial class RegressionTests
                 oStored.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)) ==
                 "Saved through the SQL Server editor",
                 "The item saved through the SQL Server editor reopens and decrypts");
-            DatabaseOperations.DeleteItem(oStored.ItemId);
+            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oStored.ItemId));
         }
         finally
         {
@@ -503,7 +511,9 @@ internal static partial class RegressionTests
                     oSave.ExecuteNonQuery();
                     oAccepted.Add(sName);
                     Console.WriteLine("ACCEPTED: " + sName);
-                    using SqlCommand oDelete = new SqlCommand("EXEC [dbo].[DeleteItem] @id", oConnection);
+                    using SqlCommand oDelete = new SqlCommand("DECLARE @version binary(8) = " +
+                        "(SELECT [RowVersion] FROM [dbo].[Item] WHERE [ItemId] = @id); " +
+                        "EXEC [dbo].[DeleteItem] @id, @version", oConnection);
                     oDelete.Parameters.AddWithValue("@id", oSave.Parameters["@itemId"].Value);
                     oDelete.ExecuteNonQuery();
                 }
@@ -565,7 +575,7 @@ internal static partial class RegressionTests
                     oLoaded.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)
                     .SequenceEqual(oPlainText),
                     "SQL Server round trips " + nSuite + " " + sType + " content at " + nLength + " bytes");
-                DatabaseOperations.DeleteItem(oItem.ItemId);
+                DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oItem.ItemId));
             }
         }
     }
@@ -640,7 +650,7 @@ internal static partial class RegressionTests
         try
         {
             // Unsupported schemas must be rejected without changing stored data or certificate affiliations.
-            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 6, 8 })
+            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 9 })
             {
                 oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = @version WHERE [Id] = 1";
                 oCommand.Parameters.AddWithValue("@version", nVersion);
@@ -659,7 +669,7 @@ internal static partial class RegressionTests
         }
         finally
         {
-            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 7 WHERE [Id] = 1";
+            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 8 WHERE [Id] = 1";
             oCommand.Parameters.Clear();
             oCommand.ExecuteNonQuery();
         }
@@ -742,7 +752,7 @@ internal static partial class RegressionTests
             oStorage.RefreshEscrow();
             Check(DatabaseOperations.LoadItem(oWindowsStored.ItemId).ProtectionDisplay
                 .Contains("Windows: "), "Saved item text retains the escrow identity used at its save");
-            DatabaseOperations.DeleteItem(oWindowsStored.ItemId);
+            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oWindowsStored.ItemId));
             Item oMissingCertificate = new Item { Label = "Missing certificate escrow", ItemType = "text" };
             try
             {
@@ -768,7 +778,7 @@ internal static partial class RegressionTests
                 oCertificateItem.Instances.Any(i => i.UserId == oPrimary.UserId) &&
                 oCertificateItem.ProtectionDisplay.Contains("Primary escrow"),
                 "Certificate escrow uses its verified SID and is named on the item");
-            DatabaseOperations.DeleteItem(oCertificateItem.ItemId);
+            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oCertificateItem.ItemId));
         }
         finally { File.WriteAllBytes(sConfigPath, oOriginal); }
     }
@@ -846,7 +856,7 @@ internal static partial class RegressionTests
         oCommand.Parameters.AddWithValue("@itemId", oRecoveryItem.ItemId);
         Check((int)oCommand.ExecuteScalar() == 1, "Recovery group affiliation controls item visibility");
         oCommand.Parameters.Clear();
-        SqlServerItemOperations.Delete(oStorage, oRecoveryItem.ItemId);
+        SqlServerItemOperations.Delete(oStorage, DatabaseOperations.LoadItem(oRecoveryItem.ItemId));
         Item oGroupItem = new Item { Label = "Group affiliation", ItemType = "text" };
         Item oGroupEncrypted = new Item
         {
@@ -864,7 +874,7 @@ internal static partial class RegressionTests
         oCommand.Parameters.AddWithValue("@itemId", oGroupItem.ItemId);
         Check((int)oCommand.ExecuteScalar() == 1, "Windows group SID grants item visibility");
         oCommand.Parameters.Clear();
-        SqlServerItemOperations.Delete(oStorage, oGroupItem.ItemId);
+        SqlServerItemOperations.Delete(oStorage, DatabaseOperations.LoadItem(oGroupItem.ItemId));
         oCommand.CommandText = "UPDATE [dbo].[User] SET [Sid] = N'S-1-5-21-1-2-3-1000' WHERE [UserId] = @otherId";
         oCommand.Parameters.AddWithValue("@otherId", nOtherUserId);
         oCommand.ExecuteNonQuery();
@@ -937,7 +947,9 @@ internal static partial class RegressionTests
             long nRoleItem = (long)oCommand.ExecuteScalar();
             Check(nRoleItem > nItemId, "Domain role can save an affiliated item through the procedure");
             oCommand.Parameters.Clear();
-            oCommand.CommandText = "EXEC [dbo].[DeleteItem] @itemId";
+            oCommand.CommandText = "DECLARE @version binary(8) = " +
+                "(SELECT [RowVersion] FROM [dbo].[Item] WHERE [ItemId] = @itemId); " +
+                "EXEC [dbo].[DeleteItem] @itemId, @version";
             oCommand.Parameters.AddWithValue("@itemId", nRoleItem);
             oCommand.ExecuteNonQuery();
             Check(true, "Domain role can delete its affiliated item through the procedure");
@@ -966,7 +978,9 @@ internal static partial class RegressionTests
             Check((int)oCommand.ExecuteScalar() == 0, "Unrelated SID cannot read encrypted content");
             oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[AuthorizedInstance]";
             Check((int)oCommand.ExecuteScalar() == 0, "Unrelated SID cannot read recipient links");
-            oCommand.CommandText = "EXEC [dbo].[DeleteItem] @itemId";
+            oCommand.CommandText = "DECLARE @version binary(8) = " +
+                "(SELECT [RowVersion] FROM [dbo].[Item] WHERE [ItemId] = @itemId); " +
+                "EXEC [dbo].[DeleteItem] @itemId, @version";
             oCommand.Parameters.AddWithValue("@itemId", nItemId);
             Reject(() => oCommand.ExecuteNonQuery(), "Unrelated SID cannot delete the item");
         }
