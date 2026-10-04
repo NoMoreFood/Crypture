@@ -59,23 +59,39 @@ internal static partial class RegressionTests
             return RunConcurrencyWorker(sRole);
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_PORTABLE_DIRECTORY") != null)
             return RunPortableStartupWorker();
+        AppContext.SetData("APP_CONFIG_FILE", Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"));
         string sDirectory = Path.Combine(Path.GetTempPath(), "Crypture.Tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(sDirectory);
+        using UserPreferenceSnapshot oPreferences = new UserPreferenceSnapshot();
         try
         {
+            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_PREFERENCES_ONLY") == "1")
+            {
+                TestUserPreferences();
+                return 0;
+            }
             if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONFIG_STARTUP") == "1")
             {
                 TestCertificateUsageStartup();
                 return 0;
             }
-            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1")
+            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1" ||
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
             {
                 Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 oApplication.Resources = new ResourceDictionary
                 {
                     Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
                 };
-                try { TestConfigurationDefaults(sDirectory); }
+                try
+                {
+                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
+                    {
+                        TestPasswordGeneratorLayout();
+                        TestPasswordGeneratorDefaults(sDirectory);
+                    }
+                    else TestConfigurationDefaults(sDirectory);
+                }
                 finally { oApplication.Shutdown(); }
                 Console.WriteLine("Completed " + nChecks + " configuration regression checks.");
                 return 0;
@@ -90,10 +106,19 @@ internal static partial class RegressionTests
             {
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_SQLSERVER_ONLY") == "1")
                 {
-                    TestSqlServerBackend(sDirectory, oCert, oOtherCert);
+                    Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                    oApplication.Resources = new ResourceDictionary
+                    {
+                        Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml",
+                            UriKind.Absolute)
+                    };
+                    try { TestSqlServerBackend(sDirectory, oCert, oOtherCert); }
+                    finally { oApplication.Shutdown(); }
+                    Console.WriteLine("Completed " + nChecks + " SQL Server regression checks.");
                     return 0;
                 }
                 TestSqlServerBackend(sDirectory, oCert, oOtherCert);
+                TestUserPreferences();
                 TestConcurrentDatabase(sDirectory, oCert, oOtherCert);
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ONLY") == "1") return 0;
                 TestContentEncryptionSuites(sDirectory, oCert, oOtherCert);
@@ -545,6 +570,7 @@ internal static partial class RegressionTests
         string sDatabase = Path.Combine(sDirectory, "Vault ; \u00e9.cryptdb");
         string sSchema = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SQLite.sql"));
         DatabaseOperations.CreateDatabase(sDatabase, sSchema);
+        Check(VaultHasNoPreferences(sDatabase), "New SQLite Vaults contain no password generator preferences");
         SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "Storage.cryptdb"));
         oStorage.Create();
         oStorage.Validate();
@@ -564,10 +590,10 @@ internal static partial class RegressionTests
             .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
             .Replace("\t[Signature] blob NULL\r\n", "")
             .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,", "[CipherParams] integer DEFAULT '0' NOT NULL");
-        sLegacySchema = sLegacySchema.Substring(0,
-            sLegacySchema.IndexOf("CREATE TABLE IF NOT EXISTS [PasswordGeneratorSettings]", StringComparison.Ordinal));
         string sLegacyDatabase = Path.Combine(sDirectory, "legacy-schema.cryptdb");
-        DatabaseOperations.CreateDatabase(sLegacyDatabase, sLegacySchema);
+        DatabaseOperations.CreateDatabase(sLegacyDatabase, sLegacySchema +
+            "CREATE TABLE PasswordGeneratorSettings (Id integer PRIMARY KEY, MinimumLength integer); " +
+            "INSERT INTO PasswordGeneratorSettings VALUES (1, 777);");
         Item oLegacyItem = new Item { Label = "Before upgrade", ItemType = "text" };
         byte[] oLegacyPlain = Encoding.Unicode.GetBytes("Preserved legacy content");
         EncryptPreviousRsaFormat(oLegacyItem, oLegacyPlain, oCert);
@@ -595,8 +621,8 @@ internal static partial class RegressionTests
         DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
         DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
         CryptureEntities.DatabasePath = sLegacyDatabase;
-        Check(DatabaseOperations.LoadPasswordOptions().MinimumLength == 20,
-            "Old Vault migration adds generator settings with safe defaults");
+        Check(VaultHasNoPreferences(sLegacyDatabase),
+            "Legacy Vault migration leaves preferences outside the database");
         oLegacyItem = DatabaseOperations.LoadItem(1);
         Check(oLegacyItem.Cipher.ProtectionDescriptor == null && oLegacyItem.ModifiedByIdentity == null,
             "Upgrade old Vault schema idempotently");
@@ -613,8 +639,8 @@ internal static partial class RegressionTests
             IncludeDigits = false, IncludeSymbols = true, SymbolCharacters = "'\"\\;!",
             ExcludedCharacters = "' DROP TABLE [User]; --", RequireEachType = false, ExcludeSimilar = false
         };
-        DatabaseOperations.SavePasswordOptions(oPasswordOptions);
-        PasswordOptions oLoadedOptions = DatabaseOperations.LoadPasswordOptions();
+        PasswordOptions.SavePreferences(oPasswordOptions);
+        PasswordOptions oLoadedOptions = PasswordOptions.LoadPreferences();
         Check(oLoadedOptions.MinimumLength == 25 && oLoadedOptions.MaximumLength == 37 &&
             !oLoadedOptions.IncludeUppercase && oLoadedOptions.IncludeLowercase && !oLoadedOptions.IncludeDigits &&
             oLoadedOptions.IncludeSymbols && oLoadedOptions.SymbolCharacters == oPasswordOptions.SymbolCharacters &&
@@ -622,12 +648,12 @@ internal static partial class RegressionTests
             !oLoadedOptions.RequireEachType && !oLoadedOptions.ExcludeSimilar,
             "Persist every password option including quoted character lists");
         CryptureEntities.DatabasePath = sLegacyDatabase;
-        Check(DatabaseOperations.LoadPasswordOptions().MaximumLength == 24,
-            "Password settings belong to each Vault file independently");
+        Check(PasswordOptions.LoadPreferences().MaximumLength == 37,
+            "Password settings follow the Windows user across Vault files");
         CryptureEntities.DatabasePath = sDatabase;
-        Reject(() => DatabaseOperations.SavePasswordOptions(new PasswordOptions { MinimumLength = 0 }),
-            "Reject invalid settings before modifying the Vault");
-        Check(DatabaseOperations.LoadPasswordOptions().MaximumLength == 37,
+        Reject(() => PasswordOptions.SavePreferences(new PasswordOptions { MinimumLength = 0 }),
+            "Reject invalid preferences before modifying the user file");
+        Check(PasswordOptions.LoadPreferences().MaximumLength == 37,
             "Failed validation preserves saved settings");
         User oUser = new User { Certificate = oCert.RawData };
         User oOtherUser = new User { Certificate = oOtherCert.RawData };
@@ -680,8 +706,8 @@ internal static partial class RegressionTests
         Reject(() => DatabaseOperations.BackupDatabase(sDatabase, sDatabase),
             "Protect active Vault from backup overwrite");
         CryptureEntities.DatabasePath = sBackup;
-        Check(DatabaseOperations.LoadPasswordOptions().MaximumLength == 37,
-            "Vault backups include password generator preferences");
+        Check(VaultHasNoPreferences(sBackup),
+            "Vault backups contain no password generator preferences");
         Item oBackedUp = DatabaseOperations.LoadItem(nItemId);
         Check(ItemCryptography.Decrypt(oBackedUp, oBackedUp.Instances.Single(), oCert).SequenceEqual(oPlainText),
             "Open and decrypt Vault backup");
@@ -815,6 +841,8 @@ internal static partial class RegressionTests
         string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
         byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
         string sPreviousConnection = CryptureEntities.ConnectionString;
+        var oPreferences = new Crypture.Properties.Settings();
+        PasswordOptions oOriginalOptions = oPreferences.PasswordGeneratorOptions;
         PasswordGenerator oGenerator = null;
         MethodInfo oGenerate = typeof(PasswordGenerator).GetMethod("oGenerateButton_Click",
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -849,6 +877,9 @@ internal static partial class RegressionTests
 
         try
         {
+            oPreferences.PasswordGeneratorOptions = null;
+            oPreferences.Save();
+
             // Exercise the adjacent file through both generator entry paths, including XML punctuation.
             Configure(("MinimumLength", "8"), ("MaximumLength", "12"), ("IncludeUppercase", "False"),
                 ("IncludeLowercase", "False"), ("IncludeDigits", "False"), ("IncludeSymbols", "True"),
@@ -867,11 +898,15 @@ internal static partial class RegressionTests
                 ((CheckBox)oGenerator.FindName("oExcludeSimilar")).IsChecked == false &&
                 ((CheckBox)oGenerator.FindName("oRequireEachType")).IsChecked == false,
                 "Standalone generator loads all ten configured defaults");
+            Check(new Crypture.Properties.Settings().PasswordGeneratorOptions == null,
+                "Opening the generator does not save application defaults as user preferences");
             oGenerate.Invoke(oGenerator, new object[] { null, null });
             string sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
                 "Configured symbols, exclusions, lengths, and similar-character choice control generated output");
             oGenerator.Close();
+            Check(PasswordOptions.LoadPreferences().GetCharacterGroups().Single() == "|",
+                "Generating without a Vault saves the user's preferences");
 
             string sVault = Path.Combine(sDirectory, "password-defaults.cryptdb");
             DatabaseOperations.CreateDatabase(sVault,
@@ -880,17 +915,13 @@ internal static partial class RegressionTests
             oGenerator = new PasswordGenerator();
             Check(((TextBox)oGenerator.FindName("oMinimumLength")).Text == "8" &&
                 ((TextBox)oGenerator.FindName("oMaximumLength")).Text == "12",
-                "A Vault without generator preferences uses configured defaults");
-            using (CryptureEntities oContext = new CryptureEntities())
-                Check(oContext.Database.SqlQueryRaw<long>(
-                    "SELECT COUNT(*) AS Value FROM PasswordGeneratorSettings").Single() == 0,
-                    "Opening a generator does not save defaults into the Vault");
+                "Opening a different Vault retains the user's generator preferences");
+            Check(VaultHasNoPreferences(sVault), "Opening a generator leaves the Vault free of preferences");
             oGenerate.Invoke(oGenerator, new object[] { null, null });
             oGenerator.Close();
-            Check(DatabaseOperations.LoadPasswordOptions().GetCharacterGroups().Single() == "|",
-                "Generating saves the configured preferences into the Vault");
+            Check(VaultHasNoPreferences(sVault), "Generating a password leaves the Vault free of preferences");
 
-            // Reopening sees new defaults, while saved Vault preferences remain independent of that file.
+            // A saved user selection takes precedence when application defaults change.
             Configure(("MinimumLength", "1"), ("MaximumLength", "1"), ("IncludeUppercase", "True"),
                 ("IncludeLowercase", "True"), ("IncludeDigits", "False"), ("IncludeSymbols", "False"),
                 ("RequireEachType", "False"));
@@ -898,21 +929,21 @@ internal static partial class RegressionTests
             oGenerator = new PasswordGenerator();
             oGenerate.Invoke(oGenerator, new object[] { null, null });
             sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
-            Check(sPassword.Length == 1 && Char.IsAsciiLetter(sPassword[0]),
-                "Reopening reads changed defaults and allows optional character-type coverage");
+            Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
+                "Standalone generator preserves saved user preferences when application defaults change");
             oGenerator.Close();
             CryptureEntities.DatabasePath = sVault;
             oGenerator = new PasswordGenerator();
             oGenerate.Invoke(oGenerator, new object[] { null, null });
             sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
-                "Saved Vault preferences override changed application defaults");
+                "Saved user preferences override changed application defaults with a Vault open");
             oGenerator.Close();
 
             Configure(("IncludeDigits", "yes"));
             Invalid("PasswordGeneratorIncludeDigits");
-            Check(DatabaseOperations.LoadPasswordOptions().GetCharacterGroups().Single() == "|",
-                "Invalid unused defaults do not prevent loading saved Vault preferences");
+            Check(PasswordOptions.LoadPreferences().GetCharacterGroups().Single() == "|",
+                "Invalid unused defaults do not prevent loading saved user preferences");
             Configure(("MinimumLength", "twenty"));
             Invalid("PasswordGeneratorMinimumLength");
             Configure(("MinimumLength", "32"), ("MaximumLength", "16"));
@@ -940,11 +971,28 @@ internal static partial class RegressionTests
             Check(oDefaults.MinimumLength == 20 && oDefaults.MaximumLength == 24 &&
                 oDefaults.GetCharacterGroups().Count == 4 && !File.Exists(sConfigPath),
                 "Missing configuration uses built-in defaults without creating a file");
+            Check(PasswordOptions.LoadPreferences().GetCharacterGroups().Single() == "|",
+                "Saved user preferences survive removal of the adjacent configuration");
+            File.WriteAllBytes(sConfigPath, oOriginalConfig);
+            Configure(("MinimumLength", "1"), ("MaximumLength", "1"), ("IncludeUppercase", "True"),
+                ("IncludeLowercase", "True"), ("IncludeDigits", "False"), ("IncludeSymbols", "False"),
+                ("RequireEachType", "False"));
+            oPreferences.PasswordGeneratorOptions = null;
+            oPreferences.Save();
+            CryptureEntities.ConnectionString = "";
+            oGenerator = new PasswordGenerator();
+            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
+            Check(sPassword.Length == 1 && Char.IsAsciiLetter(sPassword[0]),
+                "A user without saved preferences receives current defaults and optional character-type coverage");
+            oGenerator.Close();
         }
         finally
         {
             oGenerator?.Close();
             File.WriteAllBytes(sConfigPath, oOriginalConfig);
+            oPreferences.PasswordGeneratorOptions = oOriginalOptions;
+            oPreferences.Save();
             CryptureEntities.ConnectionString = sPreviousConnection;
         }
     }

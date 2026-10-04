@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
-using Microsoft.Data.SqlClient;
-using System.Data;
 using System.IO;
 using System.Linq;
 using System.Security.Principal;
@@ -13,21 +11,6 @@ namespace Crypture
 {
     internal static class DatabaseOperations
     {
-        internal const string PasswordOptionsSchema =
-            "CREATE TABLE IF NOT EXISTS [PasswordGeneratorSettings] (" +
-            "    [Id] integer PRIMARY KEY CHECK ([Id] = 1)," +
-            "    [MinimumLength] integer NOT NULL CHECK ([MinimumLength] BETWEEN 1 AND 1024)," +
-            "    [MaximumLength] integer NOT NULL CHECK ([MaximumLength] BETWEEN [MinimumLength] AND 1024)," +
-            "    [IncludeUppercase] integer NOT NULL CHECK ([IncludeUppercase] IN (0, 1))," +
-            "    [IncludeLowercase] integer NOT NULL CHECK ([IncludeLowercase] IN (0, 1))," +
-            "    [IncludeDigits] integer NOT NULL CHECK ([IncludeDigits] IN (0, 1))," +
-            "    [IncludeSymbols] integer NOT NULL CHECK ([IncludeSymbols] IN (0, 1))," +
-            "    [SymbolCharacters] nvarchar NOT NULL," +
-            "    [ExcludedCharacters] nvarchar NOT NULL," +
-            "    [ExcludeSimilar] integer NOT NULL CHECK ([ExcludeSimilar] IN (0, 1))," +
-            "    [RequireEachType] integer NOT NULL CHECK ([RequireEachType] IN (0, 1))" +
-            ");";
-
         internal static Item LoadItem(long nItemId)
         {
             using (CryptureEntities oContent = new CryptureEntities())
@@ -112,8 +95,6 @@ namespace Crypture
                     oStored = oContent.Items.Include(i => i.Cipher).Include(i => i.Instances)
                         .SingleOrDefault(i => i.ItemId == oItem.ItemId);
                     if (oStored == null || oStored.ModifiedDate != oItem.ModifiedDate ||
-                        CryptureEntities.Storage.IsSqlServer &&
-                        !(oStored.RowVersion ?? []).SequenceEqual(oItem.RowVersion ?? []) ||
                         oStored.Cipher == null || oItem.Cipher == null ||
                         oStored.Cipher.CipherParams != oItem.Cipher.CipherParams ||
                         oStored.Cipher.ContentSuite != oItem.Cipher.ContentSuite ||
@@ -209,79 +190,13 @@ namespace Crypture
                             oColumn[ColumnTypeIndex] + " NULL", oConnection, oTransaction))
                             oCommand.ExecuteNonQuery();
                     }
+
+                    // Preferences belong to the Windows user profile.
                     using (SqliteCommand oCommand = new SqliteCommand(
-                        PasswordOptionsSchema, oConnection, oTransaction)) oCommand.ExecuteNonQuery();
+                        "DROP TABLE IF EXISTS [PasswordGeneratorSettings]", oConnection, oTransaction))
+                        oCommand.ExecuteNonQuery();
                     oTransaction.Commit();
                 }
-            }
-        }
-
-        internal static PasswordOptions LoadPasswordOptions()
-        {
-            using (CryptureEntities oContent = new CryptureEntities())
-            {
-                PasswordOptions oOptions = oContent.Database.SqlQueryRaw<PasswordOptions>(
-                    "SELECT MinimumLength, MaximumLength, IncludeUppercase, IncludeLowercase, IncludeDigits, " +
-                    "IncludeSymbols, SymbolCharacters, ExcludedCharacters, ExcludeSimilar, RequireEachType " +
-                    "FROM PasswordGeneratorSettings WHERE Id = 1").SingleOrDefault() ?? PasswordOptions.ReadDefaults();
-                oOptions.GetCharacterGroups();
-                return oOptions;
-            }
-        }
-
-        internal static void SavePasswordOptions(PasswordOptions oOptions)
-        {
-            oOptions.GetCharacterGroups();
-            if (CryptureEntities.Storage.IsSqlServer)
-            {
-                // Update the one settings row atomically across SQL Server clients.
-                using SqlConnection oConnection = new SqlConnection(CryptureEntities.Storage.ConnectionString);
-                oConnection.Open();
-                using SqlTransaction oTransaction = oConnection.BeginTransaction(IsolationLevel.Serializable);
-                using SqlCommand oCommand = new SqlCommand("UPDATE [dbo].[PasswordGeneratorSettings] SET " +
-                    "MinimumLength=@min, MaximumLength=@max, IncludeUppercase=@upper, IncludeLowercase=@lower, " +
-                    "IncludeDigits=@digits, IncludeSymbols=@symbols, SymbolCharacters=@characters, " +
-                    "ExcludedCharacters=@excluded, ExcludeSimilar=@similar, RequireEachType=@each WHERE Id=1",
-                    oConnection, oTransaction);
-                oCommand.Parameters.AddWithValue("@min", oOptions.MinimumLength);
-                oCommand.Parameters.AddWithValue("@max", oOptions.MaximumLength);
-                oCommand.Parameters.AddWithValue("@upper", oOptions.IncludeUppercase);
-                oCommand.Parameters.AddWithValue("@lower", oOptions.IncludeLowercase);
-                oCommand.Parameters.AddWithValue("@digits", oOptions.IncludeDigits);
-                oCommand.Parameters.AddWithValue("@symbols", oOptions.IncludeSymbols);
-                oCommand.Parameters.AddWithValue("@characters", oOptions.SymbolCharacters);
-                oCommand.Parameters.AddWithValue("@excluded", oOptions.ExcludedCharacters);
-                oCommand.Parameters.AddWithValue("@similar", oOptions.ExcludeSimilar);
-                oCommand.Parameters.AddWithValue("@each", oOptions.RequireEachType);
-                if (oCommand.ExecuteNonQuery() == 0)
-                {
-                    oCommand.CommandText = "INSERT INTO [dbo].[PasswordGeneratorSettings] (Id, MinimumLength, " +
-                        "MaximumLength, IncludeUppercase, IncludeLowercase, IncludeDigits, IncludeSymbols, " +
-                        "SymbolCharacters, ExcludedCharacters, ExcludeSimilar, RequireEachType) VALUES " +
-                        "(1, @min, @max, @upper, @lower, @digits, @symbols, @characters, @excluded, @similar, @each)";
-                    oCommand.ExecuteNonQuery();
-                }
-                oTransaction.Commit();
-                return;
-            }
-            using (CryptureEntities oContent = new CryptureEntities())
-            {
-                oContent.Database.ExecuteSqlRaw(
-                    "INSERT OR REPLACE INTO PasswordGeneratorSettings (Id, MinimumLength, MaximumLength, " +
-                    "IncludeUppercase, IncludeLowercase, IncludeDigits, IncludeSymbols, SymbolCharacters, " +
-                    "ExcludedCharacters, ExcludeSimilar, RequireEachType) " +
-                    "VALUES (1, @min, @max, @upper, @lower, @digits, @symbols, " +
-                    "@characters, @excluded, @similar, @each)",
-                    new SqliteParameter("@min", oOptions.MinimumLength),
-                    new SqliteParameter("@max", oOptions.MaximumLength),
-                    new SqliteParameter("@upper", oOptions.IncludeUppercase ? 1 : 0),
-                    new SqliteParameter("@lower", oOptions.IncludeLowercase ? 1 : 0),
-                    new SqliteParameter("@digits", oOptions.IncludeDigits ? 1 : 0),
-                    new SqliteParameter("@symbols", oOptions.IncludeSymbols ? 1 : 0),
-                    new SqliteParameter("@characters", oOptions.SymbolCharacters),
-                    new SqliteParameter("@excluded", oOptions.ExcludedCharacters),
-                    new SqliteParameter("@similar", oOptions.ExcludeSimilar ? 1 : 0),
-                    new SqliteParameter("@each", oOptions.RequireEachType ? 1 : 0));
             }
         }
 
@@ -300,9 +215,7 @@ namespace Crypture
                 return;
             }
             using (CryptureEntities oContent = new CryptureEntities())
-            using (var oTransaction = CryptureEntities.Storage.IsSqlServer
-                ? oContent.Database.BeginTransaction(IsolationLevel.Serializable)
-                : oContent.Database.BeginTransaction())
+            using (var oTransaction = oContent.Database.BeginTransaction())
             {
                 if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
                     !i.Instances.Any(j => j.UserId != nUserId) && (i.Cipher == null ||
@@ -315,9 +228,6 @@ namespace Crypture
                 if (oRecovery.Certificate != null && oUser.Certificate.SequenceEqual(oRecovery.Certificate))
                     throw new InvalidOperationException(
                         "The configured emergency recovery certificate cannot be removed.");
-                if (CryptureEntities.Storage.IsSqlServer)
-                    oContent.Items.Where(i => i.ModifiedBy == nUserId)
-                        .ExecuteUpdate(s => s.SetProperty(i => i.ModifiedBy, (long?)null));
                 oContent.Users.Remove(oUser);
                 oContent.SaveChanges();
                 oTransaction.Commit();

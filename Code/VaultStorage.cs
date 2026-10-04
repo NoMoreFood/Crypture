@@ -4,7 +4,6 @@ using System.Data.Common;
 using System.IO;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
-using System.Threading;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -113,7 +112,6 @@ namespace Crypture
         public bool SupportsCompact => false;
         internal string DatabaseName => oBuilder.InitialCatalog;
         internal string RecentConnection => ConnectionString;
-        internal bool UpgradedOnOpen { get; private set; }
         internal SqlServerEscrowChoice EscrowChoice { get; set; }
         internal SqlServerEscrowPolicy Escrow { get; private set; }
 
@@ -205,67 +203,17 @@ namespace Crypture
 
         public void Validate()
         {
-            // A concurrent owner's schema transaction can deadlock a reader; retry the whole connection.
-            for (int nAttempt = 0; nAttempt < 3; nAttempt++)
-            {
-                try { ValidateOnce(); return; }
-                catch (SqlException oError) when (oError.Number == 1205 && nAttempt < 2)
-                {
-                    Thread.Sleep(100 * (nAttempt + 1));
-                }
-            }
-        }
-
-        private void ValidateOnce()
-        {
             const int VaultMarkerId = 1;
-            const int SupportedSchemaVersion = 4;
-            const int OldestSchemaVersion = 2;
+            const int SupportedSchemaVersion = 6;
+
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);
             oConnection.Open();
             using SqlCommand oCommand = new SqlCommand(
                 "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = @id", oConnection);
             oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
-            if (oCommand.ExecuteScalar() is not int nVersion)
+            if (oCommand.ExecuteScalar() is not int nVersion || nVersion != SupportedSchemaVersion)
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
-            if (nVersion == SupportedSchemaVersion)
-            {
-                RefreshEscrow();
-                return;
-            }
-            if (nVersion < OldestSchemaVersion || nVersion > SupportedSchemaVersion)
-                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
-
-            // A Vault owner quarantines existing affiliations before reopening shared records.
-            using SqlCommand oPermission = new SqlCommand(
-                "SELECT CASE WHEN IS_ROLEMEMBER(N'db_owner') = 1 OR " +
-                "IS_SRVROLEMEMBER(N'sysadmin') = 1 THEN 1 ELSE 0 END", oConnection);
-            if (oPermission.ExecuteScalar() is not int nPermission || nPermission != 1)
-                throw new InvalidOperationException("The Vault owner must open this SQL Server Vault first " +
-                    "to verify its certificate affiliations.");
-            using SqlTransaction oTransaction = oConnection.BeginTransaction(IsolationLevel.Serializable);
-            using SqlCommand oLockedMarker = new SqlCommand(
-                "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) " +
-                "WHERE [Id] = @id", oConnection, oTransaction);
-            oLockedMarker.Parameters.AddWithValue("@id", VaultMarkerId);
-            if (oLockedMarker.ExecuteScalar() is not int nCurrentVersion)
-                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
-            if (nCurrentVersion == SupportedSchemaVersion)
-            {
-                oTransaction.Commit();
-                RefreshEscrow();
-                return;
-            }
-            if (nCurrentVersion < OldestSchemaVersion || nCurrentVersion >= SupportedSchemaVersion)
-                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
-            if (nCurrentVersion == OldestSchemaVersion)
-                ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerUpgrade");
-            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerUpgrade4");
-            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerEnrollment");
-            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerEscrow");
-            oTransaction.Commit();
-            UpgradedOnOpen = true;
             RefreshEscrow();
         }
 

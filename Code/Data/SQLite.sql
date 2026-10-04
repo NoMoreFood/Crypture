@@ -45,17 +45,3 @@ CREATE TABLE [User] (
 	[Certificate]	blob UNIQUE NOT NULL,
 	[Sid]	nvarchar COLLATE NOCASE
 );
-
-CREATE TABLE IF NOT EXISTS [PasswordGeneratorSettings] (
-    [Id] integer PRIMARY KEY CHECK ([Id] = 1),
-    [MinimumLength] integer NOT NULL CHECK ([MinimumLength] BETWEEN 1 AND 1024),
-    [MaximumLength] integer NOT NULL CHECK ([MaximumLength] BETWEEN [MinimumLength] AND 1024),
-    [IncludeUppercase] integer NOT NULL CHECK ([IncludeUppercase] IN (0, 1)),
-    [IncludeLowercase] integer NOT NULL CHECK ([IncludeLowercase] IN (0, 1)),
-    [IncludeDigits] integer NOT NULL CHECK ([IncludeDigits] IN (0, 1)),
-    [IncludeSymbols] integer NOT NULL CHECK ([IncludeSymbols] IN (0, 1)),
-    [SymbolCharacters] nvarchar NOT NULL,
-    [ExcludedCharacters] nvarchar NOT NULL,
-    [ExcludeSimilar] integer NOT NULL CHECK ([ExcludeSimilar] IN (0, 1)),
-    [RequireEachType] integer NOT NULL CHECK ([RequireEachType] IN (0, 1))
-);

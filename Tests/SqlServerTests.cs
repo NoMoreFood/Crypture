@@ -7,6 +7,13 @@ using System.Text;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Data;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Ribbon;
+using System.Windows.Threading;
 using Crypture;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -46,6 +53,14 @@ internal static partial class RegressionTests
                 "Windows: " + sCurrentSid);
             oStorage.Create();
             oStorage.Validate();
+            using (SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString))
+            {
+                oConnection.Open();
+                using SqlCommand oCommand = new SqlCommand(
+                    "SELECT OBJECT_ID(N'dbo.PasswordGeneratorSettings', N'U')", oConnection);
+                Check(oCommand.ExecuteScalar() is DBNull,
+                    "New SQL Server Vaults contain no password generator preferences");
+            }
             Reject(() => oStorage.Create(), "SQL Server refuses to overwrite an existing Vault");
             CryptureEntities.Storage = oStorage;
             Check(oStorage.Escrow?.Descriptor == "SID=" + sCurrentSid,
@@ -94,10 +109,10 @@ internal static partial class RegressionTests
             Check(oSaves.Single(t => t.Result != null).Result is InvalidOperationException oConflict &&
                 oConflict.Message.StartsWith("This item changed", StringComparison.Ordinal),
                 "A competing SQL Server edit reports a readable conflict");
-            DatabaseOperations.SavePasswordOptions(new PasswordOptions { MinimumLength = 26,
+            PasswordOptions.SavePreferences(new PasswordOptions { MinimumLength = 26,
                 MaximumLength = 32 });
-            Check(DatabaseOperations.LoadPasswordOptions().MinimumLength == 26,
-                "SQL Server retains password generator settings");
+            Check(PasswordOptions.LoadPreferences().MinimumLength == 26,
+                "SQL Server connections use the Windows user's password generator preferences");
             VaultHealthReport oReport = VaultHealthCheck.Run(oStorage, false, false, CancellationToken.None);
             Check(oReport.ItemCount == 1, "SQL Server health check reads the Vault");
             Reject(() => DatabaseOperations.RemoveCertificate(oUsers[1].UserId),
@@ -116,7 +131,7 @@ internal static partial class RegressionTests
             using (CryptureEntities oContext = new CryptureEntities())
                 Check(!oContext.Ciphers.Any() && !oContext.Instances.Any(),
                     "SQL Server cascades item deletion to encrypted records");
-            TestSqlServerUpgrade(oStorage, oUsers[0]);
+            TestSqlServerValidation(oStorage, oUsers[0]);
         }
         finally
         {
@@ -172,6 +187,10 @@ internal static partial class RegressionTests
                 ItemCryptography.Decrypt(oStored, oStored.Instances.Single(i =>
                     i.UserId == oStorage.Escrow.CertificateUserId), oEscrowCertificate).SequenceEqual(oSecret),
                 "A distinct selected escrow certificate decrypts the saved item");
+            if (Application.Current != null) TestSqlServerEditorSave(oPrimary, oPrimaryCertificate);
+            TestSqlServerSaveValidation(oStorage, oStored);
+            TestSqlServerContentLimits(oStorage, oStored.Instances.Select(i => i.User).ToArray(),
+                oPrimary, oPrimaryCertificate);
         }
         finally
         {
@@ -187,6 +206,250 @@ internal static partial class RegressionTests
                 "DROP DATABASE [" + sDatabase + "]; END", oConnection);
             oCommand.Parameters.AddWithValue("@name", sDatabase);
             oCommand.ExecuteNonQuery();
+        }
+    }
+
+    private static void TestSqlServerEditorSave(User oPrimary, X509Certificate2 oCertificate)
+    {
+        SynchronizationContext oPreviousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+        ItemEditor oEditor = null;
+        Exception oSaveError = null;
+        DispatcherUnhandledExceptionEventHandler oUnhandled = (s, e) =>
+        {
+            oSaveError = e.Exception;
+            e.Handled = true;
+        };
+        Dispatcher.CurrentDispatcher.UnhandledException += oUnhandled;
+        try
+        {
+            // Exercise the asynchronous save handler through its busy-state cleanup and window close.
+            oEditor = new ItemEditor
+            {
+                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
+                ShowActivated = false, ShowInTaskbar = false
+            };
+            oEditor.Show();
+            PumpUntil(() => oEditor.IsLoaded && oEditor.CertificateLoading.IsCompleted);
+            ((TextBox)oEditor.FindName("oItemLabel")).Text = "SQL Server editor save";
+            ((TextBox)oEditor.FindName("oItemData")).Text = "Saved through the SQL Server editor";
+            ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = 1;
+            oEditor.UserListSelected.Add(oPrimary);
+            Check(((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
+                "A new SQL Server item is ready to save with certificate protection");
+            typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(oEditor, [null, new RoutedEventArgs()]);
+            PumpUntil(() => !oEditor.IsVisible || oSaveError != null);
+            if (oSaveError != null) throw new Exception("The SQL Server editor failed after saving.", oSaveError);
+            Check(oEditor.ThisItem.ItemId != 0 && ((TextBox)oEditor.FindName("oItemData")).Text.Length == 0,
+                "Saving a new SQL Server item closes the editor and clears plaintext");
+            Item oStored = DatabaseOperations.LoadItem(oEditor.ThisItem.ItemId);
+            Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
+                oStored.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)) ==
+                "Saved through the SQL Server editor",
+                "The item saved through the SQL Server editor reopens and decrypts");
+            DatabaseOperations.DeleteItem(oStored.ItemId);
+        }
+        finally
+        {
+            Dispatcher.CurrentDispatcher.UnhandledException -= oUnhandled;
+            if (oEditor != null)
+            {
+                typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(oEditor, false);
+                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(oEditor, false);
+                oEditor.Close();
+            }
+            SynchronizationContext.SetSynchronizationContext(oPreviousContext);
+        }
+    }
+
+    private static void TestSqlServerSaveValidation(SqlServerVaultStorage oStorage, Item oStored)
+    {
+        using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
+        oConnection.Open();
+        using SqlCommand oSetup = new SqlCommand("CREATE USER [crypture_validation] WITHOUT LOGIN; " +
+            "ALTER ROLE [crypture_domain] ADD MEMBER [crypture_validation]; " +
+            "EXECUTE AS USER = N'crypture_validation'", oConnection);
+        oSetup.ExecuteNonQuery();
+        using SqlCommand oSave = new SqlCommand("[dbo].[SaveItem]", oConnection)
+        {
+            CommandType = CommandType.StoredProcedure, CommandTimeout = 120
+        };
+        oSave.Parameters.Add("@itemId", SqlDbType.BigInt).Direction = ParameterDirection.InputOutput;
+        oSave.Parameters.Add("@expectedRowVersion", SqlDbType.Binary, 8).Value = DBNull.Value;
+        oSave.Parameters.Add("@label", SqlDbType.NVarChar, -1);
+        oSave.Parameters.Add("@itemType", SqlDbType.NVarChar, -1);
+        oSave.Parameters.Add("@modifiedBy", SqlDbType.BigInt).Value = DBNull.Value;
+        oSave.Parameters.Add("@cipherText", SqlDbType.VarBinary, -1);
+        oSave.Parameters.Add("@cipherVector", SqlDbType.VarBinary, -1);
+        oSave.Parameters.Add("@cipherParams", SqlDbType.BigInt);
+        oSave.Parameters.Add("@contentSuite", SqlDbType.BigInt);
+        oSave.Parameters.Add("@authenticationTag", SqlDbType.VarBinary, -1);
+        oSave.Parameters.Add("@protectionDescriptor", SqlDbType.NVarChar, -1);
+        oSave.Parameters.Add("@protectedKey", SqlDbType.VarBinary, -1);
+        oSave.Parameters.Add("@signature", SqlDbType.VarBinary, -1);
+        oSave.Parameters.Add("@recipients", SqlDbType.Structured).TypeName = "dbo.EncryptedRecipient";
+        DataTable oRecipients = new DataTable();
+        oRecipients.Columns.Add("UserId", typeof(long));
+        oRecipients.Columns.Add("CipherKey", typeof(byte[]));
+        oRecipients.Columns.Add("CipherParams", typeof(long));
+        oRecipients.Columns.Add("Signature", typeof(byte[]));
+        foreach (Instance oInstance in oStored.Instances)
+            oRecipients.Rows.Add(oInstance.UserId, oInstance.CipherKey, oInstance.CipherParams, oInstance.Signature);
+        (string Name, Action<SqlCommand> Change)[] oCases =
+        {
+            ("Ignored escrow recipient format", c => ((DataTable)c.Parameters["@recipients"].Value).Rows
+                .Cast<DataRow>().Single(r => (long)r["UserId"] == oStorage.Escrow.CertificateUserId)["CipherParams"] = 2L),
+            ("Oversized text ciphertext", c => c.Parameters["@cipherText"].Value =
+                new byte[Utilities.MaxItemSize + 1]),
+            ("Oversized file ciphertext", c =>
+            {
+                c.Parameters["@itemType"].Value = ".bin";
+                c.Parameters["@cipherText"].Value = new byte[Utilities.MaxCompressedItemSize + 1];
+            }),
+            ("Oversized recipient key", c => ((DataTable)c.Parameters["@recipients"].Value).Rows[0]["CipherKey"] =
+                new byte[4097]),
+            ("Invalid recipient signature", c => ((DataTable)c.Parameters["@recipients"].Value).Rows[0]["Signature"] =
+                new byte[33]),
+            ("Invalid GCM nonce", c => c.Parameters["@cipherVector"].Value = new byte[13]),
+            ("Invalid GCM tag", c => c.Parameters["@authenticationTag"].Value = new byte[17]),
+            ("Invalid CBC block length", c =>
+            {
+                c.Parameters["@contentSuite"].Value = 2L;
+                c.Parameters["@cipherText"].Value = new byte[17];
+                c.Parameters["@cipherVector"].Value = new byte[16];
+                c.Parameters["@authenticationTag"].Value = DBNull.Value;
+            }),
+            ("Oversized CBC ciphertext", c =>
+            {
+                c.Parameters["@itemType"].Value = ".bin";
+                c.Parameters["@contentSuite"].Value = 2L;
+                c.Parameters["@cipherText"].Value = new byte[Utilities.MaxCompressedItemSize + 32];
+                c.Parameters["@cipherVector"].Value = new byte[16];
+                c.Parameters["@authenticationTag"].Value = DBNull.Value;
+            }),
+            ("Missing content suite", c => c.Parameters["@contentSuite"].Value = DBNull.Value),
+            ("Unsupported protection format", c => c.Parameters["@cipherParams"].Value = 99L),
+            ("Oversized item label", c => c.Parameters["@label"].Value = new string('x', 16001)),
+            ("Oversized item type", c => c.Parameters["@itemType"].Value = new string('x', 451)),
+            ("Oversized protection descriptor", c => c.Parameters["@protectionDescriptor"].Value =
+                "SID=" + new string('x', 16001)),
+            ("Oversized recovery envelope", c =>
+            {
+                c.Parameters["@cipherParams"].Value = ItemCryptography.RecoveryFormat;
+                c.Parameters["@signature"].Value = new byte[32];
+                c.Parameters["@protectedKey"].Value = new byte[2225185];
+                foreach (DataRow oRow in ((DataTable)c.Parameters["@recipients"].Value).Rows)
+                    oRow["CipherParams"] = ItemCryptography.RecoveryFormat;
+            }),
+            ("Invalid recovery envelope header", c =>
+            {
+                byte[] oEnvelope = TestRecoveryEnvelope("SID=" + CertificateOperations.CurrentUserSid);
+                Array.Fill(oEnvelope, (byte)255, 0, 4);
+                c.Parameters["@cipherParams"].Value = ItemCryptography.RecoveryFormat;
+                c.Parameters["@signature"].Value = new byte[32];
+                c.Parameters["@protectedKey"].Value = oEnvelope;
+                foreach (DataRow oRow in ((DataTable)c.Parameters["@recipients"].Value).Rows)
+                    oRow["CipherParams"] = ItemCryptography.RecoveryFormat;
+            }),
+            ("Too many recipients", c =>
+            {
+                DataTable oRows = (DataTable)c.Parameters["@recipients"].Value;
+                while (oRows.Rows.Count <= 100)
+                    oRows.Rows.Add(10000L + oRows.Rows.Count, new byte[8],
+                        ItemCryptography.CertificateFormat, new byte[32]);
+            })
+        };
+        List<string> oAccepted = new List<string>();
+        try
+        {
+            // Call the procedure as a domain-role member to bypass all client validation.
+            foreach (var (sName, oChange) in oCases)
+            {
+                oSave.Parameters["@itemId"].Value = 0L;
+                oSave.Parameters["@label"].Value = oStored.Label;
+                oSave.Parameters["@itemType"].Value = oStored.ItemType;
+                oSave.Parameters["@cipherText"].Value = oStored.Cipher.CipherText;
+                oSave.Parameters["@cipherVector"].Value = oStored.Cipher.CipherVector;
+                oSave.Parameters["@cipherParams"].Value = oStored.Cipher.CipherParams;
+                oSave.Parameters["@contentSuite"].Value = oStored.Cipher.ContentSuite;
+                oSave.Parameters["@authenticationTag"].Value = oStored.Cipher.AuthenticationTag;
+                oSave.Parameters["@protectionDescriptor"].Value = DBNull.Value;
+                oSave.Parameters["@protectedKey"].Value = DBNull.Value;
+                oSave.Parameters["@signature"].Value = DBNull.Value;
+                oSave.Parameters["@recipients"].Value = oRecipients.Copy();
+                oChange(oSave);
+                try
+                {
+                    oSave.ExecuteNonQuery();
+                    oAccepted.Add(sName);
+                    Console.WriteLine("ACCEPTED: " + sName);
+                    using SqlCommand oDelete = new SqlCommand("EXEC [dbo].[DeleteItem] @id", oConnection);
+                    oDelete.Parameters.AddWithValue("@id", oSave.Parameters["@itemId"].Value);
+                    oDelete.ExecuteNonQuery();
+                }
+                catch (SqlException oError) when (oError.Number == 50026)
+                {
+                    Check(true, "SQL Server rejects " + sName.ToLowerInvariant());
+                }
+            }
+
+            // Reject malformed edits before replacing the existing ciphertext and recipients.
+            oSave.Parameters["@itemId"].Value = oStored.ItemId;
+            oSave.Parameters["@expectedRowVersion"].Value = oStored.RowVersion;
+            oSave.Parameters["@recipients"].Value = oRecipients.Copy();
+            oSave.Parameters["@cipherVector"].Value = new byte[13];
+            try
+            {
+                oSave.ExecuteNonQuery();
+                throw new Exception("SQL Server accepted an invalid encrypted item update.");
+            }
+            catch (SqlException oError) when (oError.Number == 50026)
+            {
+                Check(true, "SQL Server rejects malformed encrypted item updates");
+            }
+        }
+        finally
+        {
+            oSetup.CommandText = "REVERT";
+            oSetup.ExecuteNonQuery();
+        }
+        Check(oAccepted.Count == 0, "SQL Server rejects every malformed save");
+        Item oUnchanged = DatabaseOperations.LoadItem(oStored.ItemId);
+        using SqlCommand oCount = new SqlCommand("SELECT COUNT(*) FROM [dbo].[Item]", oConnection);
+        Check((int)oCount.ExecuteScalar() == 1 && oUnchanged.RowVersion.SequenceEqual(oStored.RowVersion) &&
+            oUnchanged.Cipher.CipherText.SequenceEqual(oStored.Cipher.CipherText) &&
+            oUnchanged.Instances.Count == oStored.Instances.Count && oUnchanged.Instances.All(i =>
+                i.CipherKey.SequenceEqual(oStored.Instances.Single(j => j.UserId == i.UserId).CipherKey)),
+            "Rejected saves leave the stored item intact and create no item rows");
+    }
+
+    private static void TestSqlServerContentLimits(SqlServerVaultStorage oStorage, User[] oRecipients,
+        User oPrimary, X509Certificate2 oCertificate)
+    {
+        // Verify real encryption and decryption at the server's empty and maximum content boundaries.
+        foreach (ContentEncryptionSuite nSuite in Enum.GetValues<ContentEncryptionSuite>())
+        {
+            foreach (var (sType, nLength) in new[]
+            {
+                ("text", 0), ("text", Utilities.MaxItemSize), (".bin", Utilities.MaxCompressedItemSize)
+            })
+            {
+                byte[] oPlainText = new byte[nLength];
+                if (nLength != 0) oPlainText[0] = 1;
+                Item oItem = new Item { Label = "SQL content boundary", ItemType = sType };
+                Item oEncrypted = new Item { Label = oItem.Label, ItemType = sType };
+                ItemCryptography.Encrypt(oEncrypted, oPlainText, oRecipients, nContentSuite: nSuite);
+                SqlServerItemOperations.Save(oStorage, oItem, oEncrypted);
+                Item oLoaded = DatabaseOperations.LoadItem(oItem.ItemId);
+                Check(ItemCryptography.Decrypt(oLoaded,
+                    oLoaded.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)
+                    .SequenceEqual(oPlainText),
+                    "SQL Server round trips " + nSuite + " " + sType + " content at " + nLength + " bytes");
+                DatabaseOperations.DeleteItem(oItem.ItemId);
+            }
         }
     }
 
@@ -246,72 +509,50 @@ internal static partial class RegressionTests
         return (long)oId.Value;
     }
 
-    private static void TestSqlServerUpgrade(SqlServerVaultStorage oStorage, User oUser)
+    private static void TestSqlServerValidation(SqlServerVaultStorage oStorage, User oUser)
     {
-        DatabaseOperations.SaveItem(new Item { Label = "Upgrade affiliation", ItemType = "text",
+        DatabaseOperations.SaveItem(new Item { Label = "Schema validation", ItemType = "text",
             ModifiedBy = oUser.UserId }, [3], new[] { oUser });
+        using CryptureEntities oContext = new CryptureEntities();
+        long nItemId = oContext.Items.Single().ItemId;
+        byte[] oCipherText = DatabaseOperations.LoadItem(nItemId).Cipher.CipherText;
+        string sEscrowLabel = oStorage.Escrow.Label;
         using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
         oConnection.Open();
         using SqlCommand oCommand = oConnection.CreateCommand();
-        oCommand.CommandText = "DROP PROCEDURE [dbo].[EnrollCertificate]; " +
-            "DROP PROCEDURE [dbo].[VerifyUnboundCertificate]; " +
-            "DROP PROCEDURE [dbo].[MarkEscrowCertificate]; " +
-            "DROP PROCEDURE [dbo].[SetVaultEscrowPrincipal]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP CONSTRAINT [FK_CryptureVault_EscrowCertificate]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP CONSTRAINT [CK_CryptureVault_Escrow]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP COLUMN [EscrowCertificateUserId], " +
-            "[EscrowDescriptor], [EscrowLabel]; " +
-            "ALTER TABLE [dbo].[Cipher] DROP COLUMN [EscrowLabel]; " +
-            "EXEC sys.sp_refreshview N'dbo.AuthorizedCipher'; " +
-            "ALTER TABLE [dbo].[User] DROP CONSTRAINT [DF_User_IsEscrow]; " +
-            "ALTER TABLE [dbo].[User] DROP COLUMN [IsEscrow]; " +
-            "GRANT INSERT ON [dbo].[User] TO [crypture_domain]; " +
-            "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 2 WHERE [Id] = 1";
-        oCommand.ExecuteNonQuery();
-        using ManualResetEventSlim oStart = new ManualResetEventSlim();
-        Task<Exception>[] oUpgrades = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+        try
         {
-            oStart.Wait();
-            try { oStorage.Validate(); return null; }
-            catch (Exception oError) { return oError; }
-        })).ToArray();
-        oStart.Set();
-        Task.WaitAll(oUpgrades);
-        if (oUpgrades.Any(t => t.Result != null))
-            throw new Exception("Concurrent Vault upgrades failed.", oUpgrades.First(t => t.Result != null).Result);
-        Check(true, "Concurrent Vault owners apply the schema upgrade once");
-        using CryptureEntities oContext = new CryptureEntities();
-        Check(oContext.Users.Single().Sid == null && !oContext.Items.Any(),
-            "Upgrading a shared Vault quarantines previously unverified affiliations");
-        oCommand.CommandText = "EXECUTE AS USER = N'crypture_probe'; " +
-            "SELECT HAS_PERMS_BY_NAME(N'dbo.User', N'OBJECT', N'INSERT'); REVERT";
-        Check((int)oCommand.ExecuteScalar() == 0,
-            "Upgrade revokes direct certificate inserts from the domain role");
-        oCommand.CommandText = "EXEC [dbo].[VerifyUnboundCertificate] @userId, @certificate, @sid";
-        oCommand.Parameters.AddWithValue("@userId", oUser.UserId);
-        oCommand.Parameters.AddWithValue("@certificate", new byte[] { 1, 2, 3 });
-        oCommand.Parameters.AddWithValue("@sid", oUser.Sid);
-        Reject(() => oCommand.ExecuteNonQuery(), "A different certificate cannot claim a quarantined affiliation");
-        oCommand.Parameters["@certificate"].Value = oUser.Certificate;
-        oCommand.ExecuteNonQuery();
-        Check(oContext.Items.Any() && oContext.Users.AsNoTracking().Single().Sid == oUser.Sid,
-            "Verified enrollment restores access to the existing encrypted item");
-        oCommand.Parameters.Clear();
+            // Unsupported schemas must be rejected without changing stored data or certificate affiliations.
+            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 7 })
+            {
+                oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = @version WHERE [Id] = 1";
+                oCommand.Parameters.AddWithValue("@version", nVersion);
+                oCommand.ExecuteNonQuery();
+                oCommand.Parameters.Clear();
+                bool bRejected = false;
+                try { oStorage.Validate(); }
+                catch (InvalidDataException) { bRejected = true; }
+                Check(bRejected, "Opening an unsupported SQL Server schema is rejected: " + nVersion);
+                oCommand.CommandText = "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = 1";
+                Check((int)oCommand.ExecuteScalar() == nVersion &&
+                    oContext.Users.AsNoTracking().Single().Sid == oUser.Sid &&
+                    DatabaseOperations.LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
+                    "Rejected SQL Server opens preserve the schema, affiliations, and encrypted content");
+            }
+        }
+        finally
+        {
+            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 6 WHERE [Id] = 1";
+            oCommand.Parameters.Clear();
+            oCommand.ExecuteNonQuery();
+        }
 
-        // A Vault already using verified affiliations gains per-Vault escrow without changing its recipients.
-        oCommand.CommandText = "DROP PROCEDURE [dbo].[SetVaultEscrowPrincipal]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP CONSTRAINT [FK_CryptureVault_EscrowCertificate]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP CONSTRAINT [CK_CryptureVault_Escrow]; " +
-            "ALTER TABLE [dbo].[CryptureVault] DROP COLUMN [EscrowCertificateUserId], " +
-            "[EscrowDescriptor], [EscrowLabel]; " +
-            "ALTER TABLE [dbo].[Cipher] DROP COLUMN [EscrowLabel]; " +
-            "EXEC sys.sp_refreshview N'dbo.AuthorizedCipher'; " +
-            "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 3 WHERE [Id] = 1";
-        oCommand.ExecuteNonQuery();
-        oStorage.Validate();
-        oCommand.CommandText = "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = 1";
-        Check((int)oCommand.ExecuteScalar() == 4 && oStorage.Escrow == null && oContext.Items.Any(),
-            "Verified SQL Server Vaults upgrade without changing saved affiliations");
+        // Concurrent opens read the same saved escrow policy without requiring a schema writer.
+        Task.WaitAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() => oStorage.Validate())).ToArray());
+        Check(oStorage.Escrow.Label == sEscrowLabel &&
+            oContext.Users.AsNoTracking().Single().Sid == oUser.Sid &&
+            DatabaseOperations.LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
+            "Concurrent SQL Server opens preserve escrow, affiliations, and encrypted content");
     }
 
     private static void TestSqlServerEscrow(SqlServerVaultStorage oStorage, User oPrimary)
@@ -331,13 +572,13 @@ internal static partial class RegressionTests
             {
                 Cipher = new Cipher
                 {
-                    CipherText = [1], CipherVector = [1], CipherParams = ItemCryptography.RecoveryFormat,
-                    ContentSuite = 1, AuthenticationTag = [1],
-                    ProtectedKey = TestRecoveryEnvelope(sEscrowDescriptor), Signature = [1]
+                    CipherText = [1], CipherVector = new byte[12], CipherParams = ItemCryptography.RecoveryFormat,
+                    ContentSuite = 1, AuthenticationTag = new byte[16],
+                    ProtectedKey = TestRecoveryEnvelope(sEscrowDescriptor), Signature = new byte[32]
                 }
             };
-            oEncrypted.Instances.Add(new Instance { UserId = oPrimary.UserId, CipherKey = [1],
-                CipherParams = ItemCryptography.RecoveryFormat, Signature = [1] });
+            oEncrypted.Instances.Add(new Instance { UserId = oPrimary.UserId, CipherKey = new byte[8],
+                CipherParams = ItemCryptography.RecoveryFormat, Signature = new byte[32] });
             oEncrypted.Cipher.ProtectedKey = TestRecoveryEnvelope("SID=S-1-5-32-545");
             try
             {
@@ -355,6 +596,22 @@ internal static partial class RegressionTests
                 RecoveryProtection.ReadWindowsKeys(oWindowsStored.Cipher).Any(e =>
                     e.Key == sEscrowDescriptor),
                 "Windows escrow is saved and named on the item despite a different local config");
+
+            // Certificate-only protection must not satisfy escrow with an unused recovery envelope.
+            Item oIgnoredEscrow = new Item { Label = "Ignored Windows escrow", ItemType = "text" };
+            Item oCertificateOnly = new Item { Label = oIgnoredEscrow.Label, ItemType = oIgnoredEscrow.ItemType };
+            ItemCryptography.Encrypt(oCertificateOnly, [2], new[] { oPrimary });
+            oCertificateOnly.Cipher.ProtectedKey = TestRecoveryEnvelope(sEscrowDescriptor);
+            try
+            {
+                SqlServerItemOperations.Save(oStorage, oIgnoredEscrow, oCertificateOnly);
+                throw new Exception("SQL Server accepted a recovery envelope ignored by the item format.");
+            }
+            catch (SqlException oError) when (oError.Number == 50026)
+            {
+                Check(oIgnoredEscrow.ItemId == 0,
+                    "SQL Server rejects Windows escrow data ignored by certificate-only protection");
+            }
 
             using (SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString))
             {
@@ -374,10 +631,10 @@ internal static partial class RegressionTests
             {
                 SqlServerItemOperations.Save(oStorage, oMissingCertificate, new Item
                 {
-                    Cipher = new Cipher { CipherText = [1], CipherVector = [1], CipherParams = 2,
-                        ContentSuite = 1, AuthenticationTag = [1],
+                    Cipher = new Cipher { CipherText = [1], CipherVector = new byte[12], CipherParams = 2,
+                        ContentSuite = 1, AuthenticationTag = new byte[16],
                         ProtectionDescriptor = "SID=" + WindowsIdentity.GetCurrent().User.Value,
-                        ProtectedKey = [1], Signature = [1] }
+                        ProtectedKey = [1], Signature = new byte[32] }
                 });
                 throw new Exception("SQL Server accepted an item without the certificate escrow identity.");
             }
@@ -460,12 +717,13 @@ internal static partial class RegressionTests
         {
             Cipher = new Cipher
             {
-                CipherText = [1], CipherVector = [1], CipherParams = ItemCryptography.RecoveryFormat,
-                ContentSuite = 1, AuthenticationTag = [1], ProtectedKey = oRecoveryEnvelope, Signature = [1]
+                CipherText = [1], CipherVector = new byte[12], CipherParams = ItemCryptography.RecoveryFormat,
+                ContentSuite = 1, AuthenticationTag = new byte[16],
+                ProtectedKey = oRecoveryEnvelope, Signature = new byte[32]
             }
         };
         oRecoveryEncrypted.Instances.Add(new Instance { UserId = oStorage.Escrow.CertificateUserId.Value,
-            CipherKey = [1], CipherParams = ItemCryptography.RecoveryFormat, Signature = [1] });
+            CipherKey = new byte[8], CipherParams = ItemCryptography.RecoveryFormat, Signature = new byte[32] });
         SqlServerItemOperations.Save(oStorage, oRecoveryItem, oRecoveryEncrypted);
         oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[Item] WHERE [ItemId] = @itemId";
         oCommand.Parameters.AddWithValue("@itemId", oRecoveryItem.ItemId);
@@ -477,13 +735,13 @@ internal static partial class RegressionTests
         {
             Cipher = new Cipher
             {
-                CipherText = [1], CipherVector = [1], CipherParams = 1, ContentSuite = 1,
-                AuthenticationTag = [1], ProtectionDescriptor = "SID=S-1-5-32-545",
-                ProtectedKey = [1], Signature = [1]
+                CipherText = [1], CipherVector = new byte[12], CipherParams = ItemCryptography.RecoveryFormat,
+                ContentSuite = 1, AuthenticationTag = new byte[16], ProtectionDescriptor = "SID=S-1-5-32-545",
+                ProtectedKey = TestRecoveryEnvelope("SID=S-1-5-32-545"), Signature = new byte[32]
             }
         };
         oGroupEncrypted.Instances.Add(new Instance { UserId = oStorage.Escrow.CertificateUserId.Value,
-            CipherKey = [1], CipherParams = 1, Signature = [1] });
+            CipherKey = new byte[8], CipherParams = ItemCryptography.RecoveryFormat, Signature = new byte[32] });
         SqlServerItemOperations.Save(oStorage, oGroupItem, oGroupEncrypted);
         oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[Item] WHERE [ItemId] = @itemId";
         oCommand.Parameters.AddWithValue("@itemId", oGroupItem.ItemId);
@@ -531,11 +789,13 @@ internal static partial class RegressionTests
             Reject(() => oCommand.ExecuteNonQuery(), "Domain role cannot insert item rows directly");
             oCommand.CommandText = "DECLARE @r [dbo].[EncryptedRecipient]; " +
                 "INSERT INTO @r ([UserId], [CipherKey], [CipherParams], [Signature]) " +
-                "SELECT TOP (1) [UserId], 0x01, 2, 0x01 FROM [dbo].[User] WHERE [Sid] = @sid; " +
+                "SELECT TOP (1) [UserId], CONVERT(binary(8), 0x01), 3, CONVERT(binary(32), 0x01) " +
+                "FROM [dbo].[User] WHERE [Sid] = @sid; " +
+                "DECLARE @nonce binary(12) = 0x01, @tag binary(16) = 0x01; " +
                 "DECLARE @newId bigint = 0; EXEC [dbo].[SaveItem] @itemId = @newId OUTPUT, " +
                 "@expectedRowVersion = NULL, @label = N'Forged modifier', @itemType = N'text', " +
-                "@modifiedBy = @otherId, @cipherText = 0x01, @cipherVector = 0x01, @cipherParams = 2, " +
-                "@contentSuite = 1, @authenticationTag = 0x01, @protectionDescriptor = NULL, " +
+                "@modifiedBy = @otherId, @cipherText = 0x01, @cipherVector = @nonce, @cipherParams = 3, " +
+                "@contentSuite = 1, @authenticationTag = @tag, @protectionDescriptor = NULL, " +
                 "@protectedKey = NULL, @signature = NULL, @recipients = @r";
             oCommand.Parameters.AddWithValue("@sid", sCurrentSid);
             oCommand.Parameters.AddWithValue("@otherId", nOtherUserId);
@@ -546,11 +806,13 @@ internal static partial class RegressionTests
             oCommand.Parameters.Clear();
             oCommand.CommandText = "DECLARE @r [dbo].[EncryptedRecipient]; " +
                 "INSERT INTO @r ([UserId], [CipherKey], [CipherParams], [Signature]) " +
-                "SELECT TOP (1) [UserId], 0x01, 2, 0x01 FROM [dbo].[User] WHERE [Sid] = @sid; " +
+                "SELECT TOP (1) [UserId], CONVERT(binary(8), 0x01), 3, CONVERT(binary(32), 0x01) " +
+                "FROM [dbo].[User] WHERE [Sid] = @sid; " +
+                "DECLARE @nonce binary(12) = 0x01, @tag binary(16) = 0x01; " +
                 "DECLARE @newId bigint = 0; EXEC [dbo].[SaveItem] @itemId = @newId OUTPUT, " +
                 "@expectedRowVersion = NULL, @label = N'Role item', @itemType = N'text', " +
-                "@modifiedBy = NULL, @cipherText = 0x01, @cipherVector = 0x01, @cipherParams = 2, " +
-                "@contentSuite = 1, @authenticationTag = 0x01, @protectionDescriptor = NULL, " +
+                "@modifiedBy = NULL, @cipherText = 0x01, @cipherVector = @nonce, @cipherParams = 3, " +
+                "@contentSuite = 1, @authenticationTag = @tag, @protectionDescriptor = NULL, " +
                 "@protectedKey = NULL, @signature = NULL, @recipients = @r; SELECT @newId";
             oCommand.Parameters.AddWithValue("@sid", sCurrentSid);
             long nRoleItem = (long)oCommand.ExecuteScalar();

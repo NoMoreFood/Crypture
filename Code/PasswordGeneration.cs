@@ -21,9 +21,28 @@ namespace Crypture
         public bool ExcludeSimilar { get; set; } = true;
         public bool RequireEachType { get; set; } = true;
 
+        internal static PasswordOptions LoadPreferences()
+        {
+            // Read a fresh user snapshot when opening the generator.
+            Properties.Settings oSettings = new Properties.Settings();
+            PasswordOptions oOptions = oSettings.PasswordGeneratorOptions ?? ReadDefaults();
+            oOptions.GetCharacterGroups();
+            return oOptions;
+        }
+
+        internal static void SavePreferences(PasswordOptions oOptions)
+        {
+            oOptions.GetCharacterGroups();
+
+            // Save the complete selection without overwriting unrelated preferences cached by the main window.
+            Properties.Settings oSettings = new Properties.Settings();
+            oSettings.PasswordGeneratorOptions = oOptions;
+            oSettings.Save();
+        }
+
         internal static PasswordOptions ReadDefaults()
         {
-            // Read the adjacent configuration when opening a generator without saved Vault preferences.
+            // Read the adjacent configuration when the user has no saved generator preferences.
             string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
             try
             {

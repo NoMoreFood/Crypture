@@ -399,7 +399,9 @@ namespace Crypture
             }
             finally
             {
-                SetBusy(false);
+                // A successful save closes the editor without refreshing its draft model.
+                if (bSaved) bBusy = false;
+                else SetBusy(false);
             }
             if (!bSaved) return;
 

@@ -9,13 +9,13 @@ CREATE TABLE [dbo].[CryptureVault] (
         ([EscrowCertificateUserId] IS NOT NULL AND [EscrowDescriptor] IS NULL AND [EscrowLabel] IS NOT NULL) OR
         ([EscrowCertificateUserId] IS NULL AND [EscrowDescriptor] IS NOT NULL AND [EscrowLabel] IS NOT NULL))
 );
-INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 4);
+INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 6);
 
 CREATE TABLE [dbo].[User] (
     [UserId] bigint IDENTITY(1,1) NOT NULL CONSTRAINT [PK_User] PRIMARY KEY,
     [Certificate] varbinary(max) NOT NULL,
     [CertificateHash] AS CONVERT(binary(32), HASHBYTES('SHA2_256', [Certificate])) PERSISTED,
-    [Sid] nvarchar(450) NULL,
+    [Sid] nvarchar(450) NOT NULL,
     [IsEscrow] bit NOT NULL CONSTRAINT [DF_User_IsEscrow] DEFAULT 0
 );
 CREATE UNIQUE INDEX [UX_User_CertificateHash] ON [dbo].[User] ([CertificateHash]);
@@ -61,19 +61,3 @@ CREATE TABLE [dbo].[Instance] (
 );
 CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [dbo].[Instance] ([ItemId], [UserId]);
 CREATE INDEX [IX_Instance_User] ON [dbo].[Instance] ([UserId]);
-
-CREATE TABLE [dbo].[PasswordGeneratorSettings] (
-    [Id] int NOT NULL CONSTRAINT [PK_PasswordGeneratorSettings] PRIMARY KEY CHECK ([Id] = 1),
-    [MinimumLength] int NOT NULL CHECK ([MinimumLength] BETWEEN 1 AND 1024),
-    [MaximumLength] int NOT NULL,
-    [IncludeUppercase] bit NOT NULL,
-    [IncludeLowercase] bit NOT NULL,
-    [IncludeDigits] bit NOT NULL,
-    [IncludeSymbols] bit NOT NULL,
-    [SymbolCharacters] nvarchar(94) NOT NULL,
-    [ExcludedCharacters] nvarchar(256) NOT NULL,
-    [ExcludeSimilar] bit NOT NULL,
-    [RequireEachType] bit NOT NULL,
-    CONSTRAINT [CK_PasswordGeneratorSettings_Length] CHECK
-        ([MinimumLength] BETWEEN 1 AND 1024 AND [MaximumLength] BETWEEN [MinimumLength] AND 1024)
-);

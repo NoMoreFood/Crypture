@@ -9,15 +9,12 @@ namespace Crypture
     {
         public string SelectedPassword { get; private set; }
         private bool bLoading = true;
-        private readonly bool bHasVault = !String.IsNullOrEmpty(CryptureEntities.ConnectionString);
 
         public PasswordGenerator(bool bInsertIntoItem = false)
         {
             InitializeComponent();
             Utilities.EnableClipboardTimeout(oGeneratedPassword);
-            PasswordOptions oOptions = bHasVault
-                ? DatabaseOperations.LoadPasswordOptions() : PasswordOptions.ReadDefaults();
-            if (!bHasVault) oSettingsHint.Text = "No Vault is open. Settings apply only to this window.";
+            PasswordOptions oOptions = PasswordOptions.LoadPreferences();
             oMinimumLength.Text = oOptions.MinimumLength.ToString(CultureInfo.InvariantCulture);
             oMaximumLength.Text = oOptions.MaximumLength.ToString(CultureInfo.InvariantCulture);
             oUppercase.IsChecked = oOptions.IncludeUppercase;
@@ -79,12 +76,12 @@ namespace Crypture
             {
                 PasswordOptions oOptions = ReadOptions();
                 string sPassword = PasswordGeneration.Generate(oOptions);
-                if (bHasVault) DatabaseOperations.SavePasswordOptions(oOptions);
+                PasswordOptions.SavePreferences(oOptions);
                 oGeneratedPassword.Text = sPassword;
                 oCopyButton.IsEnabled = true;
                 oInsertButton.IsEnabled = true;
                 oPasswordStatus.Text = sPassword.Length + " characters. " +
-                    (bHasVault ? "Settings saved in this Vault." : "Ready to copy.");
+                    "Settings saved for your Windows user.";
 
                 // Keep the generated password and copy action visible in small windows.
                 oPasswordResult.UpdateLayout();

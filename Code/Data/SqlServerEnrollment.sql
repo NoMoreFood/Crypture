@@ -1,5 +1,5 @@
 -- Vault owners verify a certificate's Windows identity before calling these procedures.
-CREATE OR ALTER PROCEDURE [dbo].[EnrollCertificate]
+CREATE PROCEDURE [dbo].[EnrollCertificate]
     @certificate varbinary(max), @sid nvarchar(450), @userId bigint OUTPUT
 AS
 BEGIN
@@ -11,20 +11,8 @@ BEGIN
     SET @userId = CONVERT(bigint, SCOPE_IDENTITY());
 END;
 GO
-CREATE OR ALTER PROCEDURE [dbo].[VerifyUnboundCertificate]
-    @userId bigint, @certificate varbinary(max), @sid nvarchar(450)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    IF [dbo].[SidBytes](@sid) IS NULL OR @certificate IS NULL
-        THROW 50017, 'A valid public certificate and Windows SID are required.', 1;
-    UPDATE [dbo].[User] SET [Sid] = @sid WHERE [UserId] = @userId AND [Sid] IS NULL AND
-        [Certificate] = @certificate;
-    IF @@ROWCOUNT <> 1 THROW 50020, 'The certificate is not awaiting verification.', 1;
-END;
-GO
 -- The owner can select one enrolled certificate as the Vault's current recovery identity.
-CREATE OR ALTER PROCEDURE [dbo].[MarkEscrowCertificate]
+CREATE PROCEDURE [dbo].[MarkEscrowCertificate]
     @userId bigint, @label nvarchar(450) = NULL
 AS
 BEGIN
@@ -36,7 +24,7 @@ BEGIN
             THROW 50025, 'A short escrow identity label is required.', 1;
         DECLARE @locked int;
         SELECT @locked = [Id] FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = 1;
-        IF NOT EXISTS (SELECT 1 FROM [dbo].[User] WHERE [UserId] = @userId AND [Sid] IS NOT NULL)
+        IF NOT EXISTS (SELECT 1 FROM [dbo].[User] WHERE [UserId] = @userId)
             THROW 50018, 'The escrow certificate is not enrolled and verified.', 1;
         UPDATE [dbo].[User] SET [IsEscrow] = 0 WHERE [IsEscrow] = 1;
         UPDATE [dbo].[User] SET [IsEscrow] = 1 WHERE [UserId] = @userId;
@@ -53,7 +41,7 @@ BEGIN
 END;
 GO
 -- User and group escrow uses the existing Windows SID descriptor in the saved recovery envelope.
-CREATE OR ALTER PROCEDURE [dbo].[SetVaultEscrowPrincipal]
+CREATE PROCEDURE [dbo].[SetVaultEscrowPrincipal]
     @sid nvarchar(450), @label nvarchar(450)
 AS
 BEGIN

@@ -41,7 +41,8 @@ namespace Crypture
                 oUser.ToTable("User");
                 oUser.HasKey(u => u.UserId);
                 oUser.Property(u => u.Certificate).IsRequired();
-                if (!oStorage.IsSqlServer)
+                if (oStorage.IsSqlServer) oUser.Property(u => u.Sid).IsRequired();
+                else
                 {
                     oUser.HasIndex(u => u.Certificate).IsUnique();
                     oUser.Ignore(u => u.IsEscrow);

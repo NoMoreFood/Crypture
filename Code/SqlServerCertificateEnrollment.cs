@@ -10,8 +10,7 @@ namespace Crypture
 {
     internal static class SqlServerCertificateEnrollment
     {
-        internal static void EnrollOwn(SqlServerVaultStorage oStorage, X509Certificate2 oCertificate,
-            long? nUnboundUserId = null)
+        internal static void EnrollOwn(SqlServerVaultStorage oStorage, X509Certificate2 oCertificate)
         {
             // Prove the current Windows account can use the matching private key before binding its SID.
             byte[] oChallenge = RandomNumberGenerator.GetBytes(32);
@@ -31,7 +30,7 @@ namespace Crypture
                         throw new CryptographicException("The certificate private key did not match.");
                 }
                 finally { CryptographicOperations.ZeroMemory(oUnwrapped); }
-                Enroll(oStorage, oCertificate.RawData, CertificateOperations.CurrentUserSid, nUnboundUserId);
+                Enroll(oStorage, oCertificate.RawData, CertificateOperations.CurrentUserSid);
             }
             finally
             {
@@ -41,10 +40,10 @@ namespace Crypture
         }
 
         internal static void EnrollFromDirectory(SqlServerVaultStorage oStorage, X509Certificate2 oCertificate,
-            string sSid, long? nUnboundUserId = null)
+            string sSid)
         {
             VerifyDirectoryBinding(oCertificate.RawData, sSid);
-            Enroll(oStorage, oCertificate.RawData, sSid, nUnboundUserId);
+            Enroll(oStorage, oCertificate.RawData, sSid);
         }
 
         internal static void MarkEscrow(SqlServerVaultStorage oStorage, User oUser)
@@ -89,21 +88,18 @@ namespace Crypture
                 throw new InvalidOperationException("The Active Directory certificate is not valid for encryption.");
         }
 
-        private static void Enroll(SqlServerVaultStorage oStorage, byte[] oCertificate, string sSid,
-            long? nUnboundUserId)
+        private static void Enroll(SqlServerVaultStorage oStorage, byte[] oCertificate, string sSid)
         {
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand(nUnboundUserId.HasValue
-                ? "[dbo].[VerifyUnboundCertificate]" : "[dbo].[EnrollCertificate]", oConnection)
+            using SqlCommand oCommand = new SqlCommand("[dbo].[EnrollCertificate]", oConnection)
             {
                 CommandType = CommandType.StoredProcedure
             };
             oCommand.Parameters.Add("@certificate", SqlDbType.VarBinary, -1).Value = oCertificate;
             oCommand.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = sSid;
             SqlParameter oUserId = oCommand.Parameters.Add("@userId", SqlDbType.BigInt);
-            oUserId.Direction = nUnboundUserId.HasValue ? ParameterDirection.Input : ParameterDirection.Output;
-            if (nUnboundUserId.HasValue) oUserId.Value = nUnboundUserId.Value;
+            oUserId.Direction = ParameterDirection.Output;
             oCommand.ExecuteNonQuery();
         }
     }

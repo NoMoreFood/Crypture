@@ -41,7 +41,7 @@ internal static partial class RegressionTests
                 oContext.Users.AddRange(oUsers);
                 oContext.SaveChanges();
             }
-            DatabaseOperations.SavePasswordOptions(ConcurrentOptions(30));
+            PasswordOptions.SavePreferences(ConcurrentOptions(30));
             for (int nWriter = 0; nWriter < ConcurrentWriterCount; nWriter++)
                 SaveConcurrentItem(new Item(), "concurrent:" + nWriter + ":0", oUsers);
             long[] nIds;
@@ -191,7 +191,7 @@ internal static partial class RegressionTests
                 "Concurrent backups to one filename publish one valid snapshot and clean temporary files");
             ValidateConcurrentVault(Path.Combine(sRoot, "competing-backup.cryptdb"), oCert, oOtherCert);
 
-            string sLegacy = sSchema[..sSchema.IndexOf("CREATE TABLE IF NOT EXISTS", StringComparison.Ordinal)]
+            string sLegacy = sSchema
                 .Replace("\t[ModifiedByIdentity] nvarchar NULL,\r\n", "")
                 .Replace("\t[ContentSuite] integer NULL,\r\n", "")
                 .Replace("\t[AuthenticationTag] blob NULL,\r\n", "")
@@ -206,7 +206,7 @@ internal static partial class RegressionTests
                 Enumerable.Range(0, 6).Select(i => "migrate-" + i));
             CryptureEntities.DatabasePath = sLegacyPath;
             using (CryptureEntities oContext = new()) oContext.Items.Include(i => i.Cipher).ToList();
-            Check(oCounts["migrations"] == 6 && DatabaseOperations.LoadPasswordOptions().MinimumLength == 20,
+            Check(oCounts["migrations"] == 6 && VaultHasNoPreferences(sLegacyPath),
                 "Six simultaneous legacy Vault opens complete the schema migration without duplicate columns");
         }
         finally
@@ -369,7 +369,7 @@ internal static partial class RegressionTests
                         oContext.SaveChanges();
                     }
                     File.WriteAllText(sProgress, "revision " + nRevision + ": settings");
-                    DatabaseOperations.SavePasswordOptions(ConcurrentOptions(30 + nWriter * 40 + nRevision));
+                    PasswordOptions.SavePreferences(ConcurrentOptions(30 + nWriter * 40 + nRevision));
                     oCounts["writes"] += 2;
                     oCounts["deletes"]++;
                 }
@@ -389,7 +389,7 @@ internal static partial class RegressionTests
                         oCounts["reads"]++;
                         if (bActive) oCounts["overlappingReads"]++;
                     }
-                    PasswordOptions oOptions = DatabaseOperations.LoadPasswordOptions();
+                    PasswordOptions oOptions = PasswordOptions.LoadPreferences();
                     PasswordOptions oExpected = ConcurrentOptions(oOptions.MinimumLength);
                     if (oOptions.MaximumLength != oExpected.MaximumLength ||
                         oOptions.IncludeDigits != oExpected.IncludeDigits ||

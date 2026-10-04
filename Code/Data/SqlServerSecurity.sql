@@ -229,7 +229,6 @@ GRANT SELECT ON [dbo].[Item] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedCipher] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedInstance] TO [crypture_domain];
 GRANT SELECT ON [dbo].[User] TO [crypture_domain];
-GRANT SELECT, INSERT, UPDATE ON [dbo].[PasswordGeneratorSettings] TO [crypture_domain];
 GRANT EXECUTE, REFERENCES ON TYPE::[dbo].[EncryptedRecipient] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[DeleteItem] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[RemoveCertificate] TO [crypture_domain];

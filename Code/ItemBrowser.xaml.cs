@@ -39,7 +39,6 @@ namespace Crypture
 
         private string sDatabasePath;
         private bool bCanEnrollCertificates = true;
-        private bool bNeedsCertificateReview;
         private List<User> CertificateList = new List<User>();
         private HashSet<string> PrivateCertificates = new HashSet<string>();
 
@@ -56,8 +55,7 @@ namespace Crypture
             {
                 User oExisting = oContent.Users.ToList().FirstOrDefault(u =>
                     u.Certificate.AsSpan().SequenceEqual(oCert.RawData));
-                if (oExisting != null && (CryptureEntities.Storage is not SqlServerVaultStorage ||
-                    oExisting.Sid != null))
+                if (oExisting != null)
                 {
                     MessageBox.Show(this,
                          "The selected certificate is already in the Vault.",
@@ -68,9 +66,8 @@ namespace Crypture
                 if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
                 {
                     if (bFromDirectory)
-                        SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier,
-                            oExisting?.UserId);
-                    else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert, oExisting?.UserId);
+                        SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier);
+                    else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert);
                     oRefreshItemButton_Click();
                     return true;
                 }
@@ -400,8 +397,6 @@ namespace Crypture
             }
             ItemList = new ObservableCollection<Item>(oItems.OrderBy(i => i.Label));
             CertificateList = oUsers.OrderBy(u => u.Name).ToList();
-            bNeedsCertificateReview = CryptureEntities.Storage.IsSqlServer &&
-                CertificateList.Any(u => u.Sid == null);
             PrivateCertificates = oPrivate;
             ApplyFilter();
         }
@@ -438,8 +433,6 @@ namespace Crypture
                 : bCertificates ? bCanEnrollCertificates
                     ? "Add a certificate from your personal store to get started."
                     : "Ask the Vault owner to enroll a verified certificate."
-                : bNeedsCertificateReview
-                    ? "Some items may be hidden until the Vault owner verifies certificate affiliations."
                 : "No items to show. Add an item or adjust the accessibility filter.";
             oEmptyState.Visibility = nCount == 0 && !oAdvancedTab.IsSelected
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -568,14 +561,6 @@ namespace Crypture
                 if (oStorage is SqlServerVaultStorage oSqlServer)
                     RememberRecentEntry(SqlRecentPrefix + oSqlServer.RecentConnection);
                 else RememberRecentVault(oStorage.DisplayName);
-                if (oStorage is SqlServerVaultStorage { UpgradedOnOpen: true } &&
-                    bNeedsCertificateReview)
-                    Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
-                        MessageBox.Show(this, "Certificate affiliations need verification. Open Certificates " +
-                            "and add each unverified certificate from Active Directory or your personal " +
-                            "store. Encrypted items remain stored and become accessible as their " +
-                            "certificates are verified.", "Verify Certificate Affiliations",
-                            MessageBoxButton.OK, MessageBoxImage.Information)));
                 return true;
             }
             catch (Exception eError)
