@@ -1,7 +1,7 @@
 <Window x:Class="Crypture.SqlServerVaultDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="SQL Server Vault" Width="620" Height="455" MinWidth="560" MinHeight="430"
+    Title="SQL Server Vault" Width="620" MinWidth="560" SizeToContent="Height"
     WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
     Background="{DynamicResource Crypture.WindowBrush}"
     Foreground="{DynamicResource Crypture.TextBrush}">
@@ -12,7 +12,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
@@ -52,7 +52,7 @@
                     AutomationProperties.Name="Selected escrow identity" />
             </StackPanel>
         </Border>
-        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,0" TextWrapping="Wrap"
+        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,16" TextWrapping="Wrap"
             Foreground="{DynamicResource Crypture.MutedBrush}">
             <Run Text="Uses your Windows account over an encrypted connection. Item visibility follows saved " />
             <Run Text="certificate recipients and Windows protection SIDs. Certificates are shared in the Vault." />
