@@ -47,10 +47,6 @@
                     <ribbon:RibbonButton x:Name="oViewItemButton" Height="Auto" Margin="6,6,6,0" Click="oViewItemButton_Click" Label="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" SmallImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oRemoveItemButton" Height="Auto" Margin="6,6,6,0" Click="oRemoveItemUser_Click" Label="Remove Item" SmallImageSource="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oItemDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                 </ribbon:RibbonGroup>
-                <ribbon:RibbonGroup x:Name="oProtectedItemScopeRibbonGroupBox" Header="Protected Item Scope" IsEnabled="False">
-                    <CheckBox x:Name="oHideAccessible" Margin="6,6,6,0" Click="oHideAccessible_Click" Content="Hide Missing Certificate Keys"
-                        ToolTip="Hide Certificate Based items without a matching local private key. User Based items remain visible; Windows checks access when you decrypt." />
-                </ribbon:RibbonGroup>
                 <ribbon:RibbonGroup Header="Help">
                     <ribbon:RibbonButton x:Name="oAboutButton" Height="Auto" Margin="6,6,6,0" Click="oAboutButton_Click" Label="About" LargeImageSource="pack://application:,,,/Crypture;component/Images/About.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
                 </ribbon:RibbonGroup>
@@ -106,6 +102,18 @@
                             Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE185;" />
                         <local:SecretFontSelector x:Name="oSecretFontSelector" Width="210" />
                     </StackPanel>
+                </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup x:Name="oProtectedItemScopeRibbonGroupBox" Header="Item Filters"
+                    IsEnabled="False">
+                    <CheckBox x:Name="oHideAccessible" Margin="6,6,6,0" Click="oHideAccessible_Click"
+                        Content="_Hide Items Without Local Keys">
+                        <CheckBox.ToolTip>
+                            <TextBlock MaxWidth="320" TextWrapping="Wrap">
+                                Hide certificate-only items when no matching private key is available on this computer.
+                                Windows and recovery items stay visible.
+                            </TextBlock>
+                        </CheckBox.ToolTip>
+                    </CheckBox>
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
         </ribbon:Ribbon>

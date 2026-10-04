@@ -433,7 +433,7 @@ namespace Crypture
                 : bCertificates ? bCanEnrollCertificates
                     ? "Add a certificate from your personal store to get started."
                     : "Ask the Vault owner to enroll a verified certificate."
-                : "No items to show. Add an item or adjust the accessibility filter.";
+                : "No items to show. Add an item or adjust the item filter on the View tab.";
             oEmptyState.Visibility = nCount == 0 && !oAdvancedTab.IsSelected
                 ? Visibility.Visible : Visibility.Collapsed;
         }
