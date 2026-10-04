@@ -54,7 +54,7 @@ BEGIN
     BEGIN
         UPDATE [dbo].[Item] SET [Label] = @label, [ItemType] = @itemType,
             [ModifiedBy] = @modifiedBy, [ModifiedByIdentity] = ORIGINAL_LOGIN(),
-            [ModifiedDate] = SYSDATETIME()
+            [ModifiedDate] = SYSUTCDATETIME()
         WHERE [ItemId] = @itemId AND [RowVersion] = @expectedRowVersion;
         IF @@ROWCOUNT <> 1 THROW 50010, 'This item changed or was removed by another user.', 1;
         DELETE FROM [dbo].[Instance] WHERE [ItemId] = @itemId;

@@ -26,8 +26,6 @@ BEGIN
         SELECT @locked = [Id] FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = 1;
         IF NOT EXISTS (SELECT 1 FROM [dbo].[User] WHERE [UserId] = @userId)
             THROW 50018, 'The escrow certificate is not enrolled and verified.', 1;
-        UPDATE [dbo].[User] SET [IsEscrow] = 0 WHERE [IsEscrow] = 1;
-        UPDATE [dbo].[User] SET [IsEscrow] = 1 WHERE [UserId] = @userId;
         UPDATE [dbo].[CryptureVault] SET [EscrowCertificateUserId] = @userId,
             [EscrowDescriptor] = NULL, [EscrowLabel] = COALESCE(@label,
                 (SELECT N'Certificate: ' + [Sid] FROM [dbo].[User] WHERE [UserId] = @userId))
@@ -55,7 +53,6 @@ BEGIN
         SELECT @locked = [Id] FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = 1;
         UPDATE [dbo].[CryptureVault] SET [EscrowCertificateUserId] = NULL,
             [EscrowDescriptor] = N'SID=' + @sid, [EscrowLabel] = @label WHERE [Id] = 1;
-        UPDATE [dbo].[User] SET [IsEscrow] = 0 WHERE [IsEscrow] = 1;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH

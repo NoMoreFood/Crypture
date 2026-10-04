@@ -73,6 +73,7 @@ internal static partial class RegressionTests
             {
                 Check(oContext.Users.Count() == 2, "SQL Server saves recipient certificates");
             }
+            TestSqlServerEscrowSelection(oStorage, oUsers);
             TestSqlServerEscrow(oStorage, oUsers[0]);
             byte[] oPlainText = Encoding.UTF8.GetBytes("SQL Server encrypted item round trip");
             DatabaseOperations.SaveItem(new Item { Label = "SQL Server item", ItemType = "text",
@@ -84,6 +85,9 @@ internal static partial class RegressionTests
             Check(oLoaded.RowVersion?.Length == 8 && oLoaded.Instances.Count == 2 &&
                 ItemCryptography.Decrypt(oLoaded, oLoaded.Instances.First(i => i.UserId == oUsers[0].UserId),
                     oCert).SequenceEqual(oPlainText), "SQL Server loads and decrypts item with recipients");
+            Check(oLoaded.CreatedDate.Kind == DateTimeKind.Utc && oLoaded.ModifiedDate.Kind == DateTimeKind.Utc &&
+                Math.Abs((DateTime.UtcNow - oLoaded.CreatedDate).TotalSeconds) < 60,
+                "SQL Server saves and reloads UTC item timestamps");
             TestSqlServerRecipientSecurity(oStorage, nItemId, sCurrentSid, oUsers[1].UserId);
             Item oStale = DatabaseOperations.LoadItem(nItemId);
             DatabaseOperations.SaveItem(oLoaded, Encoding.UTF8.GetBytes("second revision"), oUsers);
@@ -188,6 +192,7 @@ internal static partial class RegressionTests
                     i.UserId == oStorage.Escrow.CertificateUserId), oEscrowCertificate).SequenceEqual(oSecret),
                 "A distinct selected escrow certificate decrypts the saved item");
             if (Application.Current != null) TestSqlServerEditorSave(oPrimary, oPrimaryCertificate);
+            TestSqlServerSchemaConstraints(oStorage, oStored);
             TestSqlServerSaveValidation(oStorage, oStored);
             TestSqlServerContentLimits(oStorage, oStored.Instances.Select(i => i.User).ToArray(),
                 oPrimary, oPrimaryCertificate);
@@ -244,6 +249,9 @@ internal static partial class RegressionTests
             Check(oEditor.ThisItem.ItemId != 0 && ((TextBox)oEditor.FindName("oItemData")).Text.Length == 0,
                 "Saving a new SQL Server item closes the editor and clears plaintext");
             Item oStored = DatabaseOperations.LoadItem(oEditor.ThisItem.ItemId);
+            oEditor.Close();
+            oEditor = new ItemEditor(oStored);
+            CheckItemDateDisplay(oEditor);
             Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
                 oStored.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)) ==
                 "Saved through the SQL Server editor",
@@ -263,6 +271,115 @@ internal static partial class RegressionTests
             }
             SynchronizationContext.SetSynchronizationContext(oPreviousContext);
         }
+    }
+
+    private static void TestSqlServerEscrowSelection(SqlServerVaultStorage oStorage, User[] oUsers)
+    {
+        using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
+        oConnection.Open();
+        using SqlCommand oCommand = oConnection.CreateCommand();
+        oCommand.CommandText = "SELECT COL_LENGTH(N'dbo.User', N'IsEscrow')";
+        Check(oCommand.ExecuteScalar() is DBNull, "SQL Server stores escrow affiliation only in the Vault marker");
+
+        // Switching the selection updates certificate displays without maintaining another flag.
+        foreach (User oUser in oUsers)
+        {
+            oCommand.CommandText = "EXEC [dbo].[MarkEscrowCertificate] @userId, N'Selected certificate'";
+            oCommand.Parameters.AddWithValue("@userId", oUser.UserId);
+            oCommand.ExecuteNonQuery();
+            using CryptureEntities oContext = new CryptureEntities();
+            Check(oContext.Users.Single(u => u.IsEscrow).UserId == oUser.UserId,
+                "Only the Vault's selected certificate is displayed as escrow");
+            oCommand.CommandText = "EXEC [dbo].[RemoveCertificate] @userId";
+            bool bRejected = false;
+            try { oCommand.ExecuteNonQuery(); }
+            catch (SqlException oError) when (oError.Number == 50019) { bRejected = true; }
+            Check(bRejected, "The Vault selection protects an escrow certificate from direct procedure deletion");
+            oCommand.Parameters.Clear();
+        }
+        oCommand.CommandText = "EXEC [dbo].[SetVaultEscrowPrincipal] @sid, @label";
+        oCommand.Parameters.AddWithValue("@sid", oUsers[0].Sid);
+        oCommand.Parameters.AddWithValue("@label", oStorage.Escrow.Label);
+        oCommand.ExecuteNonQuery();
+        using (CryptureEntities oContext = new CryptureEntities())
+            Check(!oContext.Users.Any(u => u.IsEscrow) && oContext.Users.Count() == oUsers.Length,
+                "Windows escrow clears all derived certificate flags and preserves the enrolled directory");
+        oStorage.RefreshEscrow();
+    }
+
+    private static void TestSqlServerSchemaConstraints(SqlServerVaultStorage oStorage, Item oStored)
+    {
+        using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
+        oConnection.Open();
+        (string Name, string Sql)[] oCases =
+        {
+            ("Empty certificate", "UPDATE [dbo].[User] SET [Certificate] = 0x WHERE [UserId] = @userId"),
+            ("Oversized certificate", "UPDATE [dbo].[User] SET [Certificate] = " +
+                "CONVERT(varbinary(max), REPLICATE(CONVERT(varchar(max), 'x'), 16385)) WHERE [UserId] = @userId"),
+            ("Empty SID", "UPDATE [dbo].[User] SET [Sid] = N'' WHERE [UserId] = @userId"),
+            ("Empty label", "UPDATE [dbo].[Item] SET [Label] = N'' WHERE [ItemId] = @itemId"),
+            ("Oversized label", "UPDATE [dbo].[Item] SET [Label] = " +
+                "REPLICATE(CONVERT(nvarchar(max), N'x'), 16001) WHERE [ItemId] = @itemId"),
+            ("Oversized type", "UPDATE [dbo].[Item] SET [ItemType] = REPLICATE(N'x', 451) WHERE [ItemId] = @itemId"),
+            ("Oversized modifier", "UPDATE [dbo].[Item] SET [ModifiedByIdentity] = " +
+                "REPLICATE(N'x', 451) WHERE [ItemId] = @itemId"),
+            ("Missing suite", "UPDATE [dbo].[Cipher] SET [ContentSuite] = NULL WHERE [ItemId] = @itemId"),
+            ("Unknown suite", "UPDATE [dbo].[Cipher] SET [ContentSuite] = 99 WHERE [ItemId] = @itemId"),
+            ("Unsupported format", "UPDATE [dbo].[Cipher] SET [CipherParams] = 0 WHERE [ItemId] = @itemId"),
+            ("Invalid nonce", "UPDATE [dbo].[Cipher] SET [CipherVector] = 0x01 WHERE [ItemId] = @itemId"),
+            ("Oversized nonce", "UPDATE [dbo].[Cipher] SET [CipherVector] = " +
+                "CONVERT(varbinary(max), REPLICATE('x', 17)) WHERE [ItemId] = @itemId"),
+            ("Missing tag", "UPDATE [dbo].[Cipher] SET [AuthenticationTag] = NULL WHERE [ItemId] = @itemId"),
+            ("Short tag", "UPDATE [dbo].[Cipher] SET [AuthenticationTag] = 0x01 WHERE [ItemId] = @itemId"),
+            ("Oversized tag", "UPDATE [dbo].[Cipher] SET [AuthenticationTag] = " +
+                "CONVERT(varbinary(max), REPLICATE('x', 17)) WHERE [ItemId] = @itemId"),
+            ("Oversized payload", "UPDATE [dbo].[Cipher] SET [CipherText] = " +
+                "CONVERT(varbinary(max), REPLICATE(CONVERT(varchar(max), 'x'), 68157441)) WHERE [ItemId] = @itemId"),
+            ("Invalid CBC length", "UPDATE [dbo].[Cipher] SET [ContentSuite] = 2, " +
+                "[CipherText] = CONVERT(varbinary(max), REPLICATE('x', 17)), " +
+                "[CipherVector] = CONVERT(binary(16), 0x01), [AuthenticationTag] = NULL WHERE [ItemId] = @itemId"),
+            ("Empty protected key", "UPDATE [dbo].[Cipher] SET [ProtectedKey] = 0x WHERE [ItemId] = @itemId"),
+            ("Oversized protected key", "UPDATE [dbo].[Cipher] SET [ProtectedKey] = " +
+                "CONVERT(varbinary(max), REPLICATE(CONVERT(varchar(max), 'x'), 2225185)) WHERE [ItemId] = @itemId"),
+            ("Missing Windows access signature", "UPDATE [dbo].[Cipher] SET [CipherParams] = 2, " +
+                "[ProtectionDescriptor] = N'SID=' + @sid, [ProtectedKey] = 0x01, [Signature] = NULL " +
+                "WHERE [ItemId] = @itemId"),
+            ("Missing recovery key", "UPDATE [dbo].[Cipher] SET [CipherParams] = 4, " +
+                "[ProtectedKey] = NULL, [Signature] = CONVERT(binary(32), 0x01) WHERE [ItemId] = @itemId"),
+            ("Short recovery signature", "UPDATE [dbo].[Cipher] SET [Signature] = 0x01 WHERE [ItemId] = @itemId"),
+            ("Invalid recipient format", "UPDATE [dbo].[Instance] SET [CipherParams] = 2 WHERE [ItemId] = @itemId"),
+            ("Short recipient key", "UPDATE [dbo].[Instance] SET [CipherKey] = 0x01 WHERE [ItemId] = @itemId"),
+            ("Oversized recipient key", "UPDATE [dbo].[Instance] SET [CipherKey] = " +
+                "CONVERT(varbinary(max), REPLICATE('x', 4097)) WHERE [ItemId] = @itemId"),
+            ("Short recipient signature", "UPDATE [dbo].[Instance] SET [Signature] = 0x01 WHERE [ItemId] = @itemId"),
+            ("Duplicate recipient", "INSERT INTO [dbo].[Instance] " +
+                "([ItemId], [UserId], [CipherKey], [CipherParams], [Signature]) " +
+                "SELECT [ItemId], [UserId], [CipherKey], [CipherParams], [Signature] " +
+                "FROM [dbo].[Instance] WHERE [ItemId] = @itemId")
+        };
+
+        // Malformed table writes must fail even when they bypass the save procedure.
+        foreach ((string sName, string sSql) in oCases)
+        {
+            using SqlTransaction oTransaction = oConnection.BeginTransaction();
+            using SqlCommand oCommand = new SqlCommand(sSql, oConnection, oTransaction) { CommandTimeout = 120 };
+            oCommand.Parameters.AddWithValue("@itemId", oStored.ItemId);
+            oCommand.Parameters.AddWithValue("@userId", oStored.Instances.First().UserId);
+            oCommand.Parameters.AddWithValue("@sid", CertificateOperations.CurrentUserSid);
+            bool bRejected = false;
+            try { oCommand.ExecuteNonQuery(); }
+            catch (SqlException oError) when (oError.Number is 515 or 547 or 8152 or 2628 or 2601 or 2627)
+            {
+                bRejected = true;
+            }
+            oTransaction.Rollback();
+            Check(bRejected, "SQL Server schema rejects a malformed direct write: " + sName);
+        }
+        Item oUnchanged = DatabaseOperations.LoadItem(oStored.ItemId);
+        Check(oUnchanged.Cipher.CipherText.SequenceEqual(oStored.Cipher.CipherText) &&
+            oUnchanged.Instances.Count == oStored.Instances.Count &&
+            oUnchanged.RowVersion.SequenceEqual(oStored.RowVersion),
+            "Rejected direct writes preserve the item revision, encrypted content, and recipient keys");
     }
 
     private static void TestSqlServerSaveValidation(SqlServerVaultStorage oStorage, Item oStored)
@@ -523,7 +640,7 @@ internal static partial class RegressionTests
         try
         {
             // Unsupported schemas must be rejected without changing stored data or certificate affiliations.
-            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 7 })
+            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 6, 8 })
             {
                 oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = @version WHERE [Id] = 1";
                 oCommand.Parameters.AddWithValue("@version", nVersion);
@@ -542,7 +659,7 @@ internal static partial class RegressionTests
         }
         finally
         {
-            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 6 WHERE [Id] = 1";
+            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 7 WHERE [Id] = 1";
             oCommand.Parameters.Clear();
             oCommand.ExecuteNonQuery();
         }
@@ -767,6 +884,8 @@ internal static partial class RegressionTests
             Check((int)oCommand.ExecuteScalar() == 1, "Affiliated SID can read the encrypted content view");
             oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[AuthorizedInstance]";
             Check((int)oCommand.ExecuteScalar() == 2, "Affiliated SID can read the recipient view");
+            oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[EnrolledUser] WHERE [IsEscrow] = 1";
+            Check((int)oCommand.ExecuteScalar() == 1, "The domain role can read the derived escrow affiliation");
             oCommand.CommandText = "SELECT COUNT(*) FROM [dbo].[Cipher]";
             Reject(() => oCommand.ExecuteScalar(), "Domain role cannot bypass the encrypted-content view");
             oCommand.CommandText = "UPDATE [dbo].[User] SET [Sid] = N'S-1-5-32-545'";

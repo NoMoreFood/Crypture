@@ -345,7 +345,9 @@ namespace Crypture
     {
         public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            return value is DateTime oDate && oDate != DateTime.MinValue ? value : "- Not Yet Set -";
+            // Display UTC values in local time and leave unspecified timestamps as recorded.
+            if (value is not DateTime oDate || oDate == DateTime.MinValue) return "- Not Yet Set -";
+            return oDate.Kind == DateTimeKind.Utc ? oDate.ToLocalTime() : oDate;
         }
 
         public object ConvertBack(object value, Type targetTypes, object parameter, System.Globalization.CultureInfo culture)

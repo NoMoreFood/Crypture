@@ -31,10 +31,10 @@ CREATE TABLE [Item] (
 	[ItemId] integer  PRIMARY KEY AUTOINCREMENT NOT NULL,
 	[ItemType]	nvarchar NOT NULL DEFAULT 'text',
 	[Label] nvarchar  NOT NULL,
-	[ModifiedDate] datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	[ModifiedDate] datetime DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	[ModifiedBy] integer NULL,
 	[ModifiedByIdentity] nvarchar NULL,
-	[CreatedDate] datetime DEFAULT CURRENT_TIMESTAMP NOT NULL
+	[CreatedDate] datetime DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL
 ,
     FOREIGN KEY ([ModifiedBy])
         REFERENCES [User]([UserId]) ON DELETE SET NULL
@@ -45,3 +45,7 @@ CREATE TABLE [User] (
 	[Certificate]	blob UNIQUE NOT NULL,
 	[Sid]	nvarchar COLLATE NOCASE
 );
+
+CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [Instance] ([ItemId], [UserId]);
+CREATE INDEX [IX_Instance_User] ON [Instance] ([UserId]);
+CREATE INDEX [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);

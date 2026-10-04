@@ -1,5 +1,8 @@
 ﻿<Window x:Class="Crypture.ItemBrowser" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:properties="clr-namespace:Crypture.Properties" x:Name="oItemBrowser" Title="Crypture" Width="940" Height="560" MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d" Loaded="oItemBrowser_Loaded" Closing="oItemBrowser_Closing" PreviewKeyDown="oItemBrowser_PreviewKeyDown"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+    <Window.Resources>
+        <local:CheckIfDateIsNotSetConverter x:Key="CheckIfDateIsNotSetConverter" />
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -151,7 +154,11 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="Auto" MinWidth="125" Binding="{Binding ModifiedDate, StringFormat='yyyy-MM-dd HH:mm:ss'}" Header="Modified Date" IsReadOnly="True">
+                <DataGridTextColumn Width="Auto" MinWidth="125" Header="Modified Date" IsReadOnly="True">
+                    <DataGridTextColumn.Binding>
+                        <Binding Path="ModifiedDate" Converter="{StaticResource CheckIfDateIsNotSetConverter}"
+                            StringFormat="yyyy-MM-dd HH:mm:ss" />
+                    </DataGridTextColumn.Binding>
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE787;" />

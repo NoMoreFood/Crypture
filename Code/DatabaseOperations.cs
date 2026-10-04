@@ -107,13 +107,13 @@ namespace Crypture
                 }
                 else
                 {
-                    oStored = new Item { CreatedDate = DateTime.Now };
+                    oStored = new Item { CreatedDate = DateTime.UtcNow };
                     oContent.Items.Add(oStored);
                 }
 
                 oStored.Label = oItem.Label;
                 oStored.ItemType = oItem.ItemType;
-                oStored.ModifiedDate = DateTime.Now;
+                oStored.ModifiedDate = DateTime.UtcNow;
                 oStored.ModifiedBy = sProtectionDescriptor == null ? oItem.ModifiedBy : null;
                 using (WindowsIdentity oIdentity = WindowsIdentity.GetCurrent())
                     oStored.ModifiedByIdentity = oIdentity.Name;
@@ -190,6 +190,14 @@ namespace Crypture
                             oColumn[ColumnTypeIndex] + " NULL", oConnection, oTransaction))
                             oCommand.ExecuteNonQuery();
                     }
+
+                    // Index certificate references and allow one encrypted key per item recipient.
+                    using (SqliteCommand oCommand = new SqliteCommand(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS [UX_Instance_Item_User] " +
+                        "ON [Instance] ([ItemId], [UserId]); " +
+                        "CREATE INDEX IF NOT EXISTS [IX_Instance_User] ON [Instance] ([UserId]); " +
+                        "CREATE INDEX IF NOT EXISTS [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);",
+                        oConnection, oTransaction)) oCommand.ExecuteNonQuery();
 
                     // Preferences belong to the Windows user profile.
                     using (SqliteCommand oCommand = new SqliteCommand(

@@ -204,7 +204,7 @@ namespace Crypture
         public void Validate()
         {
             const int VaultMarkerId = 1;
-            const int SupportedSchemaVersion = 6;
+            const int SupportedSchemaVersion = 7;
 
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);

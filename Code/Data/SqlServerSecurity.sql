@@ -159,6 +159,12 @@ CREATE VIEW [dbo].[AuthorizedInstance]
 AS SELECT r.* FROM [dbo].[Instance] AS r
 CROSS APPLY [dbo].[CanReadItem](r.[ItemId]) AS a;
 GO
+-- Certificate affiliation uses the Vault's single escrow selection.
+CREATE VIEW [dbo].[EnrolledUser]
+AS SELECT u.[UserId], u.[Certificate], u.[Sid],
+    CONVERT(bit, CASE WHEN u.[UserId] = v.[EscrowCertificateUserId] THEN 1 ELSE 0 END) AS [IsEscrow]
+FROM [dbo].[User] AS u CROSS JOIN [dbo].[CryptureVault] AS v WHERE v.[Id] = 1;
+GO
 CREATE PROCEDURE [dbo].[DeleteItemCore] @itemId bigint
 WITH EXECUTE AS 'crypture_writer'
 AS
@@ -205,7 +211,7 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM [dbo].[User]
                        WHERE [UserId] = @userId AND [dbo].[MatchesPrincipal]([Sid]) = 1)
             THROW 50014, 'This certificate is not affiliated with your Windows account.', 1;
-        IF EXISTS (SELECT 1 FROM [dbo].[User] WHERE [UserId] = @userId AND [IsEscrow] = 1)
+        IF EXISTS (SELECT 1 FROM [dbo].[CryptureVault] WHERE [Id] = 1 AND [EscrowCertificateUserId] = @userId)
             THROW 50019, 'An escrow certificate cannot be removed from the Vault.', 1;
         IF EXISTS (SELECT 1 FROM [dbo].[Instance] WHERE [UserId] = @userId) OR
            EXISTS (SELECT 1 FROM [dbo].[Item] WHERE [ModifiedBy] = @userId)
@@ -229,6 +235,7 @@ GRANT SELECT ON [dbo].[Item] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedCipher] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedInstance] TO [crypture_domain];
 GRANT SELECT ON [dbo].[User] TO [crypture_domain];
+GRANT SELECT ON [dbo].[EnrolledUser] TO [crypture_domain];
 GRANT EXECUTE, REFERENCES ON TYPE::[dbo].[EncryptedRecipient] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[DeleteItem] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[RemoveCertificate] TO [crypture_domain];

@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using System;
+using System.Globalization;
 
 namespace Crypture
 {
@@ -38,12 +40,16 @@ namespace Crypture
             // Keep the existing Vault schema and Windows identity/certificate relationships.
             oModel.Entity<User>(oUser =>
             {
-                oUser.ToTable("User");
                 oUser.HasKey(u => u.UserId);
                 oUser.Property(u => u.Certificate).IsRequired();
-                if (oStorage.IsSqlServer) oUser.Property(u => u.Sid).IsRequired();
+                if (oStorage.IsSqlServer)
+                {
+                    oUser.ToView("EnrolledUser");
+                    oUser.Property(u => u.Sid).IsRequired();
+                }
                 else
                 {
+                    oUser.ToTable("User");
                     oUser.HasIndex(u => u.Certificate).IsUnique();
                     oUser.Ignore(u => u.IsEscrow);
                 }
@@ -58,8 +64,25 @@ namespace Crypture
                     .OnDelete(oStorage.IsSqlServer ? DeleteBehavior.ClientSetNull : DeleteBehavior.SetNull);
                 oItem.HasOne(i => i.Cipher).WithOne(c => c.Item).HasForeignKey<Cipher>(c => c.ItemId)
                     .OnDelete(DeleteBehavior.Cascade);
-                if (oStorage.IsSqlServer) oItem.Property(i => i.RowVersion).IsRowVersion();
-                else oItem.Ignore(i => i.RowVersion);
+
+                // Preserve timestamp kinds in SQLite and restore SQL Server's UTC timestamps on reads.
+                if (oStorage.IsSqlServer)
+                {
+                    ValueConverter<DateTime, DateTime> oUtc = new ValueConverter<DateTime, DateTime>(
+                        d => d.ToUniversalTime(), d => DateTime.SpecifyKind(d, DateTimeKind.Utc));
+                    oItem.Property(i => i.CreatedDate).HasConversion(oUtc);
+                    oItem.Property(i => i.ModifiedDate).HasConversion(oUtc);
+                    oItem.Property(i => i.RowVersion).IsRowVersion();
+                }
+                else
+                {
+                    ValueConverter<DateTime, string> oTimestamp = new ValueConverter<DateTime, string>(
+                        d => d.ToString("O", CultureInfo.InvariantCulture),
+                        s => DateTime.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+                    oItem.Property(i => i.CreatedDate).HasConversion(oTimestamp);
+                    oItem.Property(i => i.ModifiedDate).HasConversion(oTimestamp);
+                    oItem.Ignore(i => i.RowVersion);
+                }
             });
             oModel.Entity<Cipher>(oCipher =>
             {
@@ -79,6 +102,8 @@ namespace Crypture
                 if (oStorage.IsSqlServer) oInstance.ToView("AuthorizedInstance");
                 else oInstance.ToTable("Instance");
                 oInstance.HasKey(i => i.InstanceId);
+                oInstance.HasIndex(i => new { i.ItemId, i.UserId }).IsUnique();
+                oInstance.HasIndex(i => i.UserId);
                 oInstance.Property(i => i.CipherKey).IsRequired();
                 oInstance.Property(i => i.Signature).IsRequired();
                 oInstance.HasOne(i => i.Item).WithMany(i => i.Instances).HasForeignKey(i => i.ItemId)

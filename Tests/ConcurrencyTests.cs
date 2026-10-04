@@ -199,7 +199,11 @@ internal static partial class RegressionTests
                 .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
                 .Replace("\t[Signature] blob NULL\r\n", "")
                 .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,",
-                    "[CipherParams] integer DEFAULT '0' NOT NULL");
+                    "[CipherParams] integer DEFAULT '0' NOT NULL")
+                .Replace("DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))", "DEFAULT CURRENT_TIMESTAMP")
+                .Replace("CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [Instance] ([ItemId], [UserId]);\r\n", "")
+                .Replace("CREATE INDEX [IX_Instance_User] ON [Instance] ([UserId]);\r\n", "")
+                .Replace("CREATE INDEX [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);\r\n", "");
             string sLegacyPath = Path.Combine(sRoot, "legacy.cryptdb");
             DatabaseOperations.CreateDatabase(sLegacyPath, sLegacy);
             oCounts = RunConcurrentClients(sRoot, "migration",

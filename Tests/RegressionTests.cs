@@ -11,6 +11,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -589,7 +590,11 @@ internal static partial class RegressionTests
             .Replace("\t[ProtectionDescriptor] nvarchar NULL,\r\n", "")
             .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
             .Replace("\t[Signature] blob NULL\r\n", "")
-            .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,", "[CipherParams] integer DEFAULT '0' NOT NULL");
+            .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,", "[CipherParams] integer DEFAULT '0' NOT NULL")
+            .Replace("DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))", "DEFAULT CURRENT_TIMESTAMP")
+            .Replace("CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [Instance] ([ItemId], [UserId]);\r\n", "")
+            .Replace("CREATE INDEX [IX_Instance_User] ON [Instance] ([UserId]);\r\n", "")
+            .Replace("CREATE INDEX [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);\r\n", "");
         string sLegacyDatabase = Path.Combine(sDirectory, "legacy-schema.cryptdb");
         DatabaseOperations.CreateDatabase(sLegacyDatabase, sLegacySchema +
             "CREATE TABLE PasswordGeneratorSettings (Id integer PRIMARY KEY, MinimumLength integer); " +
@@ -605,7 +610,8 @@ internal static partial class RegressionTests
             oConnection.Open();
             using (SqliteCommand oCommand = new SqliteCommand(
                 "INSERT INTO [User] (UserId, Certificate) VALUES (1, @cert); " +
-                "INSERT INTO Item (ItemId, Label, ItemType) VALUES (1, 'Before upgrade', 'text'); " +
+                "INSERT INTO Item (ItemId, Label, ItemType, CreatedDate, ModifiedDate) " +
+                "VALUES (1, 'Before upgrade', 'text', '2026-01-01 02:03:04', '2026-01-02 03:04:05'); " +
                 "INSERT INTO Cipher (ItemId, CipherParams, CipherText, CipherVector) VALUES (1, 1, @data, @iv); " +
                 "INSERT INTO Instance (ItemId, UserId, CipherParams, CipherKey, Signature) " +
                 "VALUES (1, 1, 1, @key, @tag);", oConnection))
@@ -618,6 +624,25 @@ internal static partial class RegressionTests
                 oCommand.ExecuteNonQuery();
             }
         }
+        // A conflicting recipient must leave the entire upgrade and encrypted data untouched.
+        string sDuplicateDatabase = Path.Combine(sDirectory, "duplicate-recipients.cryptdb");
+        File.Copy(sLegacyDatabase, sDuplicateDatabase);
+        using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = sDuplicateDatabase, Pooling = false
+        }.ConnectionString))
+        {
+            oConnection.Open();
+            using SqliteCommand oCommand = new SqliteCommand("INSERT INTO [Instance] " +
+                "([ItemId], [UserId], [CipherKey], [CipherParams], [Signature]) " +
+                "SELECT [ItemId], [UserId], [CipherKey], [CipherParams], [Signature] FROM [Instance]", oConnection);
+            oCommand.ExecuteNonQuery();
+        }
+        byte[] oDuplicateOriginal = File.ReadAllBytes(sDuplicateDatabase);
+        Reject(() => DatabaseOperations.EnsureProtectionSchema(sDuplicateDatabase),
+            "Reject a conflicting recipient during the SQLite schema upgrade");
+        Check(File.ReadAllBytes(sDuplicateDatabase).SequenceEqual(oDuplicateOriginal),
+            "A rejected SQLite upgrade preserves duplicate recipient keys and all schema data byte for byte");
         DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
         DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
         CryptureEntities.DatabasePath = sLegacyDatabase;
@@ -628,6 +653,12 @@ internal static partial class RegressionTests
             "Upgrade old Vault schema idempotently");
         Check(ItemCryptography.Decrypt(oLegacyItem, oLegacyItem.Instances.Single(), oCert).SequenceEqual(oLegacyPlain),
             "Schema migration preserves existing ciphertext and recipient keys");
+        Check(oLegacyItem.CreatedDate == new DateTime(2026, 1, 1, 2, 3, 4) &&
+            oLegacyItem.ModifiedDate == new DateTime(2026, 1, 2, 3, 4, 5) &&
+            oLegacyItem.CreatedDate.Kind == DateTimeKind.Unspecified &&
+            oLegacyItem.ModifiedDate.Kind == DateTimeKind.Unspecified,
+            "Opening a SQLite Vault preserves timestamp values without assuming an unknown offset");
+        TestSqliteRecipientIndexes(sLegacyDatabase, 1, 1);
         string sNotVault = Path.Combine(sDirectory, "not-Vault.db");
         DatabaseOperations.CreateDatabase(sNotVault, "CREATE TABLE Other (Id integer)");
         Reject(() => DatabaseOperations.EnsureProtectionSchema(sNotVault), "Do not migrate an unrelated Vault");
@@ -673,6 +704,10 @@ internal static partial class RegressionTests
             "Load a complete detached item graph");
         Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Single(), oCert).SequenceEqual(oPlainText),
             "Decrypt newly saved Vault item");
+        Check(oItem.CreatedDate.Kind == DateTimeKind.Utc && oItem.ModifiedDate.Kind == DateTimeKind.Utc &&
+            Math.Abs((DateTime.UtcNow - oItem.CreatedDate).TotalSeconds) < 60,
+            "SQLite saves and reloads item timestamps as UTC instants");
+        TestSqliteRecipientIndexes(sDatabase, nItemId, oUser.UserId);
         DateTime oCreated = oItem.CreatedDate;
         byte[] oOriginalVector = oItem.Cipher.CipherVector.ToArray();
         Item oStale = DatabaseOperations.LoadItem(nItemId);
@@ -681,6 +716,8 @@ internal static partial class RegressionTests
         DatabaseOperations.SaveItem(oItem, oPlainText, new[] { oUser, oOtherUser });
         oItem = DatabaseOperations.LoadItem(nItemId);
         Check(oItem.CreatedDate == oCreated, "Preserve original creation date on update");
+        Check(oItem.ModifiedDate.Kind == DateTimeKind.Utc && oItem.ModifiedDate >= oCreated,
+            "SQLite updates retain UTC timestamp kinds and ordering");
         Check(oItem.ModifiedBy == oOtherUser.UserId && oItem.Instances.Count == 2, "Update modifier and recipients");
         Check(!oItem.Cipher.CipherVector.SequenceEqual(oOriginalVector), "Use a fresh IV on save");
         Check(ItemCryptography.Decrypt(oItem, oItem.Instances.First(i => i.UserId == oOtherUser.UserId), oOtherCert)
@@ -765,6 +802,58 @@ internal static partial class RegressionTests
         Check(!File.Exists(sMissing), "Opening a missing path does not create a Vault");
     }
 
+    private static void TestSqliteRecipientIndexes(string sDatabase, long nItemId, long nUserId)
+    {
+        using SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = sDatabase, ForeignKeys = true, Pooling = false
+        }.ConnectionString);
+        oConnection.Open();
+        using SqliteCommand oCommand = oConnection.CreateCommand();
+        oCommand.Parameters.AddWithValue("@itemId", nItemId);
+        oCommand.Parameters.AddWithValue("@userId", nUserId);
+
+        // Recipient lookups and certificate deletion references must use indexed searches.
+        foreach ((string Query, string Index) oQuery in new[]
+        {
+            ("SELECT [CipherKey] FROM [Instance] WHERE [ItemId] = @itemId AND [UserId] = @userId",
+                "UX_Instance_Item_User"),
+            ("SELECT [ItemId] FROM [Instance] WHERE [UserId] = @userId", "IX_Instance_User"),
+            ("SELECT [ItemId] FROM [Item] WHERE [ModifiedBy] = @userId", "IX_Item_ModifiedBy")
+        })
+        {
+            oCommand.CommandText = "EXPLAIN QUERY PLAN " + oQuery.Query;
+            using SqliteDataReader oReader = oCommand.ExecuteReader();
+            bool bIndexed = false;
+            while (oReader.Read()) bIndexed |= oReader.GetString(3).Contains(oQuery.Index, StringComparison.Ordinal);
+            Check(bIndexed, "SQLite uses the recipient reference index: " + oQuery.Index);
+        }
+        oCommand.CommandText = "INSERT INTO [Instance] " +
+            "([ItemId], [UserId], [CipherKey], [CipherParams], [Signature]) " +
+            "SELECT [ItemId], [UserId], [CipherKey], [CipherParams], [Signature] FROM [Instance] " +
+            "WHERE [ItemId] = @itemId AND [UserId] = @userId";
+        bool bRejected = false;
+        try { oCommand.ExecuteNonQuery(); }
+        catch (SqliteException oError) when (oError.SqliteErrorCode == 19) { bRejected = true; }
+        Check(bRejected, "SQLite rejects a second encrypted key for the same item and certificate");
+        oCommand.CommandText = "SELECT COUNT(*) FROM [Instance] WHERE [ItemId] = @itemId AND [UserId] = @userId";
+        Check((long)oCommand.ExecuteScalar() == 1, "A duplicate recipient insert preserves the saved access path");
+    }
+
+    private static void CheckItemDateDisplay(ItemEditor oEditor)
+    {
+        Item oItem = oEditor.ThisItem;
+        string sCreated = ((TextBlock)oEditor.FindName("oItemCreatedDate")).Text;
+        string sModified = ((TextBlock)oEditor.FindName("oItemModifiedDate")).Text;
+        DateTime oCreated = oItem.CreatedDate.Kind == DateTimeKind.Utc
+            ? oItem.CreatedDate.ToLocalTime() : oItem.CreatedDate;
+        DateTime oModified = oItem.ModifiedDate.Kind == DateTimeKind.Utc
+            ? oItem.ModifiedDate.ToLocalTime() : oItem.ModifiedDate;
+        Check(sCreated == oCreated.ToString("yyyy-MM-dd HH:mm:ss") &&
+            sModified == oModified.ToString("yyyy-MM-dd HH:mm:ss"),
+            "Editor date bindings display saved timestamps in local time without shifting unspecified dates");
+    }
+
     private static void TestVaultIntegration(Item oItem, string sDirectory)
     {
         Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -807,6 +896,7 @@ internal static partial class RegressionTests
             oEditor.Show();
             PumpUntil(() => oEditor.IsLoaded);
             Check(oEditor.UserListSelected.Count == 2, "Editor displays multiple certificate recipients");
+            CheckItemDateDisplay(oEditor);
             oEditor.Close();
             oEditor = null;
 
@@ -814,6 +904,21 @@ internal static partial class RegressionTests
 
             // Keep persistence and security assertions independently of menu and dialog presentation.
             oBrowser = new ItemBrowser();
+            DataGrid oItemGrid = (DataGrid)oBrowser.FindName("oItemDataGrid");
+            DataGridTextColumn oDateColumn = oItemGrid.Columns.OfType<DataGridTextColumn>()
+                .Single(c => ((Binding)c.Binding).Path.Path == "ModifiedDate");
+            TextBlock oDateCell = new TextBlock { DataContext = DatabaseOperations.LoadItem(oItem.ItemId) };
+            BindingOperations.SetBinding(oDateCell, TextBlock.TextProperty, oDateColumn.Binding);
+            Check(oDateCell.Text == oItem.ModifiedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                "The browser's date column displays saved UTC timestamps in local time");
+
+            // Read a released SQLite timestamp through the same editor bindings.
+            CryptureEntities.DatabasePath = Path.Combine(sDirectory, "legacy-schema.cryptdb");
+            oEditor = new ItemEditor(DatabaseOperations.LoadItem(1));
+            CheckItemDateDisplay(oEditor);
+            oEditor.Close();
+            oEditor = null;
+            CryptureEntities.DatabasePath = sDatabase;
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestTotpVault(sDirectory);
             TestCertificateUsageConfiguration(oBrowser, oItem);
