@@ -57,8 +57,9 @@
                     <ribbon:RibbonButton x:Name="oViewCertButton" Height="Auto" Margin="6,6,6,0" Click="oViewCertButton_Click" Label="View" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" LargeImageSource="pack://application:,,,/Crypture;component/Images/View.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oClaimCertButton" Height="Auto" Margin="6,6,6,0" Click="oClaimCertButton_Click" Label="Claim" SmallImageSource="pack://application:,,,/Crypture;component/Images/Own.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oRemoveCertButton" Height="Auto" Margin="6,6,6,0" Click="oRemoveItemUser_Click" Label="Remove Certificate" SmallImageSource="pack://application:,,,/Crypture;component/Images/Remove.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oMarkEscrowButton" Height="Auto" Margin="6,6,6,0" Click="oMarkEscrowButton_Click" Label="Designate Escrow" SmallImageSource="pack://application:,,,/Crypture;component/Images/Own.png" IsEnabled="{Binding Path=SelectedItems.Count, Source={x:Reference oCertDataGrid}}" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" Visibility="Collapsed" ToolTip="Use this AD-published certificate for emergency recovery in this SQL Server Vault." />
                 </ribbon:RibbonGroup>
-                <ribbon:RibbonGroup Header="Add a Certificate From...">
+                <ribbon:RibbonGroup x:Name="oAddCertificateGroup" Header="Add a Certificate From...">
                     <ribbon:RibbonButton x:Name="oAddFromStoreButton" Height="Auto" Margin="6,6,6,0" Click="oAddFromStoreButton_Click" Label="Store" LargeImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oAddFromFileButton" Height="Auto" Margin="6,6,6,0" Click="oAddFromFileButton_Click" Label="File" SmallImageSource="pack://application:,,,/Crypture;component/Images/Add.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oAddFromAdButton" Height="Auto" Margin="6,6,6,0"
@@ -129,13 +130,20 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="Auto" MinWidth="150" Binding="{Binding ProtectionDisplay}" Header="Encryption" IsReadOnly="True">
-                    <DataGridTextColumn.HeaderStyle>
+                <DataGridTemplateColumn Width="250" MinWidth="180" Header="Encryption"
+                    SortMemberPath="ProtectionDisplay">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding ProtectionDisplay}" TextTrimming="CharacterEllipsis"
+                                ToolTip="{Binding ProtectionDisplay}" VerticalAlignment="Center" Margin="5,0" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                    <DataGridTemplateColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE72E;" />
                         </Style>
-                    </DataGridTextColumn.HeaderStyle>
-                </DataGridTextColumn>
+                    </DataGridTemplateColumn.HeaderStyle>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Width="Auto" MinWidth="160" Binding="{Binding ModifiedByDisplay}" Header="Modified By" IsReadOnly="True">
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
@@ -176,6 +184,9 @@
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
+                <DataGridTextColumn x:Name="oAffiliationColumn" Width="Auto" MinWidth="135"
+                    Binding="{Binding AffiliationDisplay}" Header="Affiliation" IsReadOnly="True"
+                    Visibility="Collapsed" />
                 <DataGridTemplateColumn MinWidth="300" Header="Windows Security Identifier" SortMemberPath="Sid">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>

@@ -159,79 +159,6 @@ CREATE VIEW [dbo].[AuthorizedInstance]
 AS SELECT r.* FROM [dbo].[Instance] AS r
 CROSS APPLY [dbo].[CanReadItem](r.[ItemId]) AS a;
 GO
-CREATE PROCEDURE [dbo].[SaveItemCore]
-    @itemId bigint OUTPUT, @expectedRowVersion binary(8), @label nvarchar(max), @itemType nvarchar(max),
-    @modifiedBy bigint, @cipherText varbinary(max), @cipherVector varbinary(max),
-    @cipherParams bigint, @contentSuite bigint, @authenticationTag varbinary(max),
-    @protectionDescriptor nvarchar(max), @protectedKey varbinary(max), @signature varbinary(max),
-    @recipients [dbo].[EncryptedRecipient] READONLY
-WITH EXECUTE AS 'crypture_writer'
-AS
-BEGIN
-    SET NOCOUNT ON;
-    IF @itemId = 0
-    BEGIN
-        INSERT INTO [dbo].[Item] ([Label], [ItemType], [ModifiedBy], [ModifiedByIdentity])
-        VALUES (@label, @itemType, @modifiedBy, ORIGINAL_LOGIN());
-        SET @itemId = CONVERT(bigint, SCOPE_IDENTITY());
-    END
-    ELSE
-    BEGIN
-        UPDATE [dbo].[Item] SET [Label] = @label, [ItemType] = @itemType,
-            [ModifiedBy] = @modifiedBy, [ModifiedByIdentity] = ORIGINAL_LOGIN(),
-            [ModifiedDate] = SYSDATETIME()
-        WHERE [ItemId] = @itemId AND [RowVersion] = @expectedRowVersion;
-        IF @@ROWCOUNT <> 1 THROW 50010, 'This item changed or was removed by another user.', 1;
-        DELETE FROM [dbo].[Instance] WHERE [ItemId] = @itemId;
-        DELETE FROM [dbo].[Cipher] WHERE [ItemId] = @itemId;
-    END;
-    INSERT INTO [dbo].[Cipher] ([ItemId], [CipherText], [CipherVector], [CipherParams],
-        [ContentSuite], [AuthenticationTag], [ProtectionDescriptor], [ProtectedKey], [Signature])
-    VALUES (@itemId, @cipherText, @cipherVector, @cipherParams, @contentSuite,
-        @authenticationTag, @protectionDescriptor, @protectedKey, @signature);
-    INSERT INTO [dbo].[Instance] ([ItemId], [UserId], [CipherKey], [CipherParams], [Signature])
-    SELECT @itemId, [UserId], [CipherKey], [CipherParams], [Signature] FROM @recipients;
-END;
-GO
-CREATE PROCEDURE [dbo].[SaveItem]
-    @itemId bigint OUTPUT, @expectedRowVersion binary(8), @label nvarchar(max), @itemType nvarchar(max),
-    @modifiedBy bigint, @cipherText varbinary(max), @cipherVector varbinary(max),
-    @cipherParams bigint, @contentSuite bigint, @authenticationTag varbinary(max),
-    @protectionDescriptor nvarchar(max), @protectedKey varbinary(max), @signature varbinary(max),
-    @recipients [dbo].[EncryptedRecipient] READONLY
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-    SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-    BEGIN TRY
-        BEGIN TRANSACTION;
-        IF @itemId <> 0 AND NOT EXISTS (SELECT 1 FROM [dbo].[CanReadItem](@itemId))
-            THROW 50011, 'You are not a recipient of this item.', 1;
-        IF NOT EXISTS (
-            SELECT 1 FROM @recipients AS r
-            INNER JOIN [dbo].[User] AS u ON u.[UserId] = r.[UserId]
-            WHERE [dbo].[MatchesPrincipal](u.[Sid]) = 1
-        ) AND [dbo].[MatchesDescriptor](@protectionDescriptor) = 0 AND
-            [dbo].[MatchesRecoveryEnvelope](@protectedKey, @protectionDescriptor) = 0
-            THROW 50012, 'Include your Windows account or group in the item recipients.', 1;
-        IF @modifiedBy IS NOT NULL AND NOT EXISTS (
-            SELECT 1 FROM [dbo].[User] WHERE [UserId] = @modifiedBy AND
-                [dbo].[MatchesPrincipal]([Sid]) = 1
-        ) THROW 50016, 'The modifying certificate must belong to your Windows account or group.', 1;
-        IF @protectionDescriptor IS NOT NULL AND LEFT(@protectionDescriptor, 4) <> N'SID='
-            THROW 50013, 'SQL Server items require domain users or groups for Windows protection.', 1;
-        EXEC [dbo].[SaveItemCore] @itemId OUTPUT, @expectedRowVersion, @label, @itemType,
-            @modifiedBy, @cipherText, @cipherVector, @cipherParams, @contentSuite,
-            @authenticationTag, @protectionDescriptor, @protectedKey, @signature, @recipients;
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        THROW;
-    END CATCH;
-END;
-GO
 CREATE PROCEDURE [dbo].[DeleteItemCore] @itemId bigint
 WITH EXECUTE AS 'crypture_writer'
 AS
@@ -278,6 +205,8 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM [dbo].[User]
                        WHERE [UserId] = @userId AND [dbo].[MatchesPrincipal]([Sid]) = 1)
             THROW 50014, 'This certificate is not affiliated with your Windows account.', 1;
+        IF EXISTS (SELECT 1 FROM [dbo].[User] WHERE [UserId] = @userId AND [IsEscrow] = 1)
+            THROW 50019, 'An escrow certificate cannot be removed from the Vault.', 1;
         IF EXISTS (SELECT 1 FROM [dbo].[Instance] WHERE [UserId] = @userId) OR
            EXISTS (SELECT 1 FROM [dbo].[Item] WHERE [ModifiedBy] = @userId)
             THROW 50015, 'Remove this certificate from its items before deleting it.', 1;
@@ -299,9 +228,8 @@ GRANT SELECT ON [dbo].[CryptureVault] TO [crypture_domain];
 GRANT SELECT ON [dbo].[Item] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedCipher] TO [crypture_domain];
 GRANT SELECT ON [dbo].[AuthorizedInstance] TO [crypture_domain];
-GRANT SELECT, INSERT ON [dbo].[User] TO [crypture_domain];
+GRANT SELECT ON [dbo].[User] TO [crypture_domain];
 GRANT SELECT, INSERT, UPDATE ON [dbo].[PasswordGeneratorSettings] TO [crypture_domain];
 GRANT EXECUTE, REFERENCES ON TYPE::[dbo].[EncryptedRecipient] TO [crypture_domain];
-GRANT EXECUTE ON [dbo].[SaveItem] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[DeleteItem] TO [crypture_domain];
 GRANT EXECUTE ON [dbo].[RemoveCertificate] TO [crypture_domain];

@@ -138,12 +138,12 @@ namespace Crypture
                 }
             }
             return Scan(oItems.Values.ToList(), oUsers, bAllowSelfSigned, bCheckRevocation,
-                oCancellation, oProgress);
+                oCancellation, oProgress, oStorage);
         }
 
         internal static VaultHealthReport Scan(IReadOnlyList<Item> oItems, IReadOnlyList<User> oUsers,
             bool bAllowSelfSigned, bool bCheckRevocation, CancellationToken oCancellation,
-            IProgress<string> oProgress = null)
+            IProgress<string> oProgress = null, IVaultStorage oStorage = null)
         {
             VaultHealthReport oReport = new VaultHealthReport { ItemCount = oItems.Count };
             Dictionary<string, HashSet<Item>> oPrincipals = new Dictionary<string, HashSet<Item>>(
@@ -233,7 +233,8 @@ namespace Crypture
             // Report items that predate the configured recovery recipients without decrypting them.
             try
             {
-                RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+                RecoveryPolicy oRecovery = oStorage == null ? RecoveryPolicy.Read() :
+                    RecoveryPolicy.ReadForStorage(oStorage, true);
                 if (oRecovery.IsEnabled)
                 {
                     HashSet<long> oRecoveryUsers = new HashSet<long>(oUsers.Where(u =>

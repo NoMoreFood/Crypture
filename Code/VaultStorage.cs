@@ -4,6 +4,7 @@ using System.Data.Common;
 using System.IO;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -112,11 +113,17 @@ namespace Crypture
         public bool SupportsCompact => false;
         internal string DatabaseName => oBuilder.InitialCatalog;
         internal string RecentConnection => ConnectionString;
+        internal bool UpgradedOnOpen { get; private set; }
+        internal SqlServerEscrowChoice EscrowChoice { get; set; }
+        internal SqlServerEscrowPolicy Escrow { get; private set; }
 
         public void Configure(DbContextOptionsBuilder oOptions) => oOptions.UseSqlServer(ConnectionString);
 
         public void Create()
         {
+            if (EscrowChoice == null)
+                throw new InvalidOperationException("Choose an escrow certificate or Windows user/group " +
+                    "before creating a SQL Server Vault.");
             // Create only a new database; never initialize an unrelated existing database.
             SqlConnectionStringBuilder oMaster = new SqlConnectionStringBuilder(ConnectionString)
             {
@@ -155,19 +162,38 @@ namespace Crypture
                     .GetManifestResourceStream("Crypture.SqlServerSchema"));
                 using SqlCommand oSchema = new SqlCommand(oReader.ReadToEnd(), oVault, oTransaction);
                 oSchema.ExecuteNonQuery();
-                using StreamReader oSecurityReader = new StreamReader(typeof(SqlServerVaultStorage).Assembly
-                    .GetManifestResourceStream("Crypture.SqlServerSecurity"));
-                foreach (string sBatch in Regex.Split(oSecurityReader.ReadToEnd(), @"(?im)^[ \t]*GO[ \t]*\r?$"))
+                ExecuteBatches(oVault, oTransaction, "Crypture.SqlServerSecurity");
+                ExecuteBatches(oVault, oTransaction, "Crypture.SqlServerEnrollment");
+                ExecuteBatches(oVault, oTransaction, "Crypture.SqlServerEscrow");
+                if (EscrowChoice.Certificate != null)
                 {
-                    if (String.IsNullOrWhiteSpace(sBatch)) continue;
-                    using SqlCommand oBatch = new SqlCommand(sBatch, oVault, oTransaction);
-                    oBatch.ExecuteNonQuery();
+                    using SqlCommand oEnroll = new SqlCommand("[dbo].[EnrollCertificate]", oVault, oTransaction)
+                        { CommandType = CommandType.StoredProcedure };
+                    oEnroll.Parameters.Add("@certificate", SqlDbType.VarBinary, -1).Value = EscrowChoice.Certificate;
+                    oEnroll.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = EscrowChoice.Sid;
+                    SqlParameter oUserId = oEnroll.Parameters.Add("@userId", SqlDbType.BigInt);
+                    oUserId.Direction = ParameterDirection.Output;
+                    oEnroll.ExecuteNonQuery();
+                    using SqlCommand oEscrow = new SqlCommand("[dbo].[MarkEscrowCertificate]", oVault, oTransaction)
+                        { CommandType = CommandType.StoredProcedure };
+                    oEscrow.Parameters.Add("@userId", SqlDbType.BigInt).Value = oUserId.Value;
+                    oEscrow.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = EscrowChoice.Label;
+                    oEscrow.ExecuteNonQuery();
+                }
+                else
+                {
+                    using SqlCommand oEscrow = new SqlCommand("[dbo].[SetVaultEscrowPrincipal]", oVault,
+                        oTransaction) { CommandType = CommandType.StoredProcedure };
+                    oEscrow.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = EscrowChoice.Sid;
+                    oEscrow.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = EscrowChoice.Label;
+                    oEscrow.ExecuteNonQuery();
                 }
                 if (sQuotedLogin != null)
                     using (SqlCommand oGrant = new SqlCommand("CREATE USER " + sQuotedLogin + " FOR LOGIN " +
                         sQuotedLogin + "; ALTER ROLE [crypture_domain] ADD MEMBER " + sQuotedLogin, oVault,
                         oTransaction)) oGrant.ExecuteNonQuery();
                 oTransaction.Commit();
+                RefreshEscrow();
             }
             catch
             {
@@ -179,16 +205,98 @@ namespace Crypture
 
         public void Validate()
         {
+            // A concurrent owner's schema transaction can deadlock a reader; retry the whole connection.
+            for (int nAttempt = 0; nAttempt < 3; nAttempt++)
+            {
+                try { ValidateOnce(); return; }
+                catch (SqlException oError) when (oError.Number == 1205 && nAttempt < 2)
+                {
+                    Thread.Sleep(100 * (nAttempt + 1));
+                }
+            }
+        }
+
+        private void ValidateOnce()
+        {
             const int VaultMarkerId = 1;
-            const int SupportedSchemaVersion = 2;
+            const int SupportedSchemaVersion = 4;
+            const int OldestSchemaVersion = 2;
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);
             oConnection.Open();
             using SqlCommand oCommand = new SqlCommand(
                 "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = @id", oConnection);
             oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
-            if (oCommand.ExecuteScalar() is not int nVersion || nVersion != SupportedSchemaVersion)
+            if (oCommand.ExecuteScalar() is not int nVersion)
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+            if (nVersion == SupportedSchemaVersion)
+            {
+                RefreshEscrow();
+                return;
+            }
+            if (nVersion < OldestSchemaVersion || nVersion > SupportedSchemaVersion)
+                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+
+            // A Vault owner quarantines existing affiliations before reopening shared records.
+            using SqlCommand oPermission = new SqlCommand(
+                "SELECT CASE WHEN IS_ROLEMEMBER(N'db_owner') = 1 OR " +
+                "IS_SRVROLEMEMBER(N'sysadmin') = 1 THEN 1 ELSE 0 END", oConnection);
+            if (oPermission.ExecuteScalar() is not int nPermission || nPermission != 1)
+                throw new InvalidOperationException("The Vault owner must open this SQL Server Vault first " +
+                    "to verify its certificate affiliations.");
+            using SqlTransaction oTransaction = oConnection.BeginTransaction(IsolationLevel.Serializable);
+            using SqlCommand oLockedMarker = new SqlCommand(
+                "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) " +
+                "WHERE [Id] = @id", oConnection, oTransaction);
+            oLockedMarker.Parameters.AddWithValue("@id", VaultMarkerId);
+            if (oLockedMarker.ExecuteScalar() is not int nCurrentVersion)
+                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+            if (nCurrentVersion == SupportedSchemaVersion)
+            {
+                oTransaction.Commit();
+                RefreshEscrow();
+                return;
+            }
+            if (nCurrentVersion < OldestSchemaVersion || nCurrentVersion >= SupportedSchemaVersion)
+                throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+            if (nCurrentVersion == OldestSchemaVersion)
+                ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerUpgrade");
+            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerUpgrade4");
+            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerEnrollment");
+            ExecuteBatches(oConnection, oTransaction, "Crypture.SqlServerEscrow");
+            oTransaction.Commit();
+            UpgradedOnOpen = true;
+            RefreshEscrow();
+        }
+
+        internal SqlServerEscrowPolicy RefreshEscrow()
+        {
+            using SqlConnection oConnection = new SqlConnection(ConnectionString);
+            oConnection.Open();
+            using SqlCommand oCommand = new SqlCommand(
+                "SELECT v.[EscrowCertificateUserId], u.[Certificate], v.[EscrowDescriptor], " +
+                "v.[EscrowLabel] FROM [dbo].[CryptureVault] AS v LEFT JOIN [dbo].[User] AS u " +
+                "ON u.[UserId] = v.[EscrowCertificateUserId] WHERE v.[Id] = 1", oConnection);
+            using SqlDataReader oReader = oCommand.ExecuteReader();
+            if (!oReader.Read()) throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
+            Escrow = oReader.IsDBNull(3) ? null : new SqlServerEscrowPolicy(
+                oReader.IsDBNull(0) ? null : oReader.GetInt64(0),
+                oReader.IsDBNull(1) ? null : (byte[])oReader[1],
+                oReader.IsDBNull(2) ? null : oReader.GetString(2), oReader.GetString(3));
+            return Escrow;
+        }
+
+        private static void ExecuteBatches(SqlConnection oConnection, SqlTransaction oTransaction,
+            string sResource)
+        {
+            using StreamReader oReader = new StreamReader(typeof(SqlServerVaultStorage).Assembly
+                .GetManifestResourceStream(sResource));
+            foreach (string sBatch in Regex.Split(oReader.ReadToEnd(), @"(?im)^[ \t]*GO[ \t]*\r?$"))
+            {
+                if (String.IsNullOrWhiteSpace(sBatch)) continue;
+                using SqlCommand oCommand = new SqlCommand(sBatch, oConnection, oTransaction);
+                oCommand.ExecuteNonQuery();
+            }
         }
 
         private static string GetDomainUsersName()
@@ -229,6 +337,16 @@ namespace Crypture
             oConnection.Open();
             using SqlCommand oCommand = new SqlCommand(
                 "SELECT HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'BACKUP DATABASE')", oConnection);
+            return oCommand.ExecuteScalar() is int nPermission && nPermission == 1;
+        }
+
+        internal bool CanEnrollCertificates()
+        {
+            using SqlConnection oConnection = new SqlConnection(ConnectionString);
+            oConnection.Open();
+            using SqlCommand oCommand = new SqlCommand(
+                "SELECT CASE WHEN IS_ROLEMEMBER(N'db_owner') = 1 OR " +
+                "IS_SRVROLEMEMBER(N'sysadmin') = 1 THEN 1 ELSE 0 END", oConnection);
             return oCommand.ExecuteScalar() is int nPermission && nPermission == 1;
         }
 

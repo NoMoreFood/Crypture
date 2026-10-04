@@ -24,6 +24,7 @@ namespace Crypture
         public long UserId { get; set; }
         public byte[] Certificate { get; set; }
         public string Sid { get; set; }
+        public bool IsEscrow { get; set; }
     
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]
         public virtual ICollection<Instance> Instances { get; set; }

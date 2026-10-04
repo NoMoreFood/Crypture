@@ -354,6 +354,7 @@ internal static partial class RegressionTests
 
             // Browser, report, and clipboard behavior use the same adjacent defaults.
             Configure(("HideMissingCertificateKeys", "True"), ("RibbonMinimized", "True"),
+                ("HideSqlServerOption", "True"),
                 ("HealthCheckShowOnlyIssues", "True"), ("RecentVaultLimit", "2"),
                 ("ClipboardTimeoutSeconds", "2"), ("AutoConcealIdleMinutes", "1"));
             ItemBrowser oBrowser = Keep(new ItemBrowser());
@@ -371,6 +372,30 @@ internal static partial class RegressionTests
                 "The health report filter initializes from configuration");
             Check(((Ribbon)oBrowser.FindName("ribbon")).IsMinimized,
                 "The browser ribbon initializes from configuration");
+            Check(((RibbonButton)oBrowser.FindName("oSqlServerButton")).Visibility == Visibility.Collapsed,
+                "Configuration hides the SQL Server ribbon option");
+            SqlServerVaultDialog oSqlDialog = Keep(new SqlServerVaultDialog());
+            CheckBox oCreateSql = (CheckBox)oSqlDialog.FindName("oCreateDatabase");
+            Border oEscrowPanel = (Border)oSqlDialog.FindName("oEscrowPanel");
+            Check(oEscrowPanel.Visibility == Visibility.Collapsed,
+                "SQL Server connection keeps creation-only escrow choices hidden");
+            oCreateSql.IsChecked = true;
+            Check(oEscrowPanel.Visibility == Visibility.Visible &&
+                ((Button)oSqlDialog.FindName("oConnect")).Content.ToString() == "Create",
+                "SQL Server creation prompts for the escrow identity");
+            oSqlDialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            oSqlDialog.Left = oSqlDialog.Top = -20000;
+            oSqlDialog.ShowActivated = oSqlDialog.ShowInTaskbar = false;
+            oSqlDialog.Show();
+            oSqlDialog.UpdateLayout();
+            Grid oSqlLayout = (Grid)oSqlDialog.Content;
+            Button oSqlCreate = (Button)oSqlDialog.FindName("oConnect");
+            double nEscrowBottom = oEscrowPanel.TransformToAncestor(oSqlLayout)
+                .Transform(new Point(0, oEscrowPanel.ActualHeight)).Y;
+            double nButtonTop = oSqlCreate.TransformToAncestor(oSqlLayout).Transform(new Point()).Y;
+            Check(oEscrowPanel.ActualHeight > 90 && nEscrowBottom < nButtonTop &&
+                nButtonTop + oSqlCreate.ActualHeight <= oSqlLayout.ActualHeight,
+                "SQL Server escrow controls fit above the action buttons");
             var oStart = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath)
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
@@ -446,6 +471,8 @@ internal static partial class RegressionTests
             Invalid(() => Keep(new ItemBrowser()), "RecentVaultLimit");
             Configure(("HideMissingCertificateKeys", "yes"));
             Invalid(() => Keep(new ItemBrowser()), "HideMissingCertificateKeys");
+            Configure(("HideSqlServerOption", "yes"));
+            Invalid(() => Keep(new ItemBrowser()), "HideSqlServerOption");
             Configure(("TotpDigits", "7"));
             oPanel.Clear();
             oPanel.SetActive(true);

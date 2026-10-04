@@ -353,7 +353,8 @@ namespace Crypture
                         }
 
                         // error if there are no selected users
-                        if (UserListSelected.Count == 0 && RecoveryPolicy.Read().Certificate == null)
+                        if (UserListSelected.Count == 0 &&
+                            RecoveryPolicy.ReadForStorage(CryptureEntities.Storage).Certificate == null)
                             throw new InvalidOperationException("Select at least one recipient using Share With.");
                     }
                     List<User> oRecipients = UserListSelected.ToList();
@@ -622,16 +623,21 @@ namespace Crypture
             List<string> oDetails = new List<string>();
             try
             {
-                RecoveryPolicy oPolicy = RecoveryPolicy.Read();
-                if (oPolicy.Descriptor != null) oDetails.Add("User Based Recovery: " + oPolicy.Descriptor);
+                RecoveryPolicy oPolicy = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage);
+                string sEscrowLabel = (CryptureEntities.Storage as SqlServerVaultStorage)?.Escrow?.Label;
+                if (sEscrowLabel != null) oDetails.Add("Vault Escrow: " + sEscrowLabel);
+                else if (oPolicy.Descriptor != null)
+                    oDetails.Add("User Based Recovery: " + oPolicy.Descriptor);
                 if (oPolicy.Certificate != null)
                 {
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oPolicy.Certificate))
-                        oDetails.Add("Certificate Based Recovery: " +
+                        if (sEscrowLabel == null) oDetails.Add("Certificate Based Recovery: " +
                             oCert.GetNameInfo(X509NameType.SimpleName, false));
                 }
                 if (oDetails.Count != 0) oDetails.Add("Recovery is added automatically on every save. " +
                     "Decrypt and save older items to add it. Recovery recipients can decrypt independently.");
+                if (!String.IsNullOrWhiteSpace(ThisItem.Cipher?.EscrowLabel))
+                    oDetails.Add("Saved Escrow: " + ThisItem.Cipher.EscrowLabel);
                 if (ThisItem.Cipher?.CipherParams == ItemCryptography.RecoveryFormat)
                 {
                     foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(ThisItem.Cipher))

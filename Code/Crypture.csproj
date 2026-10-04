@@ -31,6 +31,10 @@
     <EmbeddedResource Include="Data\SQLite.sql" LogicalName="Crypture.SqliteSchema" />
     <EmbeddedResource Include="Data\SqlServer.sql" LogicalName="Crypture.SqlServerSchema" />
     <EmbeddedResource Include="Data\SqlServerSecurity.sql" LogicalName="Crypture.SqlServerSecurity" />
+    <EmbeddedResource Include="Data\SqlServerEnrollment.sql" LogicalName="Crypture.SqlServerEnrollment" />
+    <EmbeddedResource Include="Data\SqlServerUpgrade.sql" LogicalName="Crypture.SqlServerUpgrade" />
+    <EmbeddedResource Include="Data\SqlServerUpgrade4.sql" LogicalName="Crypture.SqlServerUpgrade4" />
+    <EmbeddedResource Include="Data\SqlServerEscrow.sql" LogicalName="Crypture.SqlServerEscrow" />
     <EmbeddedResource Include="Data\License - DotNet Libraries.txt" LogicalName="Crypture.RuntimeNotices" />
     <EmbeddedResource Include="$(RuntimeNoticesFile)" LogicalName="Crypture.RuntimeThirdPartyNotices"
         Condition="'$(RuntimeNoticesFile)' != ''" />

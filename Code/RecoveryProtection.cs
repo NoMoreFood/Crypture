@@ -15,6 +15,17 @@ namespace Crypture
         internal byte[] Certificate { get; private set; }
         internal bool IsEnabled => Descriptor != null || Certificate != null;
 
+        internal static RecoveryPolicy ReadForStorage(IVaultStorage oStorage, bool bRefresh = false)
+        {
+            if (oStorage is SqlServerVaultStorage oSqlServer)
+            {
+                SqlServerEscrowPolicy oEscrow = bRefresh ? oSqlServer.RefreshEscrow() : oSqlServer.Escrow;
+                if (oEscrow != null)
+                    return new RecoveryPolicy { Descriptor = oEscrow.Descriptor, Certificate = oEscrow.Certificate };
+            }
+            return Read();
+        }
+
         internal static RecoveryPolicy Read(string sPath = null)
         {
             sPath = sPath ?? Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");

@@ -238,12 +238,14 @@ namespace Crypture
             ItemType == "text" ? "Text Secret" : ItemType == "richtext" ? "Rich Text Secret" : "File Attachment";
         public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";
         public string ProtectionDisplay => Cipher == null ? "Unknown" :
-            Cipher.CipherParams == ItemCryptography.RecoveryFormat
-            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based") + " + Recovery"
+            (Cipher.CipherParams == ItemCryptography.RecoveryFormat
+            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based")
             : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
             Cipher.CipherParams == ItemCryptography.LegacyFormat ||
             Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
             Cipher.CipherParams == ItemCryptography.CertificateFormat
-            ? "Certificate Based" : "Unsupported";
+            ? "Certificate Based" : "Unsupported") +
+            (!String.IsNullOrEmpty(Cipher.EscrowLabel) ? " + Escrow: " + Cipher.EscrowLabel :
+                Cipher.CipherParams == ItemCryptography.RecoveryFormat ? " + Recovery" : "");
     }
 }

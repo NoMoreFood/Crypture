@@ -22,6 +22,7 @@ namespace Crypture
         public byte[] AuthenticationTag { get; set; }
         public string ProtectionDescriptor { get; set; }
         public byte[] ProtectedKey { get; set; }
+        public string EscrowLabel { get; set; }
         public byte[] Signature { get; set; }
     
         public virtual Item Item { get; set; }

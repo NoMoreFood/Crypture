@@ -57,7 +57,7 @@ namespace Crypture
             string sProtectionDescriptor = null)
         {
             ContentEncryptionSuite nContentSuite = ItemCryptography.ReadContentEncryptionSuite();
-            RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+            RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage, true);
             List<User> oUsers = sProtectionDescriptor == null
                 ? (oRecipients ?? Enumerable.Empty<User>()).ToList() : new List<User>();
             if (oRecovery.Certificate != null)
@@ -74,14 +74,11 @@ namespace Crypture
                 {
                     using CryptureEntities oDirectory = new CryptureEntities();
                     User oRecoveryUser = oDirectory.Users.ToList().FirstOrDefault(u =>
-                        u.Certificate.SequenceEqual(oRecovery.Certificate));
+                        u.IsEscrow && u.Certificate.SequenceEqual(oRecovery.Certificate));
                     if (oRecoveryUser == null)
-                    {
-                        oRecoveryUser = new User { Certificate = oRecovery.Certificate,
-                            Sid = CertificateOperations.CurrentUserSid };
-                        oDirectory.Users.Add(oRecoveryUser);
-                        oDirectory.SaveChanges();
-                    }
+                        throw new InvalidOperationException("The SQL Server recovery certificate must be " +
+                            "enrolled by the Vault owner and designated as escrow for its verified " +
+                            "Active Directory identity before saving.");
                     if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
                 }
                 Item oSqlEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
@@ -290,7 +287,7 @@ namespace Crypture
 
         internal static void RemoveCertificate(long nUserId)
         {
-            RecoveryPolicy oRecovery = RecoveryPolicy.Read();
+            RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage);
             if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
             {
                 using CryptureEntities oDirectory = new CryptureEntities();

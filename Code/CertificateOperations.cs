@@ -300,5 +300,8 @@ namespace Crypture
             }
         }
 
+        public string AffiliationDisplay => Sid == null ? "Needs verification" :
+            IsEscrow ? "Escrow" : "Verified";
+
     }
 }

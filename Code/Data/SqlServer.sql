@@ -1,16 +1,26 @@
 CREATE TABLE [dbo].[CryptureVault] (
     [Id] int NOT NULL CONSTRAINT [PK_CryptureVault] PRIMARY KEY CHECK ([Id] = 1),
-    [SchemaVersion] int NOT NULL
+    [SchemaVersion] int NOT NULL,
+    [EscrowCertificateUserId] bigint NULL,
+    [EscrowDescriptor] nvarchar(450) NULL,
+    [EscrowLabel] nvarchar(450) NULL,
+    CONSTRAINT [CK_CryptureVault_Escrow] CHECK (
+        ([EscrowCertificateUserId] IS NULL AND [EscrowDescriptor] IS NULL AND [EscrowLabel] IS NULL) OR
+        ([EscrowCertificateUserId] IS NOT NULL AND [EscrowDescriptor] IS NULL AND [EscrowLabel] IS NOT NULL) OR
+        ([EscrowCertificateUserId] IS NULL AND [EscrowDescriptor] IS NOT NULL AND [EscrowLabel] IS NOT NULL))
 );
-INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 2);
+INSERT INTO [dbo].[CryptureVault] ([Id], [SchemaVersion]) VALUES (1, 4);
 
 CREATE TABLE [dbo].[User] (
     [UserId] bigint IDENTITY(1,1) NOT NULL CONSTRAINT [PK_User] PRIMARY KEY,
     [Certificate] varbinary(max) NOT NULL,
     [CertificateHash] AS CONVERT(binary(32), HASHBYTES('SHA2_256', [Certificate])) PERSISTED,
-    [Sid] nvarchar(450) NULL
+    [Sid] nvarchar(450) NULL,
+    [IsEscrow] bit NOT NULL CONSTRAINT [DF_User_IsEscrow] DEFAULT 0
 );
 CREATE UNIQUE INDEX [UX_User_CertificateHash] ON [dbo].[User] ([CertificateHash]);
+ALTER TABLE [dbo].[CryptureVault] ADD CONSTRAINT [FK_CryptureVault_EscrowCertificate]
+    FOREIGN KEY ([EscrowCertificateUserId]) REFERENCES [dbo].[User] ([UserId]);
 
 CREATE TABLE [dbo].[Item] (
     [ItemId] bigint IDENTITY(1,1) NOT NULL CONSTRAINT [PK_Item] PRIMARY KEY,
@@ -34,6 +44,7 @@ CREATE TABLE [dbo].[Cipher] (
     [AuthenticationTag] varbinary(max) NULL,
     [ProtectionDescriptor] nvarchar(max) NULL,
     [ProtectedKey] varbinary(max) NULL,
+    [EscrowLabel] nvarchar(450) NULL,
     [Signature] varbinary(max) NULL,
     CONSTRAINT [FK_Cipher_Item] FOREIGN KEY ([ItemId]) REFERENCES [dbo].[Item] ([ItemId]) ON DELETE CASCADE
 );

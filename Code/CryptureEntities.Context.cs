@@ -41,7 +41,11 @@ namespace Crypture
                 oUser.ToTable("User");
                 oUser.HasKey(u => u.UserId);
                 oUser.Property(u => u.Certificate).IsRequired();
-                if (!oStorage.IsSqlServer) oUser.HasIndex(u => u.Certificate).IsUnique();
+                if (!oStorage.IsSqlServer)
+                {
+                    oUser.HasIndex(u => u.Certificate).IsUnique();
+                    oUser.Ignore(u => u.IsEscrow);
+                }
             });
             oModel.Entity<Item>(oItem =>
             {
@@ -59,7 +63,11 @@ namespace Crypture
             oModel.Entity<Cipher>(oCipher =>
             {
                 if (oStorage.IsSqlServer) oCipher.ToView("AuthorizedCipher");
-                else oCipher.ToTable("Cipher");
+                else
+                {
+                    oCipher.ToTable("Cipher");
+                    oCipher.Ignore(c => c.EscrowLabel);
+                }
                 oCipher.HasKey(c => c.ItemId);
                 oCipher.Property(c => c.ItemId).ValueGeneratedNever();
                 oCipher.Property(c => c.CipherText).IsRequired();

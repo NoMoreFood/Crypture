@@ -38,10 +38,12 @@ namespace Crypture
             $"Crypture {typeof(App).Assembly.GetName().Version.ToString(3)}";
 
         private string sDatabasePath;
+        private bool bCanEnrollCertificates = true;
+        private bool bNeedsCertificateReview;
         private List<User> CertificateList = new List<User>();
         private HashSet<string> PrivateCertificates = new HashSet<string>();
 
-        internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier)
+        internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier, bool bFromDirectory = false)
         {
             CertificateKeyProtection.ValidateForEncryption(oCert);
             if (!CertificateUsageFilter.Read().Matches(oCert))
@@ -52,12 +54,25 @@ namespace Crypture
                     "Review the certificate validation settings and selection filters in Crypture.exe.config.");
             using (CryptureEntities oContent = new CryptureEntities())
             {
-                if (oContent.Users.Where(u => u.Certificate == oCert.RawData).Count() > 0)
+                User oExisting = oContent.Users.ToList().FirstOrDefault(u =>
+                    u.Certificate.AsSpan().SequenceEqual(oCert.RawData));
+                if (oExisting != null && (CryptureEntities.Storage is not SqlServerVaultStorage ||
+                    oExisting.Sid != null))
                 {
                     MessageBox.Show(this,
                          "The selected certificate is already in the Vault.",
                          "Certificate In Vault", MessageBoxButton.OK, MessageBoxImage.Exclamation);
                     return false;
+                }
+
+                if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+                {
+                    if (bFromDirectory)
+                        SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier,
+                            oExisting?.UserId);
+                    else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert, oExisting?.UserId);
+                    oRefreshItemButton_Click();
+                    return true;
                 }
 
                 bool bAmOwner = CertificateOperations.GetPrivateCertificateData().Contains(
@@ -68,9 +83,6 @@ namespace Crypture
 
                 string sOwnerSid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid
                     ? sIdentifier : null;
-                if (CryptureEntities.Storage.IsSqlServer && sOwnerSid == null)
-                    throw new InvalidOperationException("SQL Server recipients need a Windows account SID. " +
-                        "Add this certificate from Active Directory or confirm that you own it.");
                 User oUser = new User()
                 {
                     Certificate = oCert.GetRawCertData(),
@@ -96,6 +108,8 @@ namespace Crypture
             ConfigurationDefaults oDefaults = new ConfigurationDefaults();
             oHideAccessible.IsChecked = oDefaults.Flag("HideMissingCertificateKeys", false);
             ribbon.IsMinimized = oDefaults.Flag("RibbonMinimized", false);
+            oSqlServerButton.Visibility = oDefaults.Flag("HideSqlServerOption", false)
+                ? Visibility.Collapsed : Visibility.Visible;
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
             RefreshRecentVaults();
 
@@ -240,13 +254,34 @@ namespace Crypture
                         if (oSelected.Count == 0) continue;
 
                         // add the certificate to the store
-                        AddCertificate(oSelected[0], oAccount.Sid);
+                        AddCertificate(oSelected[0], oAccount.Sid, true);
                     }
                     finally
                     {
                         foreach (X509Certificate2 oCert in oCollection) oCert.Dispose();
                     }
                 }
+            });
+        }
+
+        private void oMarkEscrowButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (oCertDataGrid.SelectedItem is not User oUser ||
+                CryptureEntities.Storage is not SqlServerVaultStorage oStorage) return;
+            if (oUser.IsEscrow)
+            {
+                MessageBox.Show(this, "This certificate is already designated for emergency recovery.",
+                    "Escrow Certificate", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (MessageBox.Show(this, "Use this AD-published certificate as the Vault's escrow identity? " +
+                "New saves will include it automatically. Existing items keep their saved recovery identity " +
+                "until they are decrypted and saved again.", "Designate Escrow Certificate",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            Utilities.TryOperation(this, () =>
+            {
+                SqlServerCertificateEnrollment.MarkEscrow(oStorage, oUser);
+                oRefreshItemButton_Click();
             });
         }
 
@@ -336,6 +371,7 @@ namespace Crypture
 
         private void RefreshData()
         {
+            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlStorage) oSqlStorage.RefreshEscrow();
             List<Item> oItems = null;
             List<User> oUsers = null;
             HashSet<string> oPrivate = CertificateOperations.GetPrivateCertificateData();
@@ -349,20 +385,23 @@ namespace Crypture
                     oUsers = oContent.Users.ToList();
                     var oProtection = oContent.Ciphers.Select(c => new
                     {
-                        c.ItemId, c.CipherParams, c.ProtectionDescriptor
+                        c.ItemId, c.CipherParams, c.ProtectionDescriptor, c.EscrowLabel
                     }).ToDictionary(c => c.ItemId);
                     foreach (Item oItem in oItems)
                     {
                         if (!oProtection.TryGetValue(oItem.ItemId, out var oPolicy)) continue;
                         oItem.Cipher = new Cipher
                         {
-                            CipherParams = oPolicy.CipherParams, ProtectionDescriptor = oPolicy.ProtectionDescriptor
+                            CipherParams = oPolicy.CipherParams, ProtectionDescriptor = oPolicy.ProtectionDescriptor,
+                            EscrowLabel = oPolicy.EscrowLabel
                         };
                     }
                 });
             }
             ItemList = new ObservableCollection<Item>(oItems.OrderBy(i => i.Label));
             CertificateList = oUsers.OrderBy(u => u.Name).ToList();
+            bNeedsCertificateReview = CryptureEntities.Storage.IsSqlServer &&
+                CertificateList.Any(u => u.Sid == null);
             PrivateCertificates = oPrivate;
             ApplyFilter();
         }
@@ -396,7 +435,11 @@ namespace Crypture
             oCountStatus.Text = bCertificates ? nCount + " certificates" : nCount + " of " + ItemList.Count + " items";
             oEmptyState.Text = String.IsNullOrEmpty(sDatabasePath) ? "Create or load a Vault to get started."
                 : sSearch.Length != 0 ? "No matches. Try another search."
-                : bCertificates ? "Add a certificate from your personal store to get started."
+                : bCertificates ? bCanEnrollCertificates
+                    ? "Add a certificate from your personal store to get started."
+                    : "Ask the Vault owner to enroll a verified certificate."
+                : bNeedsCertificateReview
+                    ? "Some items may be hidden until the Vault owner verifies certificate affiliations."
                 : "No items to show. Add an item or adjust the accessibility filter.";
             oEmptyState.Visibility = nCount == 0 && !oAdvancedTab.IsSelected
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -448,6 +491,8 @@ namespace Crypture
 
         private static void AddAutomaticCertificates()
         {
+            // SQL Server certificates require explicit owner enrollment and cannot be inserted from local settings.
+            if (CryptureEntities.Storage.IsSqlServer) return;
             using (CryptureEntities oContent = new CryptureEntities())
             {
                 List<User> oUsers = oContent.Users.ToList();
@@ -459,8 +504,7 @@ namespace Crypture
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(bCertData))
                         CertificateKeyProtection.ValidateForEncryption(oCert);
                     // create new item to add
-                    User oUser = new User { Certificate = bCertData,
-                        Sid = CryptureEntities.Storage.IsSqlServer ? CertificateOperations.CurrentUserSid : null };
+                    User oUser = new User { Certificate = bCertData };
                     oContent.Users.Add(oUser);
                     oUsers.Add(oUser);
                 }
@@ -497,6 +541,17 @@ namespace Crypture
                 oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
                 oCertificatesTab.IsEnabled = bEnableControls;
                 oClaimCertButton.Visibility = oStorage.IsSqlServer ? Visibility.Collapsed : Visibility.Visible;
+                oAffiliationColumn.Visibility = oStorage.IsSqlServer ? Visibility.Visible : Visibility.Collapsed;
+                bool bCanEnroll = oStorage is not SqlServerVaultStorage oSqlEnrollment ||
+                    oSqlEnrollment.CanEnrollCertificates();
+                bCanEnrollCertificates = bCanEnroll;
+                oAddCertificateGroup.Visibility = bCanEnroll ? Visibility.Visible : Visibility.Collapsed;
+                oAddFromStoreButton.IsEnabled = bCanEnroll;
+                oAddFromFileButton.IsEnabled = bCanEnroll;
+                oAddFromAdButton.IsEnabled = bCanEnroll && PrincipalProtection.IsDomainJoined;
+                oMarkEscrowButton.Visibility = oStorage.IsSqlServer && bCanEnroll &&
+                    PrincipalProtection.IsDomainJoined
+                    ? Visibility.Visible : Visibility.Collapsed;
                 oAdvancedTab.IsEnabled = bEnableControls;
 
                 // Offer server-side backup only to accounts permitted to perform it.
@@ -513,6 +568,14 @@ namespace Crypture
                 if (oStorage is SqlServerVaultStorage oSqlServer)
                     RememberRecentEntry(SqlRecentPrefix + oSqlServer.RecentConnection);
                 else RememberRecentVault(oStorage.DisplayName);
+                if (oStorage is SqlServerVaultStorage { UpgradedOnOpen: true } &&
+                    bNeedsCertificateReview)
+                    Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+                        MessageBox.Show(this, "Certificate affiliations need verification. Open Certificates " +
+                            "and add each unverified certificate from Active Directory or your personal " +
+                            "store. Encrypted items remain stored and become accessible as their " +
+                            "certificates are verified.", "Verify Certificate Affiliations",
+                            MessageBoxButton.OK, MessageBoxImage.Information)));
                 return true;
             }
             catch (Exception eError)
