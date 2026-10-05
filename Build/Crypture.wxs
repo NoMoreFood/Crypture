@@ -12,19 +12,19 @@
 
         <StandardDirectory Id="ProgramFiles6432Folder">
             <Directory Id="INSTALLFOLDER" Name="$(var.ProductName)">
-                <Component Id="CryptureApplication" Guid="*">
+                <Component Id="CryptureApplication" Guid="C3CB8F54-6D40-5E0A-BE02-D8E81E7A1C82">
                     <File Id="CryptureExecutable" Source="$(var.PublishDirectory)\Crypture.exe" Name="Crypture.exe" KeyPath="yes">
                         <Shortcut Id="ApplicationStartMenuShortcut" Directory="ProgramMenuFolder"
                             Name="$(var.ProductName)" Advertise="yes" WorkingDirectory="INSTALLFOLDER"
                             Icon="Crypture.exe" />
                     </File>
+                    <File Source="$(var.PublishDirectory)\e_sqlite3.dll" CompanionFile="CryptureExecutable" />
                 </Component>
             </Directory>
         </StandardDirectory>
         <StandardDirectory Id="ProgramMenuFolder" />
         <Feature Id="CryptureFeature" Title="$(var.ProductName)" Level="1">
             <ComponentRef Id="CryptureApplication" />
-            <File Directory="INSTALLFOLDER" Source="$(var.PublishDirectory)\e_sqlite3.dll" DefaultLanguage="0" />
             <Files Directory="INSTALLFOLDER" Include="$(var.PublishDirectory)\**">
                 <Exclude Files="$(var.PublishDirectory)\Crypture.exe" />
                 <Exclude Files="$(var.PublishDirectory)\e_sqlite3.dll" />
