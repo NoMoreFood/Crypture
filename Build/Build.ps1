@@ -37,12 +37,14 @@ try
     $version = [string] $projectSource.Project.PropertyGroup[0].Version
     $packageName = "Crypture-$version-portable.zip"
     $destination = Join-Path $OutputDirectory $packageName
+    $unpackedPackageName = "Crypture-$version-unpacked.zip"
+    $unpackedDestination = Join-Path $OutputDirectory $unpackedPackageName
     $runtimePrefix = 'win-'
     $runtimes = @($RuntimeIdentifier | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
     $installerNames = @($runtimes | ForEach-Object {
         "Crypture-$($_.Substring($runtimePrefix.Length))-$version-installer.msi"
     })
-    foreach ($name in @($packageName) + $installerNames)
+    foreach ($name in @($packageName, $unpackedPackageName) + $installerNames)
     {
         $output = Join-Path $OutputDirectory $name
         if (Test-Path -LiteralPath $output) { throw "Package already exists: $output" }
@@ -235,6 +237,12 @@ try
     [IO.Compression.ZipFile]::CreateFromDirectory($portableDirectory, $destination,
         [IO.Compression.CompressionLevel]::Optimal, $false)
     Write-Host "Portable ZIP ready: $destination"
+
+    # Package the unpacked application and its dependencies in architecture folders.
+    $unpackedDirectory = Join-Path $stage 'Installed'
+    [IO.Compression.ZipFile]::CreateFromDirectory($unpackedDirectory, $unpackedDestination,
+        [IO.Compression.CompressionLevel]::Optimal, $false)
+    Write-Host "Unpacked ZIP ready: $unpackedDestination"
 }
 catch
 {
