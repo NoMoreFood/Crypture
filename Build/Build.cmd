@@ -9,6 +9,8 @@ SET BASEDIR=%~dp0.
 SET BINDIR=%~dp0..\Code\bin\Release\Portable
 SET OUTDIR=%~dp0..\Binaries
 SET STAGEDIR=%~dp0PackageStage
+:: use the default module paths for Windows PowerShell
+SET PSMODULEPATH=
 POWERSHELL -NoProfile -File "%BASEDIR%\Build.ps1" -BinaryDirectory "%BINDIR%" ^
  -OutputDirectory "%OUTDIR%" -StageDirectory "%STAGEDIR%" ^
  -TimestampUrl "%TSAURL%" -ProductName "%LIBNAME%" -ProductUrl "%LIBURL%" %*
