@@ -204,15 +204,7 @@ try
             "-p:PublishDir=$installedDirectory/", "-p:RuntimeNoticesFile=$notices")
         $installedConfig = Join-Path $installedDirectory 'Crypture.dll.config'
         Move-Item -LiteralPath $installedConfig -Destination (Join-Path $installedDirectory 'Crypture.exe.config')
-        foreach ($file in Get-ChildItem -LiteralPath $installedDirectory -Recurse -File |
-            Where-Object { $_.Extension -in @('.exe', '.dll') })
-        {
-            if ($file.Name -in @('Crypture.exe', 'Crypture.dll') -or
-                (!$SkipSigning -and !(Get-AuthenticodeSignature -LiteralPath $file.FullName).SignerCertificate))
-            {
-                Sign-File $file.FullName
-            }
-        }
+        Sign-File (Join-Path $installedDirectory 'Crypture.exe')
 
         # Build and validate an MSI containing the unpacked application.
         $installerDirectory = Join-Path (Join-Path $stage 'Installers') $architecture
