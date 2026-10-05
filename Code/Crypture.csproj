@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <StartupObject>Crypture.App</StartupObject>
+    <StartupObject>Crypture.PortableStartup</StartupObject>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <LangVersion>14.0</LangVersion>

@@ -11,7 +11,6 @@ using System.DirectoryServices;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
@@ -101,10 +100,6 @@ namespace Crypture
 
         public ItemBrowser()
         {
-            // display splash screen and set to automatically close after constructor returns
-            SplashScreen oScreen = new SplashScreen(Assembly.GetExecutingAssembly(), "Images/Save.png");
-            oScreen.Show(true);
-
             // initialize xaml form display
             InitializeComponent();
             Title = sApplicationTitle;
@@ -115,9 +110,6 @@ namespace Crypture
                 ? Visibility.Collapsed : Visibility.Visible;
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
             RefreshRecentVaults();
-
-            string[] sArgs = Environment.GetCommandLineArgs();
-            if (sArgs.Length > 1) LoadDatabase(sArgs[1]);
 
             // show certificate generator based on settings file
             bool bCertificates = Properties.Settings.Default.EnableCertificateProtection;
@@ -488,9 +480,9 @@ namespace Crypture
             });
         }
 
-        private void oNewDatabaseButton_Click(object sender, RoutedEventArgs e)
+        private async void oNewDatabaseButton_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            await Utilities.TryOperationAsync(this, async () =>
             {
                 // ask the user where to store the file
                 SaveFileDialog oSaveDialog = new SaveFileDialog
@@ -503,8 +495,7 @@ namespace Crypture
 
                 // Create the selected file and open the new Vault.
                 SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.GetFullPath(oSaveDialog.FileName));
-                oStorage.Create();
-                if (LoadVault(oStorage, false)) oAddItemButton_Click(sender, e);
+                if (await LoadVaultAsync(oStorage, true)) oAddItemButton_Click(sender, e);
             });
         }
 
@@ -531,30 +522,8 @@ namespace Crypture
             }
         }
 
-        private bool LoadDatabase(string sDatabase, bool bEnableControls = true) =>
-            LoadVault(new SqliteVaultStorage(Path.GetFullPath(sDatabase)), false, bEnableControls);
-
-        private bool LoadVault(IVaultStorage oStorage, bool bCreate, bool bEnableControls = true)
-        {
-            if (oVaultCancellation != null) return false;
-            VaultView oView;
-            try
-            {
-                oView = PrepareVaultAsync(oStorage, bCreate, CancellationToken.None).GetAwaiter().GetResult();
-            }
-            catch (Exception eError)
-            {
-                Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
-                {
-                    MessageBox.Show(this, "The Vault could not be opened: " +
-                        Environment.NewLine + Environment.NewLine + eError.GetBaseException().Message,
-                        "Vault Connection Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                }));
-                return false;
-            }
-            ApplyVault(oStorage, oView, bEnableControls);
-            return true;
-        }
+        private Task<bool> LoadDatabaseAsync(string sDatabase) =>
+            LoadVaultAsync(new SqliteVaultStorage(Path.GetFullPath(sDatabase)), false);
 
         private static async Task<VaultView> PrepareVaultAsync(IVaultStorage oStorage, bool bCreate,
             CancellationToken oCancellation)
@@ -625,9 +594,12 @@ namespace Crypture
         }
 
         private Task<bool> LoadVaultAsync(IVaultStorage oStorage, bool bCreate) =>
-            RunVaultOperationAsync(bCreate ? "Creating Vault..." : "Connecting to Vault...", async oCancellation =>
+            RunVaultOperationAsync(bCreate ? "Creating Vault..." :
+                oStorage.IsSqlServer ? "Connecting to Vault..." : "Loading Vault...", async oCancellation =>
             {
-                VaultView oView = await PrepareVaultAsync(oStorage, bCreate, oCancellation);
+                // Load providers and prepare remote data without blocking the window's dispatcher.
+                VaultView oView = await Task.Run(() => PrepareVaultAsync(oStorage, bCreate, oCancellation),
+                    oCancellation);
                 oCancellation.ThrowIfCancellationRequested();
                 ApplyVault(oStorage, oView, true);
             });
@@ -653,6 +625,8 @@ namespace Crypture
             Mouse.OverrideCursor = Cursors.Wait;
             try
             {
+                // Paint busy feedback before database work begins.
+                await Dispatcher.Yield(DispatcherPriority.Background);
                 bool bSucceeded = await Utilities.TryOperationAsync(this, async () =>
                 {
                     try { await oOperation(oCancellation.Token); }
@@ -687,17 +661,20 @@ namespace Crypture
             await oCancellation.CancelAsync();
         }
 
-        private void oLoadDatabaseButton_Click(object sender, RoutedEventArgs e)
+        private async void oLoadDatabaseButton_Click(object sender, RoutedEventArgs e)
         {
-            // ask the user where to store the file
-            OpenFileDialog oSaveDialog = new OpenFileDialog()
+            await Utilities.TryOperationAsync(this, async () =>
             {
-                Title = "Open Vault",
-                Filter = "Crypture Vault File (*.cryptdb)|*.cryptdb|All Files (*.*)|*.*",
-                CheckFileExists = true
-            };
-            if (!oSaveDialog.ShowDialog(this).Value) return;
-            LoadDatabase(oSaveDialog.FileName);
+                // Ask the user which Vault to open.
+                OpenFileDialog oOpenDialog = new OpenFileDialog
+                {
+                    Title = "Open Vault",
+                    Filter = "Crypture Vault File (*.cryptdb)|*.cryptdb|All Files (*.*)|*.*",
+                    CheckFileExists = true
+                };
+                if (oOpenDialog.ShowDialog(this) != true) return;
+                await LoadDatabaseAsync(oOpenDialog.FileName);
+            });
         }
 
         internal void RememberRecentVault(string sPath) => RememberRecentEntry(Path.GetFullPath(sPath));
@@ -772,25 +749,25 @@ namespace Crypture
             RefreshRecentVaults();
         }
 
-        private void oRecentVault_Click(object sender, RoutedEventArgs e)
+        private async void oRecentVault_Click(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
             oLoadDatabaseButton.IsDropDownOpen = false;
-            OpenRecentVault((string)((RibbonMenuItem)sender).Tag);
+            await Utilities.TryOperationAsync(this, () => OpenRecentVaultAsync((string)((RibbonMenuItem)sender).Tag));
         }
 
-        private void OpenRecentVault(string sEntry)
+        private async Task OpenRecentVaultAsync(string sEntry)
         {
             if (!sEntry.StartsWith(SqlRecentPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                LoadDatabase(sEntry);
+                await LoadDatabaseAsync(sEntry);
                 return;
             }
             string sConnection = sEntry[SqlRecentPrefix.Length..];
             try
             {
                 SqlServerVaultStorage oStorage = new SqlServerVaultStorage(sConnection);
-                OpenSqlVault(oStorage, false);
+                await LoadVaultAsync(oStorage, false);
             }
             catch (ArgumentException oError)
             {
@@ -932,23 +909,27 @@ namespace Crypture
             Utilities.TryOperation(this, () => Properties.Settings.Default.Save());
         }
 
-        private void oItemBrowser_Loaded(object sender, RoutedEventArgs e)
+        private async void oItemBrowser_ContentRendered(object sender, EventArgs e)
         {
-            // A command-line Vault takes precedence over the last successful connection.
-            if (String.IsNullOrEmpty(sDatabasePath) && Environment.GetCommandLineArgs().Length == 1)
+            // Render the window before opening a command-line Vault or the last successful connection.
+            ContentRendered -= oItemBrowser_ContentRendered;
+            await Utilities.TryOperationAsync(this, async () =>
             {
-                string sLastVault = Properties.Settings.Default.LastVault;
-                if (String.IsNullOrWhiteSpace(sLastVault))
-                    sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()
-                        .FirstOrDefault(p => !String.IsNullOrWhiteSpace(p));
-                if (sLastVault?.StartsWith(SqlRecentPrefix, StringComparison.OrdinalIgnoreCase) == true)
-                    OpenRecentVault(sLastVault);
-                else if (!String.IsNullOrWhiteSpace(sLastVault)) LoadDatabase(sLastVault);
-            }
+                string[] sArgs = Environment.GetCommandLineArgs();
+                if (sArgs.Length > 1) await LoadDatabaseAsync(sArgs[1]);
+                else if (String.IsNullOrEmpty(sDatabasePath))
+                {
+                    string sLastVault = Properties.Settings.Default.LastVault;
+                    if (String.IsNullOrWhiteSpace(sLastVault))
+                        sLastVault = Properties.Settings.Default.RecentVaults?.Cast<string>()
+                            .FirstOrDefault(p => !String.IsNullOrWhiteSpace(p));
+                    if (!String.IsNullOrWhiteSpace(sLastVault)) await OpenRecentVaultAsync(sLastVault);
+                }
+            });
 
             if (!string.IsNullOrWhiteSpace(Properties.Settings.Default.StartupMessageText))
             {
-                Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate ()
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate ()
                 {
                     MessageBox.Show(this, Properties.Settings.Default.StartupMessageText,
                         "Welcome To Crypture", MessageBoxButton.OK,

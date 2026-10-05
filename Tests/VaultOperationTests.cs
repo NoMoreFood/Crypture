@@ -56,8 +56,10 @@ internal static partial class RegressionTests
             };
             BindingFlags nFlags = BindingFlags.NonPublic | BindingFlags.Instance;
             ((CheckBox)oBrowser.FindName("oHideAccessible")).IsChecked = false;
-            typeof(ItemBrowser).GetMethod("LoadVault", nFlags)
-                .Invoke(oBrowser, new object[] { oStorageA, false, true });
+            MethodInfo oLoadAsync = typeof(ItemBrowser).GetMethod("LoadVaultAsync", nFlags);
+            Task<bool> oInitialLoad = (Task<bool>)oLoadAsync.Invoke(oBrowser, new object[] { oStorageA, false });
+            PumpUntil(() => oInitialLoad.IsCompleted);
+            Check(oInitialLoad.Result, "SQLite opens through the asynchronous Vault operation");
             DataGrid oGrid = (DataGrid)oBrowser.FindName("oItemDataGrid");
             Item oOriginal = (Item)oGrid.Items[0];
             oGrid.SelectedItem = oOriginal;
@@ -76,7 +78,6 @@ internal static partial class RegressionTests
 
             // Cancellation after fetching candidate data must keep actions disabled until loading has stopped.
             oBrowser.Show();
-            MethodInfo oLoadAsync = typeof(ItemBrowser).GetMethod("LoadVaultAsync", nFlags);
             foreach (double nFont in new[] { 12d, 18d })
             {
                 oBrowser.FontSize = nFont;
@@ -97,8 +98,8 @@ internal static partial class RegressionTests
                 Check(!oLoading.IsCompleted && !oGrid.IsEnabled && oCancel.IsVisible &&
                     oBounds.Right <= oRoot.ActualWidth && oBounds.Bottom <= oRoot.ActualHeight,
                     "Loading repaints and keeps cancellation visible at minimum width, font " + nFont);
-                Check(!(bool)typeof(ItemBrowser).GetMethod("LoadVault", nFlags)
-                    .Invoke(oBrowser, new object[] { oStorageB, false, true }),
+                Task<bool> oSecondLoad = (Task<bool>)oLoadAsync.Invoke(oBrowser, new object[] { oStorageB, false });
+                Check(oSecondLoad.IsCompletedSuccessfully && !oSecondLoad.Result,
                     "A second Vault switch cannot race an in-flight load");
                 oCancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 PumpUntil(() => oLoading.IsCompleted);
@@ -108,6 +109,34 @@ internal static partial class RegressionTests
                     "Cancelled loading restores controls and retains the original Vault, font " + nFont);
             }
             TestBlockedSqlCancellation(oBrowser, oCert);
+
+            // Slow file creation must leave progress visible and the dispatcher responsive.
+            using (ManualResetEventSlim oCreateGate = new ManualResetEventSlim())
+            {
+                SqliteVaultStorage oNewStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "created.cryptdb"));
+                FaultingVaultStorage oDelayedCreation = new FaultingVaultStorage(oNewStorage, false, oCreateGate);
+                Task<bool> oCreating = (Task<bool>)oLoadAsync.Invoke(oBrowser,
+                    new object[] { oDelayedCreation, true });
+                try
+                {
+                    PumpUntil(() => oDelayedCreation.CreationStarted);
+                    bool bRepainted = false;
+                    oBrowser.Dispatcher.BeginInvoke(new Action(() => bRepainted = true));
+                    PumpUntil(() => bRepainted);
+                    Check(!oCreating.IsCompleted && !oGrid.IsEnabled &&
+                        ((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible &&
+                        ((TextBlock)oBrowser.FindName("oDatabaseStatus")).Text == "Creating Vault..." &&
+                        oDelayedCreation.CreationThreadId != Environment.CurrentManagedThreadId,
+                        "SQLite creation displays progress and runs off the UI thread");
+                }
+                finally { oCreateGate.Set(); }
+                PumpUntil(() => oCreating.IsCompleted);
+                Check(oCreating.Result && File.Exists(oNewStorage.DisplayName) && oGrid.IsEnabled &&
+                    !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible &&
+                    CryptureEntities.Storage.DisplayName == oNewStorage.DisplayName &&
+                    oSettings.LastVault == oNewStorage.DisplayName,
+                    "Successful SQLite creation publishes the new Vault and restores controls");
+            }
 
             // A stale deletion must not remove another process's committed revision.
             CryptureEntities.Storage = oStorageB;
@@ -208,15 +237,27 @@ internal static partial class RegressionTests
         }
     }
 
-    private sealed class FaultingVaultStorage(IVaultStorage oInner, bool bFailPermissions) : IVaultStorage
+    private sealed class FaultingVaultStorage(IVaultStorage oInner, bool bFailPermissions,
+        ManualResetEventSlim oCreateGate = null) : IVaultStorage
     {
         internal volatile bool RowsRead;
+        internal volatile bool CreationStarted;
+        internal int CreationThreadId;
         public string ConnectionString => oInner.ConnectionString;
         public string DisplayName => oInner.DisplayName;
         public bool IsSqlServer => oInner.IsSqlServer;
         public bool SupportsCompact => oInner.SupportsCompact;
         public void Configure(DbContextOptionsBuilder oOptions) => oInner.Configure(oOptions);
-        public void Create() => oInner.Create();
+        public void Create()
+        {
+            if (oCreateGate != null)
+            {
+                CreationThreadId = Environment.CurrentManagedThreadId;
+                CreationStarted = true;
+                oCreateGate.Wait();
+            }
+            oInner.Create();
+        }
         public void Validate() => oInner.Validate();
         public void ReadSnapshot(CryptureEntities oContent, Action oRead) => oInner.ReadSnapshot(oContent, oRead);
         public DbConnection OpenHealthConnection() => oInner.OpenHealthConnection();
@@ -228,6 +269,7 @@ internal static partial class RegressionTests
         {
             RowsRead = true;
             if (bFailPermissions) throw new IOException("The server disconnected during permission checks.");
+            if (oCreateGate != null) return (true, true);
             await Task.Delay(Timeout.Infinite, oCancellation);
             return (true, true);
         }

@@ -216,11 +216,21 @@ namespace Crypture
         [STAThread]
         private static void Main()
         {
-            if (TryRestartWithLocalExtraction()) return;
-            RunApplication();
+            // Show native startup feedback before library probing or Application initialization.
+            SplashScreen oScreen = new SplashScreen(typeof(PortableStartup).Assembly, "Images/Save.png");
+            oScreen.Show(true);
+            try
+            {
+                if (TryRestartWithLocalExtraction()) return;
+                RunApplication();
+            }
+            finally
+            {
+                oScreen.Close(TimeSpan.Zero);
+            }
         }
 
-        // Defer WPF initialization until native library probing completes.
+        // Defer Application loading and JIT compilation until the splash is visible and probing completes.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void RunApplication() => App.Main();
 

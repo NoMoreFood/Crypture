@@ -51,9 +51,13 @@ internal static partial class RegressionTests
                         BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oApp)).IsEnabled,
                     "Fresh application startup uses configured browser, clipboard, and idle defaults");
                 if (sExpectedVault != null)
+                {
+                    PumpUntil(() => CryptureEntities.Storage.DisplayName == sExpectedVault &&
+                        !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
                     Check(CryptureEntities.Storage.DisplayName == sExpectedVault &&
                         oSettings.LastVault == sExpectedVault && oSettings.RecentVaults.Count == 0,
                         "Startup opens the saved Vault without retaining recent history");
+                }
                 bPassed = true;
             }
             catch (Exception oError) { Console.Error.WriteLine(oError); }

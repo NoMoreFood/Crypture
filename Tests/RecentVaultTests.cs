@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -12,22 +13,29 @@ internal static partial class RegressionTests
         Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
         StringCollection oOriginal = oSettings.RecentVaults;
         string sOriginalLastVault = oSettings.LastVault;
-        MethodInfo oLoadVault = typeof(ItemBrowser).GetMethod("LoadDatabase",
+        MethodInfo oLoadVault = typeof(ItemBrowser).GetMethod("LoadDatabaseAsync",
             BindingFlags.Instance | BindingFlags.NonPublic);
+
+        bool LoadVault(string sPath)
+        {
+            Task<bool> oLoading = (Task<bool>)oLoadVault.Invoke(oBrowser, new object[] { sPath });
+            PumpUntil(() => oLoading.IsCompleted);
+            return oLoading.GetAwaiter().GetResult();
+        }
 
         try
         {
             oSettings.RecentVaults = new StringCollection();
 
             // Successful opens update history; path aliases deduplicate and reopening promotes to the front.
-            oLoadVault.Invoke(oBrowser, new object[] { sDatabase, true });
+            LoadVault(sDatabase);
             Check(oSettings.RecentVaults.Count == 1 && oSettings.RecentVaults[0] == Path.GetFullPath(sDatabase) &&
                 oSettings.LastVault == Path.GetFullPath(sDatabase),
                 "Opening a Vault adds its absolute path to recent history");
             string sSecond = Path.Combine(sDirectory, "Recent_Vault \u00e9.cryptdb");
             DatabaseOperations.CreateDatabase(sSecond, File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
                 "SQLite.sql")));
-            Check((bool)oLoadVault.Invoke(oBrowser, new object[] { sSecond, true }) &&
+            Check(LoadVault(sSecond) &&
                 oSettings.RecentVaults[0] == sSecond, "The newest successfully opened Vault is listed first");
             string sPreviousDirectory = Environment.CurrentDirectory;
             try
@@ -59,7 +67,7 @@ internal static partial class RegressionTests
         }
         finally
         {
-            oLoadVault.Invoke(oBrowser, new object[] { sDatabase, true });
+            LoadVault(sDatabase);
             oSettings.RecentVaults = oOriginal;
             oSettings.LastVault = sOriginalLastVault;
             oSettings.Save();
