@@ -30,7 +30,6 @@ namespace Crypture
         {
             const int CodeRefreshIntervalMilliseconds = 250;
             InitializeComponent();
-            Utilities.EnableClipboardTimeout(oCurrentCode);
             Utilities.EnableClipboardTimeout(oSecretInput);
             Utilities.EnableClipboardTimeout(oImportInput);
             oTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
@@ -155,7 +154,8 @@ namespace Crypture
             {
                 try
                 {
-                    oSecret = ReadSecret();
+                    ApplyDefaults();
+                    if (!String.IsNullOrWhiteSpace(oSecretInput.Text)) oSecret = ReadSecret();
                 }
                 catch (InvalidOperationException oError)
                 {
@@ -169,38 +169,34 @@ namespace Crypture
 
         internal void RefreshCode()
         {
-            if (!bActive || !IsEnabled || oSecret == null)
+            string sCode = "";
+            double nRemaining = 0;
+            if (bActive && IsEnabled && oSecret != null)
             {
-                oCurrentCode.Clear();
-                oRemainingText.Text = "";
-                oRemainingProgress.Value = 0;
-                oCopyCode.IsEnabled = false;
-                oCopySetup.IsEnabled = false;
-                return;
+                try
+                {
+                    // Recompute from wall-clock time so sleep, resume, and clock corrections do not drift.
+                    DateTimeOffset oNow = Clock();
+                    sCode = oSecret.GetCode(oNow);
+                    nRemaining = oSecret.SecondsRemaining(oNow);
+                    oRemainingProgress.Maximum = oSecret.Period;
+                    oValidationMessage.Text = "";
+                }
+                catch (InvalidOperationException oError)
+                {
+                    oValidationMessage.Text = oError.Message;
+                }
             }
-            try
-            {
-                // Recompute from wall-clock time so sleep, resume, and clock corrections do not drift.
-                DateTimeOffset oNow = Clock();
-                oCurrentCode.Text = oSecret.GetCode(oNow);
-                oValidationMessage.Text = "";
-                double nRemaining = oSecret.SecondsRemaining(oNow);
-                oRemainingProgress.Maximum = oSecret.Period;
-                oRemainingProgress.Value = nRemaining;
-                oRemainingText.Text = "Next Code in " + Math.Ceiling(nRemaining)
-                    .ToString(CultureInfo.InvariantCulture) + " Seconds";
-                oCopyCode.IsEnabled = true;
-                oCopySetup.IsEnabled = true;
-            }
-            catch (InvalidOperationException oError)
-            {
-                oCurrentCode.Clear();
-                oCopyCode.IsEnabled = false;
-                oCopySetup.IsEnabled = false;
-                oRemainingProgress.Value = 0;
-                oRemainingText.Text = "";
-                oValidationMessage.Text = oError.Message;
-            }
+
+            // Show setup guidance until a generated code is available.
+            bool bHasCode = sCode.Length > 0;
+            oCurrentCode.Text = sCode;
+            oCodePrompt.Visibility = bHasCode ? Visibility.Collapsed : Visibility.Visible;
+            oCopyCode.Visibility = oCodeCountdown.Visibility = bHasCode ? Visibility.Visible : Visibility.Collapsed;
+            oCopyCode.IsEnabled = oCopySetup.IsEnabled = bHasCode;
+            oRemainingProgress.Value = nRemaining;
+            oRemainingText.Text = bHasCode ? "Next Code in " + Math.Ceiling(nRemaining)
+                .ToString(CultureInfo.InvariantCulture) + " Seconds" : "";
         }
 
         private void oCopyCode_Click(object sender, RoutedEventArgs e)

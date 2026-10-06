@@ -154,7 +154,7 @@ internal static partial class RegressionTests
                 .SetValue(oEditor, false);
             typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
                 .Invoke(oEditor, new object[] { null, null });
-            TextBox oCode = (TextBox)oPanel.FindName("oCurrentCode");
+            TextBlock oCode = (TextBlock)oPanel.FindName("oCurrentCode");
             Check(oCode.Text.Length == 0 && ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
                 "Lock clears the TOTP seed and code");
             Reject(() => oCached.GetCode(DateTimeOffset.UtcNow), "Lock disposes the live TOTP key");
@@ -256,7 +256,7 @@ internal static partial class RegressionTests
             Complete(Import(() => TotpPanel.ReadQrFile(Path.Combine(sDirectory, "authenticator-qr.png"))));
             using TotpSecret oExpected = TotpSecret.Parse(sUri);
             Check(oPanel.ReadUri() == sUri && nChanges == 1 &&
-                ((TextBox)oPanel.FindName("oCurrentCode")).Text == oExpected.GetCode(oPanel.Clock()),
+                ((TextBlock)oPanel.FindName("oCurrentCode")).Text == oExpected.GetCode(oPanel.Clock()),
                 "QR file import fills every setup field, refreshes the code, and raises one change notification");
             Complete(Import(() => TotpPanel.ReadQrImage(CreateQrScreenshot([sOther]))));
             Check(oPanel.ReadUri().Contains("second%40example.com") && nChanges == 2,

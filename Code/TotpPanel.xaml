@@ -3,22 +3,36 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="0,2,0,8">
             <TextBlock x:Name="oAccountTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <Label Content="Current _Code:" Target="{Binding ElementName=oCurrentCode}"
+            <Label Content="Current _Code:" Target="{Binding ElementName=oCopyCode}"
                 Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE823;" />
-            <DockPanel>
-                <Button x:Name="oCopyCode" DockPanel.Dock="Right" Margin="6,0,0,0" VerticalAlignment="Center"
-                    Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy TOTP Code"
-                    Click="oCopyCode_Click" IsEnabled="False"
-                    ToolTip="Copy the current code. The code expires at the next rotation." />
-                <TextBox x:Name="oCurrentCode" IsReadOnly="True" IsUndoEnabled="False" MinHeight="64"
-                    FontSize="32" Padding="8" HorizontalContentAlignment="Center"
-                    Style="{StaticResource Crypture.SecretText}" AutomationProperties.Name="Current TOTP Code" />
-            </DockPanel>
-            <ProgressBar x:Name="oRemainingProgress" Height="5" Margin="0,8,0,0" Minimum="0" Maximum="30"
-                Foreground="{DynamicResource Crypture.AccentBrush}"
-                Background="{DynamicResource Crypture.PanelBrush}" AutomationProperties.Name="TOTP Time Remaining" />
-            <TextBlock x:Name="oRemainingText" Margin="0,5,0,8" Foreground="{DynamicResource Crypture.MutedBrush}"
-                AutomationProperties.LiveSetting="Polite" />
+            <Border Background="{DynamicResource Crypture.PanelBrush}" CornerRadius="4" MinHeight="64" Padding="12,8">
+                <DockPanel>
+                    <Button x:Name="oCopyCode" DockPanel.Dock="Right" Margin="12,0,0,0" VerticalAlignment="Center"
+                        Style="{StaticResource Crypture.CopyButton}" AutomationProperties.Name="Copy TOTP Code"
+                        Click="oCopyCode_Click" IsEnabled="False" Visibility="Collapsed"
+                        ToolTip="Copy the current code. The code expires at the next rotation." />
+                    <Grid>
+                        <TextBlock x:Name="oCurrentCode" FontSize="32" FontWeight="SemiBold"
+                            TextAlignment="Center"
+                            VerticalAlignment="Center" FontFamily="{Binding FontFamily, ElementName=oSecretInput}"
+                            Foreground="{DynamicResource Crypture.TextBrush}"
+                            AutomationProperties.Name="{Binding Text, ElementName=oCurrentCode,
+                                StringFormat='Current TOTP Code: {0}'}" />
+                        <TextBlock x:Name="oCodePrompt" TextWrapping="Wrap" TextAlignment="Center"
+                            VerticalAlignment="Center"
+                            Foreground="{DynamicResource Crypture.MutedBrush}"
+                            Text="Complete the authenticator setup below to generate a code." />
+                    </Grid>
+                </DockPanel>
+            </Border>
+            <StackPanel x:Name="oCodeCountdown" Visibility="Collapsed">
+                <ProgressBar x:Name="oRemainingProgress" Height="5" Margin="0,8,0,0" Minimum="0" Maximum="30"
+                    Foreground="{DynamicResource Crypture.AccentBrush}"
+                    Background="{DynamicResource Crypture.PanelBrush}"
+                    AutomationProperties.Name="TOTP Time Remaining" />
+                <TextBlock x:Name="oRemainingText" Margin="0,5,0,8" Foreground="{DynamicResource Crypture.MutedBrush}"
+                    AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
             <TextBlock x:Name="oValidationMessage" TextWrapping="Wrap" Margin="0,0,0,8"
                 Foreground="{DynamicResource Crypture.WarningBrush}" AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Foreground="{DynamicResource Crypture.MutedBrush}">
