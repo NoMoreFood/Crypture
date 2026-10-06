@@ -59,8 +59,7 @@ namespace Crypture
         internal Task CertificateLoading { get; private set; } = Task.CompletedTask;
         private readonly bool bDpapiNgEnabled = Properties.Settings.Default.EnableDpapiNgProtection;
         private readonly bool bCertificatesEnabled = Properties.Settings.Default.EnableCertificateProtection;
-        private readonly bool bFidoEnabled = Properties.Settings.Default.EnableFidoProtection &&
-            !CryptureEntities.Storage.IsSqlServer && FidoNative.IsAvailable;
+        private readonly bool bFidoEnabled = FidoKeyProtection.IsEnabled(CryptureEntities.Storage);
         private byte[] oFidoCredentialId;
         private readonly bool bDomainJoined = PrincipalProtection.IsDomainJoined;
         private readonly ObservableCollection<ProtectionPrincipal> PrincipalList =
@@ -112,8 +111,9 @@ namespace Crypture
             oAddCertDropDown.Items.SortDescriptions.Add(
                 new SortDescription(nameof(User.Name), ListSortDirection.Ascending));
 
-            // add in our keys by default
-            if (bNewItem && bCertificatesEnabled) LoadUsers(true);
+            // Load required certificate recipients even when certificate-based encryption is disabled.
+            if (bNewItem && (bCertificatesEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0))
+                LoadUsers(true);
             bool bSqlWindowsProtection = !CryptureEntities.Storage.IsSqlServer || bDomainJoined;
             oDpapiNgProtection.IsEnabled = bDpapiNgEnabled && bSqlWindowsProtection;
             oDpapiNgProtection.Visibility = oDpapiNgProtection.IsEnabled
@@ -188,6 +188,7 @@ namespace Crypture
                 : ThisItem.Instances.Any(i => i.UserId == u.UserId)));
             oItemSharedWith.ItemsSource = UserListSelected;
             oAddCertDropDown.ItemsSource = UserListSelected.ToList();
+            if (!bCertificatesEnabled) return;
             bLoadingCertificates = true;
             oCertificateUsageNotice.Text = "Checking recipient certificates...";
             oCertificateUsageNotice.Visibility = Visibility.Visible;

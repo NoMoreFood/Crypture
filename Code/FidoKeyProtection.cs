@@ -53,6 +53,9 @@ namespace Crypture
         private const int MaxEnvelopeBytes = MaxRecoveryBytes + MaxCredentialIdBytes + 256;
         private static readonly byte[] KeyLabel = Encoding.UTF8.GetBytes("Crypture FIDO2 Key Wrap");
 
+        internal static bool IsEnabled(IVaultStorage oStorage) =>
+            Properties.Settings.Default.EnableFidoProtection && !oStorage.IsSqlServer && FidoNative.IsAvailable;
+
         internal static byte[] Wrap(byte[] oKeys, FidoKeyAccess oAccess, byte[] oRecoveryKey)
         {
             if (oKeys?.Length != ItemCryptography.ContentKeyBytes || oAccess == null || oAccess.IsDisposed)

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -270,6 +272,152 @@ internal static partial class RegressionTests
             File.WriteAllBytes(sConfigPath, oOriginalConfig);
             CryptureEntities.ConnectionString = sConnection;
             SynchronizationContext.SetSynchronizationContext(oPreviousContext);
+        }
+    }
+
+    private static void TestFidoConfiguration(string sDirectory, X509Certificate2 oCert)
+    {
+        // Exercise enabled FIDO2 controls without opening native hardware dialogs.
+        Func<int> oReadApiVersion = FidoNative.ReadApiVersion;
+        IVaultStorage oStorage = CryptureEntities.Storage;
+        var oSettings = Crypture.Properties.Settings.Default;
+        bool bDpapi = oSettings.EnableDpapiNgProtection;
+        bool bCertificates = oSettings.EnableCertificateProtection;
+        bool bFido = oSettings.EnableFidoProtection;
+        StringCollection oAutomatic = oSettings.AutomaticallyAddedCertificatesList;
+        string sLastVault = oSettings.LastVault;
+        StringCollection oRecent = oSettings.RecentVaults;
+        SynchronizationContext oContext = SynchronizationContext.Current;
+        ItemBrowser oBrowser = null;
+        ItemEditor oEditor = null;
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+        try
+        {
+            FidoNative.ReadApiVersion = () => 4;
+            oSettings["EnableDpapiNgProtection"] = false;
+            oSettings["EnableCertificateProtection"] = false;
+            oSettings["EnableFidoProtection"] = true;
+            oSettings["AutomaticallyAddedCertificatesList"] = new StringCollection();
+            oSettings.LastVault = "";
+            oSettings.RecentVaults = new StringCollection();
+            SqliteVaultStorage oFile = new SqliteVaultStorage(Path.Combine(sDirectory, "fido-configuration.cryptdb"));
+            oFile.Create();
+            CryptureEntities.Storage = oFile;
+            oBrowser = new ItemBrowser
+            {
+                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
+                ShowActivated = false, ShowInTaskbar = false
+            };
+            oBrowser.Show();
+            PumpUntil(() => oBrowser.IsLoaded);
+            MethodInfo oLoad = typeof(ItemBrowser).GetMethod("LoadVaultAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Task<bool> oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            PumpUntil(() => oLoading.IsCompleted);
+            Check(oLoading.GetAwaiter().GetResult() &&
+                ((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
+                "FIDO-only file Vault enables Add New Item after loading");
+
+            // Inspect and close the modal draft on its dispatcher so the actual click handler can finish.
+            bool bInspected = false;
+            bool bFidoDraft = false;
+            oBrowser.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ItemEditor oDraft = Application.Current.Windows.OfType<ItemEditor>()
+                    .FirstOrDefault(w => w.Owner == oBrowser);
+                if (oDraft != null)
+                {
+                    bFidoDraft = ((ComboBox)oDraft.FindName("oProtectionMode")).SelectedIndex == 2 &&
+                        ((ComboBoxItem)oDraft.FindName("oFidoProtection")).IsEnabled &&
+                        ((RibbonButton)oDraft.FindName("oSaveItemButton")).IsEnabled;
+                    oDraft.Close();
+                }
+                bInspected = true;
+            }));
+            typeof(ItemBrowser).GetMethod("oAddItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(oBrowser, [null, null]);
+            PumpUntil(() => bInspected && !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
+            Check(bFidoDraft, "FIDO-only Add New Item opens an editable FIDO2 draft through the click handler");
+
+            // The Vault loader enrolls mandatory certificates independently of the certificate mode's UI flag.
+            oSettings["AutomaticallyAddedCertificatesList"] = new StringCollection
+                { Convert.ToBase64String(oCert.RawData) };
+            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            PumpUntil(() => oLoading.IsCompleted);
+            Check(oLoading.GetAwaiter().GetResult(), "FIDO-only Vault loads its mandatory certificate policy");
+            oEditor = new ItemEditor();
+            PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
+            Check(oEditor.UserList.Count == 1 && oEditor.UserListSelected.Count == 1 &&
+                oEditor.UserListSelected.Single().Certificate.SequenceEqual(oCert.RawData) &&
+                !((ComboBoxItem)oEditor.FindName("oCertificateProtection")).IsEnabled &&
+                ((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
+                "FIDO-only draft loads and selects mandatory recipients with certificate protection disabled");
+
+            byte[] oPlain = Encoding.Unicode.GetBytes("Mandatory certificate recovery for a FIDO-only item");
+            using FidoKeyAccess oAccess = new FidoKeyAccess(RandomNumberGenerator.GetBytes(64),
+                RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32));
+            DatabaseOperations.SaveItem(oEditor.ThisItem, oPlain, oEditor.UserListSelected, oFidoKey: oAccess);
+            long nId;
+            using (CryptureEntities oDatabase = new CryptureEntities()) nId = oDatabase.Items.Single().ItemId;
+            Item oSaved = DatabaseOperations.LoadItem(nId);
+            Check(oSaved.Instances.Count == 1 &&
+                ItemCryptography.Decrypt(oSaved, oSaved.Instances.Single(), oCert).SequenceEqual(oPlain) &&
+                ItemCryptography.Decrypt(oSaved, oFidoKey: oAccess).SequenceEqual(oPlain),
+                "Loaded mandatory recipient and FIDO2 key independently decrypt the saved item");
+            oEditor.Close();
+            oEditor = null;
+            oSettings["AutomaticallyAddedCertificatesList"] = new StringCollection();
+
+            // Unavailable, disabled, and SQL Server contexts must retain their capability restrictions.
+            FidoNative.ReadApiVersion = () => 1;
+            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            PumpUntil(() => oLoading.IsCompleted);
+            Check(oLoading.GetAwaiter().GetResult() &&
+                !((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
+                "FIDO-only Vault disables item creation when WebAuthn is unsupported");
+            FidoNative.ReadApiVersion = () => 4;
+            oSettings["EnableFidoProtection"] = false;
+            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            PumpUntil(() => oLoading.IsCompleted);
+            Check(oLoading.GetAwaiter().GetResult() &&
+                !((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
+                "Disabling every protection method keeps Add New Item disabled");
+            oSettings["EnableFidoProtection"] = true;
+            SqlServerVaultStorage oSql = new SqlServerVaultStorage(
+                "Server=localhost;Database=FidoCapability;Integrated Security=true");
+            Type oViewType = typeof(ItemBrowser).GetNestedType("VaultView", BindingFlags.NonPublic);
+            object oView = Activator.CreateInstance(oViewType,
+                new List<Item>(), new List<User>(), new HashSet<string>(), oSql.DisplayName,
+                "SQL Server capability check", "sqlserver:" + oSql.RecentConnection, false, false);
+            typeof(ItemBrowser).GetMethod("ApplyVault", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(oBrowser, [oSql, oView, true]);
+            Check(!((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
+                "FIDO-only settings cannot enable item creation for a SQL Server Vault");
+        }
+        finally
+        {
+            if (oEditor != null)
+            {
+                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(oEditor, false);
+                oEditor.Close();
+            }
+            if (oBrowser != null)
+            {
+                oBrowser.Closing -= (System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(
+                    typeof(System.ComponentModel.CancelEventHandler), oBrowser, "oItemBrowser_Closing");
+                oBrowser.Close();
+            }
+            FidoNative.ReadApiVersion = oReadApiVersion;
+            CryptureEntities.Storage = oStorage;
+            oSettings["EnableDpapiNgProtection"] = bDpapi;
+            oSettings["EnableCertificateProtection"] = bCertificates;
+            oSettings["EnableFidoProtection"] = bFido;
+            oSettings["AutomaticallyAddedCertificatesList"] = oAutomatic;
+            oSettings.LastVault = sLastVault;
+            oSettings.RecentVaults = oRecent;
+            oSettings.Save();
+            SynchronizationContext.SetSynchronizationContext(oContext);
         }
     }
 

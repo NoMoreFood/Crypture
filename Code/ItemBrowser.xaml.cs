@@ -349,7 +349,8 @@ namespace Crypture
         private void oAddItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (!Properties.Settings.Default.EnableDpapiNgProtection &&
-                !Properties.Settings.Default.EnableCertificateProtection) return;
+                !Properties.Settings.Default.EnableCertificateProtection &&
+                !FidoKeyProtection.IsEnabled(CryptureEntities.Storage)) return;
             Utilities.TryOperation(this, () =>
             {
                 ItemEditor oViewer = new ItemEditor { Owner = this };
@@ -552,7 +553,7 @@ namespace Crypture
             sDatabasePath = oView.DisplayName;
             oProtectedItemActionRibbonGroupBox.IsEnabled = bEnableControls;
             oAddItemButton.IsEnabled = bEnableControls && (Properties.Settings.Default.EnableDpapiNgProtection ||
-                Properties.Settings.Default.EnableCertificateProtection);
+                Properties.Settings.Default.EnableCertificateProtection || FidoKeyProtection.IsEnabled(oStorage));
             oProtectedItemScopeRibbonGroupBox.IsEnabled = bEnableControls;
             oCertificatesTab.IsEnabled = bEnableControls;
             oClaimCertButton.Visibility = oStorage.IsSqlServer ? Visibility.Collapsed : Visibility.Visible;

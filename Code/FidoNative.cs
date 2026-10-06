@@ -22,11 +22,13 @@ namespace Crypture
         private const int AuthenticatorDataMinimumBytes = 37;
         private const byte PresenceAndVerificationFlags = 0x05;
 
+        internal static Func<int> ReadApiVersion { get; set; } = WebAuthNGetApiVersionNumber;
+
         internal static bool IsAvailable
         {
             get
             {
-                try { return WebAuthNGetApiVersionNumber() >= MinimumApiVersion && AesGcm.IsSupported; }
+                try { return ReadApiVersion() >= MinimumApiVersion && AesGcm.IsSupported; }
                 catch (Exception oError) when (oError is DllNotFoundException || oError is EntryPointNotFoundException)
                 {
                     return false;

@@ -120,7 +120,11 @@ internal static partial class RegressionTests
                     {
                         Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
                     };
-                    try { TestFidoEditor(sDirectory); }
+                    try
+                    {
+                        TestFidoEditor(sDirectory);
+                        TestFidoConfiguration(sDirectory, oCert);
+                    }
                     finally { oApplication.Shutdown(); }
                     Console.WriteLine("Completed " + nChecks + " FIDO2 regression checks.");
                     return 0;
@@ -944,6 +948,10 @@ internal static partial class RegressionTests
             TestVaultOperations(sDirectory);
             TestTotpVault(sDirectory);
             TestFidoEditor(sDirectory);
+            using (RSA oFidoKey = RSA.Create(2048))
+            using (X509Certificate2 oFidoCertificate = Certificate(oFidoKey, "FIDO2 Recovery",
+                DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1)))
+                TestFidoConfiguration(sDirectory, oFidoCertificate);
             TestCertificateUsageConfiguration(oBrowser, oItem);
             TestEditorCertificateLoading(sDirectory);
             TestPasswordGeneratorLayout();
