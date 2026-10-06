@@ -168,11 +168,18 @@ namespace Crypture
                     oReport.Findings.Add(oPolicy);
                     continue;
                 }
-                if (oItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                if (oItem.Cipher.CipherParams is ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
                 {
+                    bool bFido = oItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
                     try
                     {
-                        foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(oItem.Cipher))
+                        Cipher oRecoveryCipher = bFido ? new Cipher
+                            { ProtectedKey = FidoKeyProtection.Read(oItem.Cipher).RecoveryKey } : oItem.Cipher;
+                        if (bFido)
+                            oPolicy.Add(HealthStatus.Information, "A FIDO2 security key protects this item. " +
+                                "This check does not contact the key or verify decryption access.");
+                        foreach (var oEntry in bFido && oRecoveryCipher.ProtectedKey == null
+                            ? new List<KeyValuePair<string, byte[]>>() : RecoveryProtection.ReadWindowsKeys(oRecoveryCipher))
                         {
                             PrincipalProtection.ValidateCustomDescriptor(oEntry.Key);
                             foreach (Match oMatch in Regex.Matches(oEntry.Key, @"S-\d+(?:-\d+)+"))
@@ -183,9 +190,10 @@ namespace Crypture
                     }
                     catch (CryptographicException oError)
                     {
-                        oPolicy.Add(HealthStatus.Error, "The saved recovery policy is invalid. " + oError.Message);
+                        oPolicy.Add(HealthStatus.Error, (bFido ? "The saved FIDO2 policy is invalid. " :
+                            "The saved recovery policy is invalid. ") + oError.Message);
                     }
-                    if (oItem.Cipher.ProtectionDescriptor == null && oItem.Instances.Count == 0)
+                    if (!bFido && oItem.Cipher.ProtectionDescriptor == null && oItem.Instances.Count == 0)
                         oPolicy.Add(HealthStatus.Error, "No primary certificate recipients are saved for this item.");
                     if (oItem.Instances.Any(i => !oUserIds.Contains(i.UserId)))
                         oPolicy.Add(HealthStatus.Error, "A recipient refers to a certificate missing from the Vault.");
@@ -246,12 +254,17 @@ namespace Crypture
                         bool bWindows = oRecovery.Descriptor == null ||
                             oItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat &&
                             oItem.Cipher.ProtectionDescriptor == oRecovery.Descriptor;
-                        if (!bWindows && oItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                        if (!bWindows && oItem.Cipher.CipherParams is
+                            ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
                         {
                             try
                             {
-                                bWindows = RecoveryProtection.ReadWindowsKeys(oItem.Cipher)
-                                    .Any(e => e.Key == oRecovery.Descriptor);
+                                Cipher oRecoveryCipher = oItem.Cipher.CipherParams == ItemCryptography.FidoFormat
+                                    ? new Cipher { ProtectedKey = FidoKeyProtection.Read(oItem.Cipher).RecoveryKey }
+                                    : oItem.Cipher;
+                                bWindows = oRecoveryCipher.ProtectedKey != null &&
+                                    RecoveryProtection.ReadWindowsKeys(oRecoveryCipher)
+                                        .Any(e => e.Key == oRecovery.Descriptor);
                             }
                             catch (CryptographicException)
                             {

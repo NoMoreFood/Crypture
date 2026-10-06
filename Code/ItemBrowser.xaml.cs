@@ -434,6 +434,7 @@ namespace Crypture
                     (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) &&
                 (oHideAccessible.IsChecked != true || ItemCryptography.UsesWindowsProtection(i.Cipher) ||
                     i.Cipher?.CipherParams == ItemCryptography.RecoveryFormat ||
+                    i.Cipher?.CipherParams == ItemCryptography.FidoFormat ||
                     i.Instances.Any(j =>
                     PrivateCertificates.Contains(Convert.ToBase64String(j.User.Certificate))))).ToList();
             List<User> oUsers = CertificateList.Where(u =>

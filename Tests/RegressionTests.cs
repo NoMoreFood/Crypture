@@ -54,6 +54,8 @@ internal static partial class RegressionTests
     [STAThread]
     private static int Main()
     {
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_FIDO_HARDWARE") == "1")
+            return RunFidoHardware();
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_AD_ROLE") is string sIdentityRole)
             return RunSqlServerIdentityTests(sIdentityRole);
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_STARTUP") == "1")
@@ -110,6 +112,19 @@ internal static partial class RegressionTests
             using (X509Certificate2 oOtherCert = Certificate(oOtherKey, "Other", DateTimeOffset.Now.AddDays(-1),
                 DateTimeOffset.Now.AddDays(1)))
             {
+                if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_FIDO_ONLY") == "1")
+                {
+                    TestFidoEncryption(sDirectory, oCert);
+                    Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                    oApplication.Resources = new ResourceDictionary
+                    {
+                        Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
+                    };
+                    try { TestFidoEditor(sDirectory); }
+                    finally { oApplication.Shutdown(); }
+                    Console.WriteLine("Completed " + nChecks + " FIDO2 regression checks.");
+                    return 0;
+                }
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_SQLSERVER_ONLY") == "1")
                 {
                     Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -129,6 +144,7 @@ internal static partial class RegressionTests
                 if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ONLY") == "1") return 0;
                 TestContentEncryptionSuites(sDirectory, oCert, oOtherCert);
                 TestEncryption(oCert, oOtherCert);
+                TestFidoEncryption(sDirectory, oCert);
                 TestTotpAlgorithms(oCert);
                 TestPrincipalProtection();
                 TestPasswordGeneration();
@@ -927,6 +943,7 @@ internal static partial class RegressionTests
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestVaultOperations(sDirectory);
             TestTotpVault(sDirectory);
+            TestFidoEditor(sDirectory);
             TestCertificateUsageConfiguration(oBrowser, oItem);
             TestEditorCertificateLoading(sDirectory);
             TestPasswordGeneratorLayout();

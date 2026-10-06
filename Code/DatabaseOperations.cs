@@ -43,8 +43,11 @@ namespace Crypture
         }
 
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
-            string sProtectionDescriptor = null)
+            string sProtectionDescriptor = null, FidoKeyAccess oFidoKey = null)
         {
+            if (oFidoKey != null && CryptureEntities.Storage.IsSqlServer)
+                throw new InvalidOperationException("FIDO2 encryption is available for file Vaults. " +
+                    "SQL Server Vaults require Windows or certificate recipients.");
             ContentEncryptionSuite nContentSuite = ItemCryptography.ReadContentEncryptionSuite();
             RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage, true);
             List<User> oUsers = sProtectionDescriptor == null
@@ -94,7 +97,7 @@ namespace Crypture
                     if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
                 }
                 ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
-                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite);
+                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite, oFidoKey);
                 Item oStored = null;
                 if (oItem.ItemId != 0)
                 {
@@ -120,7 +123,7 @@ namespace Crypture
                 oStored.Label = oItem.Label;
                 oStored.ItemType = oItem.ItemType;
                 oStored.ModifiedDate = DateTime.UtcNow;
-                oStored.ModifiedBy = sProtectionDescriptor == null ? oItem.ModifiedBy : null;
+                oStored.ModifiedBy = sProtectionDescriptor == null && oFidoKey == null ? oItem.ModifiedBy : null;
                 using (WindowsIdentity oIdentity = WindowsIdentity.GetCurrent())
                     oStored.ModifiedByIdentity = oIdentity.Name;
                 if (oStored.Cipher == null) oStored.Cipher = new Cipher();
@@ -233,7 +236,8 @@ namespace Crypture
             {
                 if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
                     !i.Instances.Any(j => j.UserId != nUserId) && (i.Cipher == null ||
-                    i.Cipher.CipherParams != ItemCryptography.RecoveryFormat || i.Cipher.ProtectionDescriptor == null)))
+                    i.Cipher.CipherParams != ItemCryptography.FidoFormat &&
+                    (i.Cipher.CipherParams != ItemCryptography.RecoveryFormat || i.Cipher.ProtectionDescriptor == null))))
                     throw new InvalidOperationException("This certificate is the only recipient " +
                         "for one or more items. Share those items with another certificate before removing it.");
 

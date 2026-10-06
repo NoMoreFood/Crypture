@@ -102,13 +102,14 @@
                                 SelectionChanged="oProtectionChanged" AutomationProperties.Name="Encryption Method">
                                 <ComboBoxItem x:Name="oDpapiNgProtection" Content="User Based" />
                                 <ComboBoxItem x:Name="oCertificateProtection" Content="Certificate Based" />
+                                <ComboBoxItem x:Name="oFidoProtection" Content="FIDO2 Security Key" />
                             </ComboBox>
                             <TextBlock x:Name="oProtectionDisabledNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Disabled Encryption" />
                             <TextBlock x:Name="oRequiredCertificateNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
-                                Text="Required recipient certificates are configured. Saving requires Certificate Based encryption." />
+                                Text="Required recipient certificates are configured. Saving includes their recovery access." />
                             <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Emergency Recovery" />
@@ -169,6 +170,19 @@
                                         <ComboBoxItem Content="Require All Listed Users and Groups" />
                                     </ComboBox>
                                 </StackPanel>
+                            </StackPanel>
+                            <StackPanel x:Name="oFidoPanel" Visibility="Collapsed" Margin="0,10,0,0">
+                                <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
+                                    Foreground="{DynamicResource Crypture.MutedBrush}"
+                                    Text="Requires a FIDO2 security key supporting hmac-secret. Complete the Windows PIN and touch prompts when saving or decrypting. Keep the key available; a Vault backup does not include it." />
+                                <TextBlock x:Name="oFidoKeyStatus" TextWrapping="Wrap" Margin="0,0,0,8"
+                                    AutomationProperties.Name="Security Key Status" />
+                                <WrapPanel>
+                                    <Button x:Name="oChangeFidoKeyButton" Content="Use Another _Key" Padding="8,3"
+                                        Click="oChangeFidoKey_Click" Visibility="Collapsed" />
+                                    <Button x:Name="oFidoRecoveryButton" Content="Use _Recovery" Padding="8,3"
+                                        Click="oFidoRecovery_Click" Visibility="Collapsed" />
+                                </WrapPanel>
                             </StackPanel>
                             <StackPanel x:Name="oCertificatePanel" Visibility="Collapsed" Margin="0,10,0,0">
                                 <TextBlock Text="Select recipient certificates using Share With in the ribbon."

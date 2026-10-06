@@ -137,6 +137,10 @@ namespace Crypture
                 await oAction();
                 return true;
             }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
             catch (Exception oError)
             {
                 MessageBox.Show(oOwner, "The operation could not be completed." + Environment.NewLine +

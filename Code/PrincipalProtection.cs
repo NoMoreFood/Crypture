@@ -240,6 +240,7 @@ namespace Crypture
         public string ProtectionDisplay => Cipher == null ? "Unknown" :
             (Cipher.CipherParams == ItemCryptography.RecoveryFormat
             ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based")
+            : Cipher.CipherParams == ItemCryptography.FidoFormat ? "FIDO2 Security Key"
             : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
             Cipher.CipherParams == ItemCryptography.LegacyFormat ||
             Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||

@@ -74,7 +74,7 @@ namespace Crypture
         private const int MaximumUtf8BytesPerCharacter = 4;
         private const int EnvelopeHeaderBytes = sizeof(int) * 2;
         private const int EnvelopeFramingAllowanceBytes = 32;
-        private const int MaxEnvelopeLength = PrincipalProtection.MaxProtectedKeyLength * MaximumRecipients +
+        internal const int MaxEnvelopeLength = PrincipalProtection.MaxProtectedKeyLength * MaximumRecipients +
             PrincipalProtection.MaxDescriptorLength * MaximumUtf8BytesPerCharacter * MaximumRecipients +
             EnvelopeFramingAllowanceBytes;
         private static readonly UTF8Encoding DescriptorEncoding = new UTF8Encoding(false, true);

@@ -23,6 +23,7 @@ namespace Crypture
         internal const long PrincipalFormat = 2;
         internal const long CertificateFormat = 3;
         internal const long RecoveryFormat = 4;
+        internal const long FidoFormat = 5;
 
         // The content key contains separate AES and authentication keys.
         internal const int ContentKeyBytes = 64;
@@ -65,14 +66,15 @@ namespace Crypture
         }
 
         // An absent suite identifies CBC content with format-specific authentication.
-        internal static bool HasSupportedContentSuite(Cipher oCipher) => oCipher.ContentSuite == null ||
+        internal static bool HasSupportedContentSuite(Cipher oCipher) =>
+            oCipher.ContentSuite == null && oCipher.CipherParams != FidoFormat ||
             (oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm ||
                 oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256CbcHmacSha256) &&
-            oCipher.CipherParams is PrincipalFormat or CertificateFormat or RecoveryFormat;
+            oCipher.CipherParams is PrincipalFormat or CertificateFormat or RecoveryFormat or FidoFormat;
 
         internal static void Encrypt(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null, string sRecoveryDescriptor = null,
-            ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm)
+            ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm, FidoKeyAccess oFidoKey = null)
         {
             int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
                 ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
@@ -83,11 +85,15 @@ namespace Crypture
 
             // Content encryption and recipient access are independent parts of the stored format.
             bool bPrincipals = sProtectionDescriptor != null;
+            bool bFido = oFidoKey != null;
+            if (bFido && bPrincipals)
+                throw new InvalidOperationException("Select one primary encryption method.");
             if (bPrincipals) PrincipalProtection.ParseDescriptor(sProtectionDescriptor, out _, false);
             List<User> oUsers = (oRecipients ?? Enumerable.Empty<User>()).GroupBy(u => u.UserId)
                 .Select(g => g.First()).ToList();
             bool bRecovery = sRecoveryDescriptor != null || bPrincipals && oUsers.Count != 0;
-            long nFormat = bRecovery ? RecoveryFormat : bPrincipals ? PrincipalFormat : CertificateFormat;
+            long nFormat = bFido ? FidoFormat : bRecovery ? RecoveryFormat :
+                bPrincipals ? PrincipalFormat : CertificateFormat;
             byte[] oKeys = new byte[ContentKeyBytes];
             byte[] oEncryptionKey = new byte[AesKeyBytes];
             byte[] oAuthenticationKey = new byte[AuthenticationKeyBytes];
@@ -129,13 +135,20 @@ namespace Crypture
 
                 // Authenticate the protected keys and access policy independently for each access path.
                 oItem.Instances.Clear();
-                if (bPrincipals && !bRecovery)
+                if (bFido)
+                {
+                    byte[] oRecoveryKey = sRecoveryDescriptor == null ? null :
+                        RecoveryProtection.WrapWindowsKeys(oKeys, null, sRecoveryDescriptor);
+                    oItem.Cipher.ProtectedKey = FidoKeyProtection.Wrap(oKeys, oFidoKey, oRecoveryKey);
+                    oItem.Cipher.Signature = ComputeSignature(oItem, oAuthenticationKey);
+                }
+                else if (bPrincipals && !bRecovery)
                 {
                     oItem.Cipher.ProtectedKey = PrincipalProtection.Protect(oKeys, sProtectionDescriptor);
                     oItem.Cipher.Signature = ComputeSignature(oItem, oAuthenticationKey);
                     return;
                 }
-                if (bRecovery)
+                else if (bRecovery)
                 {
                     // Wrap the same keys independently for normal access and emergency recovery.
                     oItem.Cipher.ProtectedKey = RecoveryProtection.WrapWindowsKeys(
@@ -156,7 +169,7 @@ namespace Crypture
                         oItem.Instances.Add(oInstance);
                     }
                 }
-                if (!bPrincipals && oItem.Instances.Count == 0)
+                if (!bPrincipals && !bFido && oItem.Instances.Count == 0)
                     throw new InvalidOperationException("Select at least one recipient certificate.");
             }
             finally
@@ -167,28 +180,31 @@ namespace Crypture
             }
         }
 
-        internal static byte[] Decrypt(Item oItem, Instance oInstance = null, X509Certificate2 oCert = null)
+        internal static byte[] Decrypt(Item oItem, Instance oInstance = null, X509Certificate2 oCert = null,
+            FidoKeyAccess oFidoKey = null)
         {
             Cipher oCipher = oItem.Cipher;
             int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
                 ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
             bool bPrincipals = oCipher?.CipherParams == PrincipalFormat;
             bool bRecovery = oCipher?.CipherParams == RecoveryFormat;
+            bool bFido = oCipher?.CipherParams == FidoFormat;
             bool bCertificate = oInstance != null && oCert != null;
             bool bGcm = oCipher?.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm;
 
             // Validate the stored suite and its lengths before opening any private or Windows-protected keys.
-            if ((oInstance == null) != (oCert == null) ||
+            if ((oInstance == null) != (oCert == null) || oFidoKey != null && (!bFido || bCertificate) ||
                 oCipher == null || !HasSupportedContentSuite(oCipher) || oCipher.CipherVector == null ||
                 oCipher.CipherVector.Length != (bGcm ? GcmNonceBytes : CbcBlockBytes) || oCipher.CipherText == null ||
                 (bGcm ? oCipher.CipherText.Length > nMaxSize || oCipher.AuthenticationTag?.Length != GcmTagBytes
                     : oCipher.CipherText.Length == 0 || oCipher.CipherText.Length % CbcBlockBytes != 0 ||
                         oCipher.CipherText.Length > nMaxSize + CbcBlockBytes || oCipher.AuthenticationTag != null) ||
-                ((!bPrincipals && !bRecovery || bRecovery && bCertificate) &&
+                ((!bPrincipals && !bRecovery && !bFido || (bRecovery || bFido) && bCertificate) &&
                 (oInstance == null || oCert == null ||
                 oCipher.CipherParams != oInstance.CipherParams ||
                 (oCipher.CipherParams != LegacyFormat && oCipher.CipherParams != AuthenticatedFormat &&
-                    oCipher.CipherParams != CertificateFormat && oCipher.CipherParams != RecoveryFormat))))
+                    oCipher.CipherParams != CertificateFormat && oCipher.CipherParams != RecoveryFormat &&
+                    oCipher.CipherParams != FidoFormat))))
                 throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
             if (bPrincipals) PrincipalProtection.ParseDescriptor(oCipher.ProtectionDescriptor, out _, false);
 
@@ -198,9 +214,11 @@ namespace Crypture
             try
             {
                 if (bRecovery) RecoveryProtection.ReadWindowsKeys(oCipher);
-                if (bPrincipals) oKeys = PrincipalProtection.Unprotect(oCipher.ProtectedKey);
+                if (bFido) FidoKeyProtection.Read(oCipher);
+                if (bFido && !bCertificate) oKeys = FidoKeyProtection.Unwrap(oCipher, oFidoKey);
+                else if (bPrincipals) oKeys = PrincipalProtection.Unprotect(oCipher.ProtectedKey);
                 else if (bRecovery && !bCertificate) oKeys = RecoveryProtection.UnwrapWindowsKeys(oCipher);
-                else if (oCipher.CipherParams == CertificateFormat || bRecovery)
+                else if (oCipher.CipherParams == CertificateFormat || bRecovery || bFido)
                     oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey);
                 else
                 {
@@ -213,7 +231,7 @@ namespace Crypture
                 }
 
                 bool bAuthenticated = oCipher.CipherParams != LegacyFormat;
-                byte[] oSignature = bPrincipals || bRecovery && !bCertificate
+                byte[] oSignature = bPrincipals || (bRecovery || bFido) && !bCertificate
                     ? oCipher.Signature : oInstance.Signature;
                 if (oKeys.Length != (bAuthenticated ? ContentKeyBytes : AesKeyBytes) || oSignature == null ||
                     oSignature.Length != (bAuthenticated ? AuthenticationKeyBytes : 0))
@@ -224,7 +242,7 @@ namespace Crypture
                 {
                     Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
                     byte[] oExpected = ComputeSignature(oItem, oAuthenticationKey,
-                        bRecovery && !bCertificate ? null : oInstance);
+                        (bRecovery || bFido) && !bCertificate ? null : oInstance);
                     int nDifference = 0;
                     for (int nIndex = 0; nIndex < oExpected.Length; nIndex++)
                         nDifference |= oExpected[nIndex] ^ oSignature[nIndex];
@@ -306,7 +324,7 @@ namespace Crypture
                     oWriter.Write(oItem.Cipher.ProtectedKey.Length);
                     oWriter.Write(oItem.Cipher.ProtectedKey);
                 }
-                if (oItem.Cipher.CipherParams == RecoveryFormat)
+                if (oItem.Cipher.CipherParams is RecoveryFormat or FidoFormat)
                 {
                     oWriter.Write(oItem.Cipher.ProtectionDescriptor ?? "");
                     oWriter.Write(oItem.Cipher.ProtectedKey.Length);
@@ -314,7 +332,7 @@ namespace Crypture
                     oWriter.Write(oInstance != null);
                 }
                 if (oItem.Cipher.CipherParams == CertificateFormat ||
-                    oItem.Cipher.CipherParams == RecoveryFormat && oInstance != null)
+                    oItem.Cipher.CipherParams is RecoveryFormat or FidoFormat && oInstance != null)
                 {
                     oWriter.Write(oInstance.UserId);
                     oWriter.Write(oInstance.CipherKey.Length);
