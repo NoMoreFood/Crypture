@@ -94,7 +94,9 @@ namespace Crypture
             {
                 bool bCut = e.Command == ApplicationCommands.Cut;
                 e.CanExecute = oTextBox.IsEnabled && (!bCut || !oTextBox.IsReadOnly) &&
-                    (!bCut && Equals(e.Parameter, "All") ? GetRichText(oTextBox).Length > 0 :
+                    (!bCut && Equals(e.Parameter, "All") ?
+                        oTextBox.Document.ContentStart.GetInsertionPosition(LogicalDirection.Forward).CompareTo(
+                            oTextBox.Document.ContentEnd.GetInsertionPosition(LogicalDirection.Backward)) != 0 :
                         !oTextBox.Selection.IsEmpty);
                 e.Handled = true;
             };

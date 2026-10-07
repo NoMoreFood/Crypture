@@ -14,6 +14,20 @@ internal static partial class RegressionTests
 {
     private static void TestRichTextVaultRoundTrip(string sDirectory)
     {
+        RichTextBox oCopySource = new RichTextBox();
+        Utilities.EnableClipboardTimeout(oCopySource, s => true);
+        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oCopySource),
+            "An empty rich text document disables whole-document copy");
+        oCopySource.Document.Blocks.Add(new Paragraph(new Run("Secret")));
+        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oCopySource),
+            "A populated rich text document enables whole-document copy");
+        oCopySource.Document.Blocks.Clear();
+        oCopySource.Document.Blocks.Add(new Paragraph());
+        Check(!System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oCopySource),
+            "An empty rich text paragraph disables whole-document copy");
+        oCopySource.Document.Blocks.Add(new Paragraph());
+        Check(System.Windows.Input.ApplicationCommands.Copy.CanExecute("All", oCopySource),
+            "Blank lines remain copyable in a rich text document");
         string sPreviousConnection = CryptureEntities.ConnectionString;
         string sVault = Path.Combine(sDirectory, "rich-text.cryptdb");
         DatabaseOperations.CreateDatabase(sVault,
