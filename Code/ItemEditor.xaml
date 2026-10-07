@@ -14,13 +14,13 @@
             <!--  Tabs  -->
             <ribbon:RibbonTab Header="Home">
                 <ribbon:RibbonGroup Header="Item Actions">
-                    <ribbon:RibbonButton x:Name="oLoadItemButton" Height="Auto" Margin="6,6,6,0"
+                    <ribbon:RibbonButton x:Name="oLoadItemButton" Margin="6,6,6,0"
                         Click="oLoadItemButton_Click" Label="Unlock" KeyTip="U"
                         LargeImageSource="{StaticResource Crypture.UnlockItemIcon}"
                         ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}"
                         Style="{StaticResource Crypture.PrimaryRibbonButton}"
                         ToolTip="Decrypt this item to view and edit its content." />
-                    <ribbon:RibbonButton x:Name="oSaveItemButton" Height="Auto" Margin="6,6,6,0"
+                    <ribbon:RibbonButton x:Name="oSaveItemButton" Margin="6,6,6,0"
                         Click="oSaveItemButton_Click" Label="Encrypt &amp; Save" KeyTip="S"
                         LargeImageSource="{StaticResource Crypture.SaveItemIcon}"
                         ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}"

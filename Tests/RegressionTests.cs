@@ -1286,19 +1286,35 @@ internal static partial class RegressionTests
             oEditor.UpdateLayout();
             Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
                 "Copy is hidden when the item displays an authenticator");
-            oEditor.SetEditingControls(false);
-            oEditor.UpdateLayout();
-            Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
-                "Copy is hidden when secret text is locked");
+
+            // Toggling the primary action must preserve its bounds and the neighboring ribbon positions.
             var oUnlock = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oLoadItemButton");
             var oSave = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oSaveItemButton");
-            Check(oUnlock.IsVisible && oUnlock.IsEnabled && oUnlock.ActualWidth >= 28 &&
-                !oSave.IsVisible,
-                "Locking restores a visible unlock action and hides saving");
-            oEditor.SetEditingControls(true);
-            oEditor.UpdateLayout();
-            Check(!oUnlock.IsVisible && oSave.IsVisible && oSave.ActualWidth >= 28,
-                "Unlocking restores a visible save action and hides unlocking");
+            var oGenerate = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oGeneratePasswordButton");
+            var oUpload = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oUploadAFile");
+            foreach (double nFontSize in new[] { 12d, 18d, 24d })
+            {
+                oEditor.FontSize = nFontSize;
+                oEditor.SetEditingControls(false);
+                oEditor.UpdateLayout();
+                Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
+                    "Copy is hidden when secret text is locked at font size " + nFontSize);
+                Check(oUnlock.IsVisible && oUnlock.IsEnabled && oUnlock.ActualWidth >= 28 && !oSave.IsVisible,
+                    "Locking restores a visible unlock action and hides saving at font size " + nFontSize);
+                Size oUnlockSize = oUnlock.RenderSize;
+                Point oUnlockPosition = oUnlock.TranslatePoint(new Point(), oRoot);
+                Point oGeneratePosition = oGenerate.TranslatePoint(new Point(), oRoot);
+                Point oUploadPosition = oUpload.TranslatePoint(new Point(), oRoot);
+                oEditor.SetEditingControls(true);
+                oEditor.UpdateLayout();
+                Check(!oUnlock.IsVisible && oSave.IsVisible && oSave.ActualWidth >= 28,
+                    "Unlocking restores a visible save action and hides unlocking at font size " + nFontSize);
+                Check(oSave.RenderSize == oUnlockSize &&
+                    (oSave.TranslatePoint(new Point(), oRoot) - oUnlockPosition).Length < 0.1 &&
+                    (oGenerate.TranslatePoint(new Point(), oRoot) - oGeneratePosition).Length < 0.1 &&
+                    (oUpload.TranslatePoint(new Point(), oRoot) - oUploadPosition).Length < 0.1,
+                    "Primary action toggles without moving ribbon controls at font size " + nFontSize);
+            }
         }
         finally
         {

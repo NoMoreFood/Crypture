@@ -932,6 +932,8 @@
     </Style>
     <Style x:Key="Crypture.PrimaryRibbonButton" TargetType="ribbon:RibbonButton"
         BasedOn="{StaticResource {x:Type ribbon:RibbonButton}}">
+        <Setter Property="Width" Value="56" />
+        <Setter Property="Height" Value="68" />
         <Setter Property="Background" Value="{DynamicResource Crypture.AccentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource Crypture.AccentTextBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
