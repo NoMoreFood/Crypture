@@ -649,8 +649,8 @@ namespace Crypture
                 oSearchPanel.IsEnabled = true;
                 oItemDataGrid.IsEnabled = true;
                 oCertDataGrid.IsEnabled = true;
-                oVaultProgress.Visibility = Visibility.Collapsed;
-                oCancelVaultOperationButton.Visibility = Visibility.Collapsed;
+                oVaultProgress.Visibility = Visibility.Hidden;
+                oCancelVaultOperationButton.Visibility = Visibility.Hidden;
                 oDatabaseStatus.Text = sDatabasePath ?? sPreviousStatus;
                 Mouse.OverrideCursor = oPreviousCursor;
             }

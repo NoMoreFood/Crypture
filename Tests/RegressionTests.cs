@@ -83,6 +83,7 @@ internal static partial class RegressionTests
             if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1" ||
                 Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1" ||
                 Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1" ||
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_UI_ONLY") == "1" ||
                 Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1")
             {
                 Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -92,7 +93,13 @@ internal static partial class RegressionTests
                 };
                 try
                 {
-                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1") TestPopups();
+                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_UI_ONLY") == "1")
+                    {
+                        TestCertificateCreator();
+                        TestTotpLayout();
+                        TestVaultOperations(sDirectory);
+                    }
+                    else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1") TestPopups();
                     else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
                         TestVaultOperations(sDirectory);
                     else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
@@ -976,6 +983,8 @@ internal static partial class RegressionTests
             CryptureEntities.DatabasePath = sDatabase;
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestVaultOperations(sDirectory);
+            TestCertificateCreator();
+            TestTotpLayout();
             TestTotpVault(sDirectory);
             TestFidoEditor(sDirectory);
             using (RSA oFidoKey = RSA.Create(2048))

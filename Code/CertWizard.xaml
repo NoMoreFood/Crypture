@@ -1,175 +1,202 @@
-﻿<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.CertWizard" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oWizardWindow" Title="Certificate Generation Wizard" Width="525" Height="550" MinWidth="525" MinHeight="550" WindowStartupLocation="CenterOwner" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" Loaded="oWizardWindow_Loaded" Closed="oWizardWindow_Closed" mc:Ignorable="d"
-    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+﻿<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.CertWizard" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oWizardWindow" Title="Create Certificate" Width="620" Height="680" MinWidth="560" MinHeight="600" WindowStartupLocation="CenterOwner" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" Loaded="oWizardWindow_Loaded" Closed="oWizardWindow_Closed" mc:Ignorable="d"
+    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}"
+    FocusManager.FocusedElement="{Binding ElementName=oSubjectTextBox}">
+    <Window.Resources>
+        <Style x:Key="FieldLabel" TargetType="Label" BasedOn="{StaticResource Crypture.GlyphLabel}">
+            <Setter Property="Padding" Value="0,3" />
+            <Setter Property="Margin" Value="0,6,0,4" />
+        </Style>
+    </Window.Resources>
     <DockPanel>
-        <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="0,1,0,0">
-            <DockPanel>
-                <Button x:Name="oRefreshProvidersButton" DockPanel.Dock="Right" Content="_Refresh Providers"
-                    Margin="12,0,0,0" Padding="8,4" IsEnabled="False" Click="oRefreshProvidersButton_Click"
-                    Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE72C;" />
-                <TextBlock x:Name="oProviderStatus" Text="Loading certificate providers..." TextWrapping="Wrap"
-                    VerticalAlignment="Center" Foreground="{DynamicResource Crypture.MutedBrush}" AutomationProperties.LiveSetting="Polite" />
-            </DockPanel>
+        <Border x:Name="oWizardFooter" DockPanel.Dock="Bottom" Padding="14,10"
+            BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="0,1,0,0">
+            <StackPanel>
+                <TextBlock x:Name="oGenerationNotice" TextTrimming="CharacterEllipsis" Margin="0,0,0,8"
+                    ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
+                    Foreground="{DynamicResource Crypture.MutedBrush}" AutomationProperties.LiveSetting="Polite" />
+                <DockPanel>
+                    <Button x:Name="oCloseButton" DockPanel.Dock="Right" Content="Cl_ose" MinWidth="82"
+                        Margin="8,0,0,0" Padding="12,6" IsCancel="True" Click="oCloseButton_Click" />
+                    <Button x:Name="oGenerateButton" DockPanel.Dock="Right" Content="_Create" MinWidth="110"
+                        Margin="12,0,0,0" Padding="12,6" IsEnabled="False" IsDefault="True"
+                        Click="oGenerateButton_Click" ToolTipService.ShowOnDisabled="True"
+                        Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
+                    <Button x:Name="oRefreshProvidersButton" Content="_Refresh Providers"
+                        HorizontalAlignment="Left" Padding="8,4" VerticalAlignment="Center"
+                        IsEnabled="False" Click="oRefreshProvidersButton_Click"
+                        Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE72C;"
+                        ToolTip="Refresh the list after connecting a smart card or other key device." />
+                </DockPanel>
+                <TextBlock x:Name="oProviderStatus" Text="Loading certificate providers..." Margin="0,8,0,0"
+                    TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Crypture.MutedBrush}"
+                    AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
         </Border>
-        <TabControl Margin="2,2,2,2">
-            <TabItem Header="General"
-                Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8A5;">
+        <TabControl x:Name="oWizardTabs" Margin="2">
+            <TabItem Header="General" Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8A5;">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Row="11" Grid.ColumnSpan="2" Margin="6,8" TextWrapping="Wrap"
+                    <StackPanel Margin="14,6,14,14">
+                        <Label Content="Certificate _Name:" Target="{Binding ElementName=oSubjectTextBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE77B;" />
+                        <TextBox x:Name="oSubjectTextBox" MinHeight="28" Padding="5,3"
+                            TextChanged="oGenerationOptionsChanged" AutomationProperties.Name="Certificate Name" />
+                        <TextBlock Margin="0,5,0,6" TextWrapping="Wrap"
                             Foreground="{DynamicResource Crypture.MutedBrush}"
-                            Text="For ECC encryption, choose ECDH and Key Agreement. ECDSA is for signing. ML-KEM recipients require an issued certificate with a CNG private key; this wizard cannot self-sign ML-KEM certificates." />
-                        <Label Grid.Row="0" Grid.Column="0" Content="Provider Types: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE713;" />
-                        <StackPanel Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
-                            <CheckBox x:Name="oHardwareCheckbox" Margin="0,0,10,0" Checked="oProviderType_Checked" Content="Hardware" IsChecked="True" Unchecked="oProviderType_Checked" />
-                            <CheckBox x:Name="oSoftwareCheckbox" Checked="oProviderType_Checked" Content="Software" IsChecked="True" Unchecked="oProviderType_Checked" />
-                        </StackPanel>
-                        <Label Grid.Row="1" Grid.Column="0" Content="Provider Name: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8F1;" />
-                        <ComboBox x:Name="oProviderComboBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" IsEditable="False" IsReadOnly="True" ItemsSource="{Binding ElementName=oWizardWindow, Path=ProviderOptions.Keys}" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedProvider}" SelectionChanged="oProviderComboBox_SelectionChanged" />
-                        <Label Grid.Row="2" Grid.Column="0" Content="Key Algorithm: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8D7;" />
-                        <ComboBox x:Name="oSignatureComboBox" Grid.Row="2" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedSignature}" SelectionChanged="oSignatureComboBox_SelectionChanged" />
-                        <Label Grid.Row="3" Grid.Column="0" Content="Key Length: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8EF;" />
-                        <Grid Grid.Row="3" Grid.Column="1">
+                            Text="Use your name or a team name. Crypture shows this name in certificate lists." />
+                        <Label Content="Create:" Style="{StaticResource FieldLabel}" Tag="&#xE710;" />
+                        <WrapPanel>
+                            <RadioButton x:Name="oCertificateSelfSignedRadio" Margin="0,0,16,5"
+                                Content="_Self-Signed Certificate" GroupName="CertRequest" IsChecked="True"
+                                Checked="oGenerationOptionsChanged" />
+                            <RadioButton x:Name="oCertificateRequestRadio" Margin="0,0,0,5"
+                                Content="Certificate Re_quest" GroupName="CertRequest"
+                                Checked="oGenerationOptionsChanged" />
+                        </WrapPanel>
+                        <TextBlock x:Name="oGenerationHelp" TextWrapping="Wrap" Margin="0,0,0,6"
+                            Foreground="{DynamicResource Crypture.MutedBrush}" />
+                        <Label Content="_Valid From:" Target="{Binding ElementName=oValidFromDatePicker}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE787;" />
+                        <Grid>
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="oKeyLengthTextBox" Width="70" Margin="0,0,5,5"
-                                HorizontalAlignment="Left" VerticalAlignment="Top" />
-                            <Label x:Name="oKeyLengthHintLabel" Grid.Column="1" Margin="0,0,0,5">
-                                <Label.ContentTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" />
-                                    </DataTemplate>
-                                </Label.ContentTemplate>
-                            </Label>
+                            <DatePicker x:Name="oValidFromDatePicker" MinHeight="28"
+                                SelectedDateChanged="oGenerationOptionsChanged"
+                                AutomationProperties.Name="Certificate Valid From" />
+                            <Label Grid.Column="1" Content="to" Padding="10,3" VerticalAlignment="Center" />
+                            <DatePicker x:Name="oValidUntilDatePicker" Grid.Column="2" MinHeight="28"
+                                SelectedDateChanged="oGenerationOptionsChanged"
+                                AutomationProperties.Name="Certificate Valid Until" />
                         </Grid>
-                        <Label Grid.Row="4" Grid.Column="0" Content="Hash Algorithm: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8FD;" />
-                        <ComboBox x:Name="oHashComboBox" Grid.Row="4" Grid.Column="1" Width="200" Margin="0,0,0,5" HorizontalAlignment="Left" IsEditable="False" IsReadOnly="True" SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedHash}" />
-                        <Label Grid.Row="5" Grid.Column="0" Content="Subject Name: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE77B;" />
-                        <TextBox x:Name="oSubjectTextBox" Grid.Row="5" Grid.Column="1" Margin="0,0,0,5" />
-                        <Label Grid.Row="6" Grid.Column="0" Content="Issuer Name: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE716;" />
-                        <TextBox x:Name="oIssuerTextBox" ToolTip="For self-signed certificates, leave blank to use the subject. Certificate requests use the issuer chosen by the CA." Grid.Row="6" Grid.Column="1" Margin="0,0,0,5" />
-                        <Label Grid.Row="7" Grid.Column="0" Content="Validity: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE787;" />
-                        <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal">
-                            <DatePicker x:Name="oValidFromDatePicker" Margin="0,0,0,5" />
-                            <Label Content=" to " />
-                            <DatePicker x:Name="oValidUntilDatePicker" Margin="0,0,0,5" />
-                        </StackPanel>
-                        <Separator Grid.Row="8" Grid.Column="0" Margin="0,10" />
-                        <Separator Grid.Row="8" Grid.Column="1" Margin="0,10" />
-                        <Label Grid.Row="9" Grid.Column="0" Content="Generation Option: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8A5;" />
-                        <WrapPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
-                            <RadioButton x:Name="oCertificateSelfSignedRadio" Margin="0,0,16,5"
-                                Content="Self-Signed Certificate" GroupName="CertRequest" IsChecked="True" />
-                            <RadioButton x:Name="oCertificateRequestRadio" Margin="0,0,0,5"
-                                Content="Certificate Request" GroupName="CertRequest" />
+                        <TextBlock x:Name="oValidityHelp" Margin="0,5,0,6" TextWrapping="Wrap"
+                            Foreground="{DynamicResource Crypture.MutedBrush}" />
+                        <Label Content="Store Private Key:" Style="{StaticResource FieldLabel}" Tag="&#xE8F1;" />
+                        <WrapPanel>
+                            <RadioButton x:Name="oCertificateStoreUserRadio" Content="Current _User"
+                                GroupName="CertStore" IsChecked="True" Margin="0,0,16,5"
+                                Checked="oGenerationOptionsChanged" />
+                            <RadioButton x:Name="oCertificateStoreMachineRadio" Content="Co_mputer"
+                                GroupName="CertStore" Margin="0,0,0,5" Checked="oGenerationOptionsChanged"
+                                ToolTip="Run Crypture as an administrator to create a computer key."
+                                ToolTipService.ShowOnDisabled="True" />
                         </WrapPanel>
-                        <Label Grid.Row="10" Grid.Column="0" Content="Create Certificate: "
-                            Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE710;" />
-                        <Button x:Name="oGenerateButton" Grid.Row="10" Grid.Column="1" MinWidth="100"
-                            HorizontalAlignment="Left" VerticalAlignment="Center" Content="Generate"
-                            IsEnabled="False" IsDefault="True" Click="oGenerateButton_Click"
-                            Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE710;" />
-                    </Grid>
+                        <TextBlock Margin="0,0,0,12" TextWrapping="Wrap"
+                            Foreground="{DynamicResource Crypture.MutedBrush}">
+                            <Run Text="Current User keeps the key with your Windows account. " />
+                            <Run Text="Computer stores it for this device and requires administrator access." />
+                        </TextBlock>
+                        <Border Background="{DynamicResource Crypture.PanelBrush}" Padding="12"
+                            BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="1" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="Key Settings" FontWeight="SemiBold" />
+                                <TextBlock x:Name="oKeySummary" TextWrapping="Wrap" Margin="0,5,0,0"
+                                    Foreground="{DynamicResource Crypture.MutedBrush}" />
+                                <TextBlock Text="Change the provider, algorithms, or key protection on Advanced."
+                                    TextWrapping="Wrap" Margin="0,5,0,0"
+                                    Foreground="{DynamicResource Crypture.MutedBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="Key Usages"
-                Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8D7;">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Label Grid.Row="0" Grid.Column="0" Content="Key Usages: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8D7;" />
-                    <ListBox x:Name="oKeyUsageCombobox" Grid.Row="0" Grid.Column="1" Height="100" Margin="0,6,0,2" ItemsSource="{Binding ElementName=oWizardWindow, Path=KeyUsages}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <ListBoxItem>
-                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding Selected}" />
-                                </ListBoxItem>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    <Label Grid.Row="1" Grid.Column="0" Content="Enhanced Key Usages: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8FD;" />
-                    <ListBox x:Name="oEnhancedKeyUsageCombobox" Grid.Row="1" Grid.Column="1" Height="175" Margin="0,6,0,2" ItemsSource="{Binding ElementName=oWizardWindow, Path=EnhancedKeyUsages}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <ListBoxItem>
-                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding Selected}" />
-                                </ListBoxItem>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-            </TabItem>
-            <TabItem Header="Advanced"
-                Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE713;">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Label Grid.Row="0" Grid.Column="0" Content="Certificate Store: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE8F1;" />
-                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
-                        <RadioButton x:Name="oCertificateStoreUserRadio" VerticalAlignment="Center" Content="User" GroupName="CertStore" IsChecked="True" />
-                        <RadioButton x:Name="oCertificateStoreMachineRadio" Margin="20,0,0,0" VerticalAlignment="Center" Content="Computer" GroupName="CertStore" />
+            <TabItem Header="Key Usages" Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE8D7;">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="14,6,14,14">
+                        <TextBlock TextWrapping="Wrap" Margin="0,8,0,6"
+                            Foreground="{DynamicResource Crypture.MutedBrush}">
+                            <Run Text="Key usages describe allowed operations. Crypture encryption needs " />
+                            <Run Text="Key Encipherment for RSA or Key Agreement for ECDH. " />
+                            <Run Text="Extended usages are optional." />
+                        </TextBlock>
+                        <Label Content="_Key Usages:" Target="{Binding ElementName=oKeyUsageCombobox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8D7;" />
+                        <ListBox x:Name="oKeyUsageCombobox" Height="150"
+                            ItemsSource="{Binding ElementName=oWizardWindow, Path=KeyUsages}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding Selected}" Margin="4,3" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <Label Content="_Extended Key Usages:" Target="{Binding ElementName=oEnhancedKeyUsageCombobox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8FD;" />
+                        <ListBox x:Name="oEnhancedKeyUsageCombobox" Height="220"
+                            ItemsSource="{Binding ElementName=oWizardWindow, Path=EnhancedKeyUsages}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding Selected}" Margin="4,3" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </StackPanel>
-                    <Label Grid.Row="1" Grid.Column="0" Content="Show Legacy Providers: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE81C;" />
-                    <CheckBox x:Name="oShowLegacyCheckbox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,5" VerticalContentAlignment="Bottom" Checked="oProviderType_Checked" Unchecked="oProviderType_Checked" />
-                    <Label Grid.Row="2" Grid.Column="0" Content="Private Key Exportable: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE898;" />
-                    <CheckBox x:Name="oKeyExportableCheckbox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,5" VerticalContentAlignment="Bottom" />
-                    <Label Grid.Row="3" Grid.Column="0" Content="Password Protect Key: "
-                        Style="{StaticResource Crypture.GlyphLabel}" Tag="&#xE72E;" />
-                    <CheckBox x:Name="oPasswordProtectCheckbox" Grid.Row="3" Grid.Column="1" Margin="0,0,0,5" VerticalContentAlignment="Bottom" />
-                </Grid>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Advanced" Style="{StaticResource Crypture.GlyphTab}" Tag="&#xE713;">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="14,6,14,14">
+                        <Label Content="Provider Types:" Style="{StaticResource FieldLabel}" Tag="&#xE713;" />
+                        <WrapPanel>
+                            <CheckBox x:Name="oSoftwareCheckbox" Content="Software" IsChecked="True"
+                                Margin="0,0,16,5" Checked="oProviderType_Checked" Unchecked="oProviderType_Checked"
+                                ToolTip="Keys stored on this computer by a software provider." />
+                            <CheckBox x:Name="oHardwareCheckbox" Content="Hardware" IsChecked="True"
+                                Margin="0,0,0,5" Checked="oProviderType_Checked" Unchecked="oProviderType_Checked"
+                                ToolTip="Keys held by a smart card, TPM, or other hardware provider." />
+                        </WrapPanel>
+                        <Label Content="_Provider:" Target="{Binding ElementName=oProviderComboBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8F1;" />
+                        <ComboBox x:Name="oProviderComboBox" MinHeight="28" IsEditable="False"
+                            ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}"
+                            ItemsSource="{Binding ElementName=oWizardWindow, Path=ProviderOptions.Keys}"
+                            SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedProvider}"
+                            SelectionChanged="oProviderComboBox_SelectionChanged" />
+                        <Label Content="Key _Algorithm:" Target="{Binding ElementName=oSignatureComboBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8D7;" />
+                        <ComboBox x:Name="oSignatureComboBox" MinHeight="28" IsEditable="False"
+                            SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedSignature}"
+                            SelectionChanged="oSignatureComboBox_SelectionChanged" />
+                        <TextBlock x:Name="oAlgorithmHelp" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"
+                            ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
+                            Foreground="{DynamicResource Crypture.MutedBrush}" />
+                        <Label Content="Key _Length:" Target="{Binding ElementName=oKeyLengthTextBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8EF;" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="oKeyLengthTextBox" MinHeight="28" Padding="5,3" Margin="0,0,10,0"
+                                TextChanged="oGenerationOptionsChanged"
+                                AutomationProperties.Name="Key Length in Bits" />
+                            <Label x:Name="oKeyLengthHintLabel" Grid.Column="1" Padding="0"
+                                VerticalAlignment="Center" Foreground="{DynamicResource Crypture.MutedBrush}" />
+                        </Grid>
+                        <Label Content="_Hash Algorithm:" Target="{Binding ElementName=oHashComboBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE8FD;" />
+                        <ComboBox x:Name="oHashComboBox" MinHeight="28" IsEditable="False"
+                            SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedHash}"
+                            SelectionChanged="oGenerationOptionsChanged" />
+                        <Label Content="_Issuer Name:" Target="{Binding ElementName=oIssuerTextBox}"
+                            Style="{StaticResource FieldLabel}" Tag="&#xE716;" />
+                        <TextBox x:Name="oIssuerTextBox" MinHeight="28" Padding="5,3"
+                            ToolTip="Blank uses the certificate name; a CA sets the issuer for requests."
+                            TextChanged="oGenerationOptionsChanged" />
+                        <CheckBox x:Name="oShowLegacyCheckbox" Content="Show Legacy Providers" Margin="0,14,0,6"
+                            Checked="oProviderType_Checked" Unchecked="oProviderType_Checked" />
+                        <CheckBox x:Name="oKeyExportableCheckbox" Content="Allow Private Key Export" Margin="0,6,0,5"
+                            ToolTip="Allows backing up or moving this private key when the provider supports export." />
+                        <CheckBox x:Name="oPasswordProtectCheckbox" Content="Prompt When Using the Private Key"
+                            Margin="0,6,0,5"
+                            ToolTip="Requests Windows key protection. The prompt depends on the provider." />
+                        <TextBlock TextWrapping="Wrap" Margin="0,8,0,0"
+                            Foreground="{DynamicResource Crypture.MutedBrush}">
+                            <Run Text="ML-KEM needs an issued certificate with a CNG private key. " />
+                            <Run Text="This creator cannot self-sign ML-KEM certificates." />
+                        </TextBlock>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </DockPanel>

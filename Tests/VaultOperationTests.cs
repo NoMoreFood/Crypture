@@ -115,6 +115,11 @@ internal static partial class RegressionTests
                 ((TextBlock)oBrowser.FindName("oDatabaseStatus")).FontSize = nFont;
                 ((TextBlock)oBrowser.FindName("oCountStatus")).FontSize = nFont;
                 ((Button)oBrowser.FindName("oCancelVaultOperationButton")).FontSize = nFont;
+                oBrowser.UpdateLayout();
+                Size oGridSize = oGrid.RenderSize;
+                FrameworkElement oRoot = (FrameworkElement)oBrowser.Content;
+                Point oCountPosition = ((TextBlock)oBrowser.FindName("oCountStatus"))
+                    .TranslatePoint(new Point(), oRoot);
                 FaultingVaultStorage oDelayed = new FaultingVaultStorage(oStorageB, false);
                 Task<bool> oLoading = oBrowser.Dispatcher.InvokeAsync(() =>
                     (Task<bool>)oLoadAsync.Invoke(oBrowser, new object[] { oDelayed, false })).Task.Unwrap();
@@ -124,11 +129,14 @@ internal static partial class RegressionTests
                 PumpUntil(() => bRepainted);
                 Button oCancel = (Button)oBrowser.FindName("oCancelVaultOperationButton");
                 oBrowser.UpdateLayout();
-                FrameworkElement oRoot = (FrameworkElement)oBrowser.Content;
                 Rect oBounds = oCancel.TransformToAncestor(oRoot).TransformBounds(new Rect(oCancel.RenderSize));
                 Check(!oLoading.IsCompleted && !oGrid.IsEnabled && oCancel.IsVisible &&
                     oBounds.Right <= oRoot.ActualWidth && oBounds.Bottom <= oRoot.ActualHeight,
                     "Loading repaints and keeps cancellation visible at minimum width, font " + nFont);
+                Check(oGrid.RenderSize == oGridSize &&
+                    (((TextBlock)oBrowser.FindName("oCountStatus")).TranslatePoint(new Point(), oRoot) -
+                        oCountPosition).Length < 0.1,
+                    "Busy feedback preserves the item list and status positions, font " + nFont);
                 Task<bool> oSecondLoad = (Task<bool>)oLoadAsync.Invoke(oBrowser, new object[] { oStorageB, false });
                 Check(oSecondLoad.IsCompletedSuccessfully && !oSecondLoad.Result,
                     "A second Vault switch cannot race an in-flight load");
@@ -138,6 +146,9 @@ internal static partial class RegressionTests
                     ReferenceEquals(CryptureEntities.Storage, oStorageA) &&
                     ((Item)oGrid.Items[0]).Label == "Vault A" && oSettings.LastVault == oStorageA.DisplayName,
                     "Cancelled loading restores controls and retains the original Vault, font " + nFont);
+                oBrowser.UpdateLayout();
+                Check(oGrid.RenderSize == oGridSize,
+                    "Cancelling a Vault operation preserves the item list size, font " + nFont);
             }
             TestBlockedSqlCancellation(oBrowser, oCert);
 

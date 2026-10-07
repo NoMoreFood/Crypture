@@ -19,6 +19,49 @@ internal static partial class RegressionTests
 {
     private const string RfcTotpSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 
+    private static void TestTotpLayout()
+    {
+        TotpPanel oPanel = new TotpPanel { Clock = () => DateTimeOffset.FromUnixTimeSeconds(59) };
+        ThemedWindow oWindow = new ThemedWindow
+        {
+            Width = 520, Height = 700, Content = oPanel, Left = -20000, Top = -20000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false
+        };
+        try
+        {
+            oWindow.Show();
+            PumpUntil(() => oWindow.IsLoaded);
+            oPanel.SetActive(true);
+            TextBox oSecret = (TextBox)oPanel.FindName("oSecretInput");
+            TextBlock oCode = (TextBlock)oPanel.FindName("oCurrentCode");
+            FrameworkElement oCodePanel = (FrameworkElement)VisualTreeHelper.GetParent(oCode);
+            Expander oSetup = (Expander)oPanel.FindName("oSetup");
+
+            // Typing and clearing a valid seed must keep the setup and code areas in place.
+            foreach (double nFontSize in new[] { 12d, 18d, 24d })
+            {
+                oWindow.FontSize = nFontSize;
+                oSecret.Clear();
+                oWindow.UpdateLayout();
+                Point oSetupPosition = oSetup.TranslatePoint(new Point(), oPanel);
+                Size oCodeSize = oCodePanel.RenderSize;
+                oSecret.Text = RfcTotpSecret;
+                oWindow.UpdateLayout();
+                Check(oCode.Text.Length == 6 && oCodePanel.RenderSize == oCodeSize &&
+                    (oSetup.TranslatePoint(new Point(), oPanel) - oSetupPosition).Length < 0.1,
+                    "An available authenticator code preserves setup and code layout, font " + nFontSize);
+                oSecret.Clear();
+                oWindow.UpdateLayout();
+                Check(oCode.Text.Length == 0 && oCodePanel.RenderSize == oCodeSize &&
+                    !((Button)oPanel.FindName("oCopyCode")).IsVisible &&
+                    !((StackPanel)oPanel.FindName("oCodeCountdown")).IsVisible &&
+                    (oSetup.TranslatePoint(new Point(), oPanel) - oSetupPosition).Length < 0.1,
+                    "An empty authenticator hides its actions without moving setup, font " + nFontSize);
+            }
+        }
+        finally { oWindow.Close(); }
+    }
+
     private static void TestTotpAlgorithms(X509Certificate2 oCertificate)
     {
         // RFC 6238 Appendix B covers all supported algorithms, leading zeroes, and dates beyond 2038.

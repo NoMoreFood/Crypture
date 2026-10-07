@@ -246,11 +246,11 @@
             </StatusBar.ItemsPanel>
             <StatusBarItem DockPanel.Dock="Right">
                 <Button x:Name="oCancelVaultOperationButton" Content="_Cancel" Padding="8,2"
-                    Visibility="Collapsed" Click="oCancelVaultOperationButton_Click" />
+                    Visibility="Hidden" Click="oCancelVaultOperationButton_Click" />
             </StatusBarItem>
             <StatusBarItem DockPanel.Dock="Right">
                 <ProgressBar x:Name="oVaultProgress" Width="70" Height="12" IsIndeterminate="True"
-                    Visibility="Collapsed" AutomationProperties.Name="Vault operation in progress" />
+                    Visibility="Hidden" AutomationProperties.Name="Vault operation in progress" />
             </StatusBarItem>
             <StatusBarItem DockPanel.Dock="Right"><TextBlock x:Name="oCountStatus" /></StatusBarItem>
             <Separator DockPanel.Dock="Right" />

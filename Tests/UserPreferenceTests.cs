@@ -30,7 +30,10 @@ internal static partial class RegressionTests
         {
             foreach (var oFile in oFiles)
             {
-                if (oFile.Value == null) File.Delete(oFile.Key);
+                if (oFile.Value == null)
+                {
+                    if (File.Exists(oFile.Key)) File.Delete(oFile.Key);
+                }
                 else File.WriteAllBytes(oFile.Key, oFile.Value);
             }
         }

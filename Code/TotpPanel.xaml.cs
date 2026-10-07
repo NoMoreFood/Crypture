@@ -1,4 +1,4 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using System;
 using System.Globalization;
 using System.IO;
@@ -188,15 +188,15 @@ namespace Crypture
                 }
             }
 
-            // Show setup guidance until a generated code is available.
+            // Keep setup guidance and code actions in one stable layout as a secret is entered or cleared.
             bool bHasCode = sCode.Length > 0;
             oCurrentCode.Text = sCode;
-            oCodePrompt.Visibility = bHasCode ? Visibility.Collapsed : Visibility.Visible;
-            oCopyCode.Visibility = oCodeCountdown.Visibility = bHasCode ? Visibility.Visible : Visibility.Collapsed;
+            oCodePrompt.Visibility = bHasCode ? Visibility.Hidden : Visibility.Visible;
+            oCopyCode.Visibility = oCodeCountdown.Visibility = bHasCode ? Visibility.Visible : Visibility.Hidden;
             oCopyCode.IsEnabled = oCopySetup.IsEnabled = bHasCode;
             oRemainingProgress.Value = nRemaining;
-            oRemainingText.Text = bHasCode ? "Next Code in " + Math.Ceiling(nRemaining)
-                .ToString(CultureInfo.InvariantCulture) + " Seconds" : "";
+            oRemainingText.Text = "Next Code in " + Math.Ceiling(nRemaining)
+                .ToString(CultureInfo.InvariantCulture) + " Seconds";
         }
 
         private void oCopyCode_Click(object sender, RoutedEventArgs e)
