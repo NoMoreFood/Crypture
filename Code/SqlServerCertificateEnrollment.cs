@@ -13,7 +13,6 @@ namespace Crypture
         internal static void EnrollOwn(SqlServerVaultStorage oStorage, X509Certificate2 oCertificate)
         {
             // Prove the current Windows account can use the matching private key before binding its SID.
-            byte[] oChallenge = RandomNumberGenerator.GetBytes(32);
             X509Certificate2Collection oPersonal = CertificateOperations.GetPersonalCertificates();
             try
             {
@@ -22,6 +21,20 @@ namespace Crypture
                 if (oPrivate == null)
                     throw new InvalidOperationException("Import the matching private key into your personal " +
                         "certificate store before enrolling this certificate in SQL Server.");
+                VerifyPrivateKey(oCertificate, oPrivate);
+                Enroll(oStorage, oCertificate.RawData, CertificateOperations.CurrentUserSid);
+            }
+            finally
+            {
+                foreach (X509Certificate2 oCert in oPersonal) oCert.Dispose();
+            }
+        }
+
+        private static void VerifyPrivateKey(X509Certificate2 oCertificate, X509Certificate2 oPrivate)
+        {
+            byte[] oChallenge = RandomNumberGenerator.GetBytes(ItemCryptography.ContentKeyBytes);
+            try
+            {
                 byte[] oWrapped = CertificateKeyProtection.Wrap(oCertificate, oChallenge);
                 byte[] oUnwrapped = CertificateKeyProtection.Unwrap(oPrivate, oWrapped);
                 try
@@ -30,13 +43,8 @@ namespace Crypture
                         throw new CryptographicException("The certificate private key did not match.");
                 }
                 finally { CryptographicOperations.ZeroMemory(oUnwrapped); }
-                Enroll(oStorage, oCertificate.RawData, CertificateOperations.CurrentUserSid);
             }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(oChallenge);
-                foreach (X509Certificate2 oCert in oPersonal) oCert.Dispose();
-            }
+            finally { CryptographicOperations.ZeroMemory(oChallenge); }
         }
 
         internal static void EnrollFromDirectory(SqlServerVaultStorage oStorage, X509Certificate2 oCertificate,

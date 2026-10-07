@@ -662,6 +662,10 @@ internal static partial class RegressionTests
     {
         Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = true;
         Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = false;
+        MethodInfo oVerify = typeof(SqlServerCertificateEnrollment).GetMethod("VerifyPrivateKey",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        oVerify.Invoke(null, [oRsaCert, oRsaCert]);
+        Check(true, "SQL enrollment verifies an RSA private key");
         foreach (CngAlgorithm oAlgorithm in new[] { CngAlgorithm.ECDiffieHellmanP256,
             CngAlgorithm.ECDiffieHellmanP384, CngAlgorithm.ECDiffieHellmanP521 })
         {
@@ -675,6 +679,10 @@ internal static partial class RegressionTests
                 Check(CertificateOperations.CheckCertificateStatus(oCert), "Accept " + oAlgorithm + " certificate");
                 Check(CertificateUsageFilter.Read().Matches(oCert), "Default usage filters retain " + oAlgorithm);
                 Check(!CertificateOperations.CheckCertificateStatus(oSigning), "Reject signing-only " + oAlgorithm);
+                oVerify.Invoke(null, [oCert, oCert]);
+                Check(true, "SQL enrollment verifies an " + oAlgorithm + " private key");
+                Reject(() => oVerify.Invoke(null, [oCert, oRsaCert]),
+                    "SQL enrollment rejects a mismatched " + oAlgorithm + " private key");
                 TestRecipientEnvelope(oCert, oRsaCert, oAlgorithm.Algorithm);
                 TestAlgorithmVault(sDirectory, oCert, oAlgorithm.Algorithm);
             }
@@ -732,6 +740,8 @@ internal static partial class RegressionTests
                     throw new CryptographicException(Marshal.GetLastWin32Error());
                 Check(oCert.HasPrivateKey, "Associate ephemeral ML-KEM-" + sParameters + " private key");
                 CertificateKeyProtection.ValidateForEncryption(oCert);
+                oVerify.Invoke(null, [oCert, oCert]);
+                Check(true, "SQL enrollment verifies an ML-KEM-" + sParameters + " private key");
                 CertificateRequest oIssuerRequest = new CertificateRequest("CN=Test Issuer", oIssuer,
                     HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 oIssuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
