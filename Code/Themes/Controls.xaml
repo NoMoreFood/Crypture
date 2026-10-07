@@ -12,6 +12,7 @@
     <SolidColorBrush x:Key="Crypture.HoverBrush" Color="#E8F2FE" />
     <SolidColorBrush x:Key="Crypture.SelectionBrush" Color="#D7EAFE" />
     <SolidColorBrush x:Key="Crypture.AccentBrush" Color="#0F6CBD" />
+    <SolidColorBrush x:Key="Crypture.AccentTextBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Crypture.DisabledBrush" Color="#687582" />
     <SolidColorBrush x:Key="Crypture.WarningBrush" Color="#9A3412" />
 
@@ -75,6 +76,38 @@
                 <StaticResource ResourceKey="Crypture.VaultBadge" />
                 <GeometryDrawing Pen="{StaticResource Crypture.VaultAccentLine}"
                     Geometry="M32,37 H43 M38,32 L43,37 L38,42" />
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+
+    <Pen x:Key="Crypture.ActionIconPen" Brush="{DynamicResource Crypture.TextBrush}" Thickness="2"
+        StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+    <Pen x:Key="Crypture.PrimaryActionIconPen" Brush="{DynamicResource Crypture.AccentTextBrush}" Thickness="2"
+        StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+    <DrawingImage x:Key="Crypture.UnlockItemIcon">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="Transparent" Geometry="M0,0 H32 V32 H0 Z" />
+                <GeometryDrawing Pen="{StaticResource Crypture.PrimaryActionIconPen}"
+                    Geometry="M11,14 V9 C11,1 25,1 25,9 M6,14 H28 V29 H6 Z M17,20 V25" />
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+    <DrawingImage x:Key="Crypture.SaveItemIcon">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="Transparent" Geometry="M0,0 H32 V32 H0 Z" />
+                <GeometryDrawing Pen="{StaticResource Crypture.PrimaryActionIconPen}"
+                    Geometry="M5,4 H23 L28,9 V28 H5 Z M10,4 V12 H22 V4 M10,28 V20 H23 V28" />
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+    <DrawingImage x:Key="Crypture.LockItemIcon">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="Transparent" Geometry="M0,0 H32 V32 H0 Z" />
+                <GeometryDrawing Pen="{StaticResource Crypture.ActionIconPen}"
+                    Geometry="M10,14 V9 C10,1 24,1 24,9 V14 M6,14 H28 V29 H6 Z M17,20 V25" />
             </DrawingGroup>
         </DrawingImage.Drawing>
     </DrawingImage>
@@ -896,6 +929,25 @@
         <Setter Property="FocusedBackground" Value="{DynamicResource Crypture.HoverBrush}" />
         <Setter Property="FocusedBorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
         <Setter Property="CanAddToQuickAccessToolBarDirectly" Value="False" />
+    </Style>
+    <Style x:Key="Crypture.PrimaryRibbonButton" TargetType="ribbon:RibbonButton"
+        BasedOn="{StaticResource {x:Type ribbon:RibbonButton}}">
+        <Setter Property="Background" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Crypture.AccentTextBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="MouseOverBackground" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="MouseOverBorderBrush" Value="{DynamicResource Crypture.TextBrush}" />
+        <Setter Property="PressedBackground" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="PressedBorderBrush" Value="{DynamicResource Crypture.TextBrush}" />
+        <Setter Property="FocusedBackground" Value="{DynamicResource Crypture.AccentBrush}" />
+        <Setter Property="FocusedBorderBrush" Value="{DynamicResource Crypture.TextBrush}" />
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Background" Value="{DynamicResource Crypture.BorderBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource Crypture.DisabledBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Crypture.BorderBrush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
     <Style TargetType="ribbon:RibbonMenuButton" BasedOn="{StaticResource Crypture.ControlStyle}">
         <Setter Property="Background" Value="{DynamicResource Crypture.PanelBrush}" />

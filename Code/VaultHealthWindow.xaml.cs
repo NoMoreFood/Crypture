@@ -8,7 +8,7 @@ using System.Windows.Controls;
 
 namespace Crypture
 {
-    public partial class VaultHealthWindow : Window
+    public partial class VaultHealthWindow : ThemedWindow
     {
         private readonly IVaultStorage oStorage;
         private CancellationTokenSource oCancellation;

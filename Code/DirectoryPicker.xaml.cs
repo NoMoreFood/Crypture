@@ -130,7 +130,7 @@ namespace Crypture
         }
     }
 
-    public partial class DirectoryPicker : Window
+    public partial class DirectoryPicker : ThemedWindow
     {
         private readonly bool bUsersOnly;
         private readonly int nSelectionLimit;

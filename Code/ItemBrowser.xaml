@@ -1,7 +1,14 @@
-﻿<Window x:Class="Crypture.ItemBrowser" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:properties="clr-namespace:Crypture.Properties" x:Name="oItemBrowser" Title="Crypture" Width="940" Height="560" MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d" ContentRendered="oItemBrowser_ContentRendered" Closing="oItemBrowser_Closing" PreviewKeyDown="oItemBrowser_PreviewKeyDown"
+﻿<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.ItemBrowser" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:properties="clr-namespace:Crypture.Properties" x:Name="oItemBrowser" Title="Crypture" Width="940" Height="560" MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d" ContentRendered="oItemBrowser_ContentRendered" Closing="oItemBrowser_Closing" PreviewKeyDown="oItemBrowser_PreviewKeyDown"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
     <Window.Resources>
         <local:CheckIfDateIsNotSetConverter x:Key="CheckIfDateIsNotSetConverter" />
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <Style x:Key="ItemCellText" TargetType="TextBlock">
+            <Setter Property="Margin" Value="8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+        </Style>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -115,6 +122,11 @@
                         </CheckBox.ToolTip>
                     </CheckBox>
                 </ribbon:RibbonGroup>
+                <ribbon:RibbonGroup Header="Item Details">
+                    <CheckBox Content="Show _Modified By" Margin="10,6"
+                        IsChecked="{Binding Source={x:Static properties:Settings.Default},Path=ShowItemModifier}"
+                        ToolTip="Show who last modified each item." />
+                </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
         </ribbon:Ribbon>
         <DockPanel x:Name="oSearchPanel" Grid.Row="1" Margin="12,8">
@@ -125,28 +137,32 @@
                 AutomationProperties.Name="Search Items and Certificates" />
         </DockPanel>
         <DataGrid x:Name="oItemDataGrid" Grid.Row="2" Width="Auto" AutoGenerateColumns="False" DockPanel.Dock="Top" HeadersVisibility="Column" IsReadOnly="True" CanUserAddRows="False"
-            CanUserDeleteRows="False" GridLinesVisibility="Horizontal" RowHeight="30" BorderThickness="0" Margin="12,0,12,8" MouseDoubleClick="oViewItemButton_Click" SelectionMode="Single">
+            CanUserDeleteRows="False" GridLinesVisibility="Horizontal" MinRowHeight="32" BorderThickness="0" Margin="12,0,12,8" MouseDoubleClick="oViewItemButton_Click" SelectionMode="Single">
             <DataGrid.Columns>
-                <DataGridTextColumn Width="*" Binding="{Binding Label}" Header="Item Label" IsReadOnly="True" SortDirection="Ascending" SortMemberPath="Label">
+                <DataGridTextColumn Width="*" MinWidth="240" Binding="{Binding Label}" Header="Item Label"
+                    ElementStyle="{StaticResource ItemCellText}" IsReadOnly="True"
+                    SortDirection="Ascending" SortMemberPath="Label">
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE8EC;" />
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="110" Binding="{Binding ItemTypeDisplay}" Header="Item Type" IsReadOnly="True">
+                <DataGridTextColumn Width="SizeToCells" MinWidth="110" MaxWidth="160"
+                    Binding="{Binding ItemTypeDisplay}" Header="Type" ElementStyle="{StaticResource ItemCellText}"
+                    IsReadOnly="True">
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE8A5;" />
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTemplateColumn Width="250" MinWidth="180" Header="Encryption"
+                <DataGridTemplateColumn Width="180" MinWidth="150" Header="Protection"
                     SortMemberPath="ProtectionDisplay">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding ProtectionDisplay}" TextTrimming="CharacterEllipsis"
-                                ToolTip="{Binding ProtectionDisplay}" VerticalAlignment="Center" Margin="5,0" />
+                                ToolTip="{Binding ProtectionDisplay}" VerticalAlignment="Center" Margin="8,0" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                     <DataGridTemplateColumn.HeaderStyle>
@@ -155,14 +171,18 @@
                         </Style>
                     </DataGridTemplateColumn.HeaderStyle>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Width="Auto" MinWidth="160" Binding="{Binding ModifiedByDisplay}" Header="Modified By" IsReadOnly="True">
+                <DataGridTextColumn Width="160" MinWidth="130" Binding="{Binding ModifiedByDisplay}"
+                    Header="Modified By" ElementStyle="{StaticResource ItemCellText}" IsReadOnly="True"
+                    Visibility="{Binding Source={x:Static properties:Settings.Default},Path=ShowItemModifier,
+                        Converter={StaticResource BooleanToVisibilityConverter}}">
                     <DataGridTextColumn.HeaderStyle>
                         <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource Crypture.GlyphColumn}">
                             <Setter Property="Tag" Value="&#xE77B;" />
                         </Style>
                     </DataGridTextColumn.HeaderStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="Auto" MinWidth="125" Header="Modified Date" IsReadOnly="True">
+                <DataGridTextColumn Width="SizeToCells" MinWidth="145" Header="Modified Date"
+                    ElementStyle="{StaticResource ItemCellText}" IsReadOnly="True">
                     <DataGridTextColumn.Binding>
                         <Binding Path="ModifiedDate" Converter="{StaticResource CheckIfDateIsNotSetConverter}"
                             StringFormat="yyyy-MM-dd HH:mm:ss" />
@@ -240,4 +260,4 @@
             </StatusBarItem>
         </StatusBar>
     </Grid>
-</Window>
+</ui:ThemedWindow>

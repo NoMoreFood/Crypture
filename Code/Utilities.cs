@@ -125,7 +125,7 @@ namespace Crypture
             }
             catch (Exception oError)
             {
-                MessageBox.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
+                Popup.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
                     Environment.NewLine + oError.GetBaseException().Message, "Crypture",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
@@ -145,7 +145,7 @@ namespace Crypture
             }
             catch (Exception oError)
             {
-                MessageBox.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
+                Popup.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
                     Environment.NewLine + oError.GetBaseException().Message, "Crypture",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
@@ -338,7 +338,7 @@ namespace Crypture
     {
         public object Convert(object[] values, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            return values.Length == 2 && values[0] is IList oList && oList.Contains(values[1]);
+            return values.Length >= 2 && values[0] is IList oList && oList.Contains(values[1]);
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object parameter, System.Globalization.CultureInfo culture)

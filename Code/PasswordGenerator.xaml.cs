@@ -5,7 +5,7 @@ using System.Windows.Input;
 
 namespace Crypture
 {
-    public partial class PasswordGenerator : Window
+    public partial class PasswordGenerator : ThemedWindow
     {
         public string SelectedPassword { get; private set; }
         private bool bLoading = true;

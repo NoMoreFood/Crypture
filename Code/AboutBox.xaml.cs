@@ -4,7 +4,7 @@ using System.Windows;
 
 namespace Crypture
 {
-    public partial class AboutBox : Window
+    public partial class AboutBox : ThemedWindow
     {
         public AboutBox()
         {

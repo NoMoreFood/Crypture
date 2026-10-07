@@ -34,8 +34,6 @@ namespace Crypture
         {
             CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
             AppContext.SetData("APP_CONFIG_FILE", Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"));
-            EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
-                new RoutedEventHandler((s, e) => ApplyTitleBarTheme((Window)s)));
         }
 
         protected override void OnStartup(StartupEventArgs e)
@@ -46,8 +44,8 @@ namespace Crypture
             // Surface invalid startup defaults before opening the main window.
             try
             {
-                TimeSpan oIdleTimeout = PrivacyIdleTimeout;
                 ApplyThemePreference();
+                TimeSpan oIdleTimeout = PrivacyIdleTimeout;
                 MainWindow = new ItemBrowser();
                 MainWindow.Show();
 
@@ -68,7 +66,7 @@ namespace Crypture
             }
             catch (Exception oError)
             {
-                MessageBox.Show("Crypture could not start.\n\n" + oError.GetBaseException().Message,
+                Popup.Show("Crypture could not start.\n\n" + oError.GetBaseException().Message,
                     "Crypture", MessageBoxButton.OK, MessageBoxImage.Error);
                 Shutdown(1);
             }
@@ -179,9 +177,10 @@ namespace Crypture
             SetThemeBrush("Hover", bDark ? "#353D47" : "#E8F2FE");
             SetThemeBrush("Selection", bDark ? "#264F78" : "#D7EAFE");
             SetThemeBrush("Accent", bDark ? "#76B9ED" : "#0F6CBD");
+            SetThemeBrush("AccentText", bDark ? "#17212F" : "#FFFFFF");
             SetThemeBrush("Disabled", bDark ? "#8993A2" : "#687582");
             SetThemeBrush("Warning", bDark ? "#FDBA74" : "#9A3412");
-            foreach (Window oWindow in Current.Windows) ApplyTitleBarTheme(oWindow);
+            foreach (Window oWindow in Current.Windows) ApplyWindowTheme(oWindow);
         }
 
         private static void SetThemeBrush(string sName, string sColor)
@@ -191,7 +190,7 @@ namespace Crypture
             Current.Resources["Crypture." + sName + "Brush"] = oBrush;
         }
 
-        private static void ApplyTitleBarTheme(Window oWindow)
+        internal static void ApplyWindowTheme(Window oWindow)
         {
             // DWM title-bar attribute identifiers.
             const int ImmersiveDarkModeAttribute = 20;
@@ -199,6 +198,10 @@ namespace Crypture
             const int CaptionTextColorAttribute = 36;
             IntPtr hWindow = new WindowInteropHelper(oWindow).Handle;
             if (hWindow == IntPtr.Zero) return;
+
+            // Match the native backing surface to the client background before WPF draws its content.
+            if (HwndSource.FromHwnd(hWindow)?.CompositionTarget is HwndTarget oTarget &&
+                oWindow.Background is SolidColorBrush oBrush) oTarget.BackgroundColor = oBrush.Color;
             int nDark = IsDarkMode ? 1 : 0;
             int nCaption = IsDarkMode ? 0x001E1E1E : -1;
             int nText = IsDarkMode ? 0x00F1F1F1 : -1;

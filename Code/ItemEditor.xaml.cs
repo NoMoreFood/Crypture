@@ -22,7 +22,7 @@ using System.Windows.Interop;
 
 namespace Crypture
 {
-    public partial class ItemEditor : Window
+    public partial class ItemEditor : ThemedWindow
     {
         // Item format selector positions.
         private const int PlainTextTypeIndex = 0;
@@ -46,7 +46,7 @@ namespace Crypture
 
         public Item ThisItem { get; set; } = new Item();
         public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
-        public ObservableCollection<User> UserListSelected { get; set; } = new ObservableCollection<User>();
+        public ObservableCollection<User> UserListSelected { get; } = new ObservableCollection<User>();
         public byte[] BinaryItemData { get; set; }
         private bool bLoading = true;
         private bool bHasChanges;
@@ -120,8 +120,16 @@ namespace Crypture
                 ? Visibility.Visible : Visibility.Collapsed;
             oCertificateProtection.IsEnabled = bCertificatesEnabled;
             oCertificateProtection.Visibility = bCertificatesEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+            // Keep FIDO2 discoverable and explain why the current context cannot use it.
             oFidoProtection.IsEnabled = bFidoEnabled;
-            oFidoProtection.Visibility = bFidoEnabled ? Visibility.Visible : Visibility.Collapsed;
+            oFidoAvailabilityNotice.Text = !Properties.Settings.Default.EnableFidoProtection
+                ? "FIDO2 protection is disabled in Crypture.exe.config."
+                : CryptureEntities.Storage.IsSqlServer
+                ? "FIDO2 protection is available only for file Vaults."
+                : !bFidoEnabled ? "FIDO2 encryption is unavailable in this Windows session. " +
+                    "Remote Desktop can limit security key support." : null;
+            oFidoProtection.ToolTip = bFidoEnabled ? null : oFidoAvailabilityNotice.Text;
             oPrincipalList.ItemsSource = PrincipalList;
             oDomainScope.IsEnabled = bDomainJoined;
             oPrincipalScope.SelectedIndex = !bDomainJoined || String.Equals(Environment.UserDomainName,
@@ -183,9 +191,10 @@ namespace Crypture
             List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
 
             // Filter new choices while retaining saved and administrator-required recipients.
-            UserListSelected = new ObservableCollection<User>(UserList.Where(u => bNewItem
+            UserListSelected.Clear();
+            foreach (User oUser in UserList.Where(u => bNewItem
                 ? oAutomatic.Any(c => c.SequenceEqual(u.Certificate))
-                : ThisItem.Instances.Any(i => i.UserId == u.UserId)));
+                : ThisItem.Instances.Any(i => i.UserId == u.UserId))) UserListSelected.Add(oUser);
             oItemSharedWith.ItemsSource = UserListSelected;
             oAddCertDropDown.ItemsSource = UserListSelected.ToList();
             if (!bCertificatesEnabled) return;
@@ -274,7 +283,8 @@ namespace Crypture
             oPrincipalMatch.IsEnabled = bEnabled && bDpapiNgEnabled && bDomainJoined;
             bool bCanUseFido = ThisItem.Cipher?.CipherParams != ItemCryptography.FidoFormat || FidoNative.IsAvailable;
             oLoadItemButton.IsEnabled = !bEnabled && bCanUseFido;
-            oLoadItemButton.Visibility = bCanUseFido ? Visibility.Visible : Visibility.Collapsed;
+            oLoadItemButton.Visibility = !bEnabled && bCanUseFido ? Visibility.Visible : Visibility.Collapsed;
+            oSaveItemButton.Visibility = bEnabled ? Visibility.Visible : Visibility.Collapsed;
             oItemData.IsEnabled = bEnabled && bPlainText;
             oRichItemData.IsEnabled = bEnabled && bRichText;
             oItemTypeSelector.IsEnabled = bEnabled && (ThisItem.ItemType is "text" or "richtext" or "totp" ||
@@ -288,7 +298,9 @@ namespace Crypture
             oUploadAFile.IsEnabled = bEnabled;
             oGeneratePasswordButton.IsEnabled = bEnabled && (bPlainText || bRichText);
             oRemoveItemButton.IsEnabled = ThisItem.ItemId != 0;
+            oRemoveItemButton.Visibility = oRemoveItemButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
             oLockItemButton.IsEnabled = bEnabled && ThisItem.ItemId != 0;
+            oPrivacyGroup.Visibility = oLockItemButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
 
             // control panel display
             oTextLockImage.Visibility = bEnabled ? Visibility.Collapsed : Visibility.Visible;
@@ -638,6 +650,8 @@ namespace Crypture
             bool bPrincipals = oProtectionMode.SelectedIndex == UserProtectionIndex;
             bool bCertificates = oProtectionMode.SelectedIndex == CertificateProtectionIndex;
             bool bFido = oProtectionMode.SelectedIndex == FidoProtectionIndex;
+            oFidoAvailabilityNotice.Visibility = !bFidoEnabled && !bFido
+                ? Visibility.Visible : Visibility.Collapsed;
             bool bProtectionEnabled = bPrincipals && oDpapiNgProtection.IsEnabled ||
                 bCertificates && bCertificatesEnabled || bFido && bFidoEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
@@ -662,7 +676,6 @@ namespace Crypture
             oPrincipalPanel.Visibility = bPrincipals && bDpapiNgEnabled ? Visibility.Visible : Visibility.Collapsed;
             oCertificatePanel.Visibility = bCertificates && bCertificatesEnabled
                 ? Visibility.Visible : Visibility.Collapsed;
-            oCertificateSharingGroup.Visibility = oCertificatePanel.Visibility;
             oFidoPanel.Visibility = bFido ? Visibility.Visible : Visibility.Collapsed;
             oFidoKeyStatus.Text = oFidoCredentialId == null ? "A security key will be set up when you save."
                 : "Use the security key that protected this item.";
@@ -810,20 +823,20 @@ namespace Crypture
                     UserListSelected.Add(oUser);
                     bHasChanges = true;
                 }
-                oMenu.IsChecked = true;
+                oMenu.SetCurrentValue(RibbonMenuItem.IsCheckedProperty, true);
                 return;
             }
             bool bIsInList = UserListSelected.Contains(oUser);
             if (bIsInList) UserListSelected.Remove(oUser);
             else UserListSelected.Add(oUser);
-            oMenu.IsChecked = !bIsInList;
+            oMenu.SetCurrentValue(RibbonMenuItem.IsCheckedProperty, !bIsInList);
             bHasChanges = true;
         }
 
         private void oRemoveItemButton_Click(object sender, RoutedEventArgs e)
         {
             // confirm removal
-            if (ThisItem.ItemId == 0 || MessageBox.Show(this,
+            if (ThisItem.ItemId == 0 || Popup.Show(this,
                 "Are you sure you want to remove this item?", "Removal Confirmation", MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
 
@@ -837,7 +850,7 @@ namespace Crypture
 
         private bool ConfirmDiscard()
         {
-            return !bHasChanges || MessageBox.Show(this, "Discard your unsaved changes?", "Unsaved Changes",
+            return !bHasChanges || Popup.Show(this, "Discard your unsaved changes?", "Unsaved Changes",
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
         }
 
@@ -878,8 +891,9 @@ namespace Crypture
             ThisItem.ModifiedBy = nStoredModifiedBy;
             DataContext = null;
             DataContext = ThisItem;
-            UserListSelected = new ObservableCollection<User>(UserList.Where(u =>
-                ThisItem.Instances.Any(i => i.UserId == u.UserId)));
+            UserListSelected.Clear();
+            foreach (User oUser in UserList.Where(u => ThisItem.Instances.Any(i => i.UserId == u.UserId)))
+                UserListSelected.Add(oUser);
             oItemSharedWith.ItemsSource = UserListSelected;
             oAddCertDropDown.Items.Refresh();
             LoadProtection();
@@ -942,7 +956,7 @@ namespace Crypture
             if (ThisItem.ItemType == "richtext" && sNewType == "text")
             {
                 string sText = Utilities.GetRichText(oRichItemData);
-                if (sText.Length != 0 && MessageBox.Show(this,
+                if (sText.Length != 0 && Popup.Show(this,
                     "Convert to plain text? Formatting will be removed.", "Convert Secret Text",
                     MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
                 {

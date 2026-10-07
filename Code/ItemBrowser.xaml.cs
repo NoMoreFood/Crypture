@@ -28,7 +28,7 @@ namespace Crypture
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
-    public partial class ItemBrowser : Window
+    public partial class ItemBrowser : ThemedWindow
     {
         public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
 
@@ -62,7 +62,7 @@ namespace Crypture
                     u.Certificate.AsSpan().SequenceEqual(oCert.RawData));
                 if (oExisting != null)
                 {
-                    MessageBox.Show(this,
+                    Popup.Show(this,
                          "The selected certificate is already in the Vault.",
                          "Certificate In Vault", MessageBoxButton.OK, MessageBoxImage.Exclamation);
                     return false;
@@ -78,7 +78,7 @@ namespace Crypture
                 }
 
                 bool bAmOwner = CertificateOperations.GetPrivateCertificateData().Contains(
-                    Convert.ToBase64String(oCert.RawData)) && MessageBox.Show(this,
+                    Convert.ToBase64String(oCert.RawData)) && Popup.Show(this,
                     "Are you the owner of the selected certificate?",
                     "Ownership Confirmation",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
@@ -131,14 +131,14 @@ namespace Crypture
                 if (CertificateOperations.GetAutomaticCertificates().Where(u => 
                     StructuralComparisons.StructuralEqualityComparer.Equals(u, ((User) oObject).Certificate)).Count() > 0)
                 {
-                    MessageBox.Show(this, "Removal of automatic certificate is prohibited.",
+                    Popup.Show(this, "Removal of automatic certificate is prohibited.",
                         "Removal Prohibited", MessageBoxButton.OK, MessageBoxImage.Exclamation);
                     return;
                 }
             }
 
             // confirm removal
-            if (oObject == null || MessageBox.Show(this,
+            if (oObject == null || Popup.Show(this,
                     "Are you sure you want to remove '" + ((oObject is User) ?
                     ((User)oObject).Name : ((Item)oObject).Label) + "'?",
                     "Removal Confirmation",
@@ -223,7 +223,7 @@ namespace Crypture
                     // skip if no certificate information was found
                     if (oAccount.Certificates.Length == 0)
                     {
-                        MessageBox.Show(this, "There was no certificate associated with '" + oAccount.Name + "'.",
+                        Popup.Show(this, "There was no certificate associated with '" + oAccount.Name + "'.",
                             "No Certificate Information Found", MessageBoxButton.OK, MessageBoxImage.Exclamation);
                         continue;
                     }
@@ -265,11 +265,11 @@ namespace Crypture
                 CryptureEntities.Storage is not SqlServerVaultStorage oStorage) return;
             if (oUser.IsEscrow)
             {
-                MessageBox.Show(this, "This certificate is already designated for emergency recovery.",
+                Popup.Show(this, "This certificate is already designated for emergency recovery.",
                     "Escrow Certificate", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            if (MessageBox.Show(this, "Use this AD-published certificate as the Vault's escrow identity? " +
+            if (Popup.Show(this, "Use this AD-published certificate as the Vault's escrow identity? " +
                 "New saves will include it automatically. Existing items keep their saved recovery identity " +
                 "until they are decrypted and saved again.", "Designate Escrow Certificate",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -775,7 +775,7 @@ namespace Crypture
             }
             catch (ArgumentException oError)
             {
-                MessageBox.Show(this, oError.Message, "Invalid Recent Vault",
+                Popup.Show(this, oError.Message, "Invalid Recent Vault",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -802,7 +802,7 @@ namespace Crypture
                         "into your personal store before claiming it.");
 
                 // ask for concurrence concur
-                if (MessageBox.Show(this, "Associate the selected certificate with your Windows account?",
+                if (Popup.Show(this, "Associate the selected certificate with your Windows account?",
                     "Confirm Ownership Change Request", MessageBoxButton.YesNo,
                     MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
@@ -838,7 +838,7 @@ namespace Crypture
             Utilities.TryOperation(this, () =>
             {
                 CryptureEntities.Storage.Compact();
-                MessageBox.Show(this, "Compact operation complete.",
+                Popup.Show(this, "Compact operation complete.",
                     "Operation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
             });
         }
@@ -870,7 +870,7 @@ namespace Crypture
             }
             if (!await RunVaultOperationAsync("Backing up Vault...", oCancellation =>
                 oStorage.BackupAsync(sDestination, oCancellation))) return;
-            MessageBox.Show(this, (oStorage.IsSqlServer ? "SQL Server Vault backup created on the server. "
+            Popup.Show(this, (oStorage.IsSqlServer ? "SQL Server Vault backup created on the server. "
                 : "Encrypted Vault backup created. ") + "Keep certificate private keys backed up separately.",
                 "Backup Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
@@ -935,7 +935,7 @@ namespace Crypture
             {
                 _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(delegate ()
                 {
-                    MessageBox.Show(this, Properties.Settings.Default.StartupMessageText,
+                    Popup.Show(this, Properties.Settings.Default.StartupMessageText,
                         "Welcome To Crypture", MessageBoxButton.OK,
                         MessageBoxImage.Information, MessageBoxResult.OK);
                 }));

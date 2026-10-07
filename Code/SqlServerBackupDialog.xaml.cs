@@ -3,7 +3,7 @@ using System.Windows;
 
 namespace Crypture
 {
-    public partial class SqlServerBackupDialog : Window
+    public partial class SqlServerBackupDialog : ThemedWindow
     {
         internal string BackupPath { get; private set; }
 
@@ -17,7 +17,7 @@ namespace Crypture
         {
             if (String.IsNullOrWhiteSpace(oBackupPath.Text))
             {
-                MessageBox.Show(this, "Enter a backup path or filename.", "Backup Path Required",
+                Popup.Show(this, "Enter a backup path or filename.", "Backup Path Required",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }

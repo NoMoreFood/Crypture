@@ -9,7 +9,7 @@ using Microsoft.Data.SqlClient;
 
 namespace Crypture
 {
-    public partial class SqlServerVaultDialog : Window
+    public partial class SqlServerVaultDialog : ThemedWindow
     {
         internal SqlServerVaultStorage Storage { get; private set; }
         internal bool CreateDatabase { get; private set; }

@@ -1,4 +1,4 @@
-<Window x:Class="Crypture.VaultHealthWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.VaultHealthWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Vault Health Check" Width="940" Height="700"
     MinWidth="760" MinHeight="600" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
     Icon="pack://application:,,,/Crypture;component/Safe.ico" Loaded="oRunButton_Click" Closed="oWindow_Closed"
@@ -84,4 +84,4 @@
                 Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE711;" />
         </DockPanel>
     </Grid>
-</Window>
+</ui:ThemedWindow>

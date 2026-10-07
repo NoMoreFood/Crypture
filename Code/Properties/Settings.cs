@@ -12,6 +12,14 @@ namespace Crypture.Properties
     internal sealed partial class Settings
     {
         [UserScopedSetting]
+        [DefaultSettingValue("False")]
+        public bool ShowItemModifier
+        {
+            get => (bool)this[nameof(ShowItemModifier)];
+            set => this[nameof(ShowItemModifier)] = value;
+        }
+
+        [UserScopedSetting]
         [SettingsSerializeAs(SettingsSerializeAs.Xml)]
         public PasswordOptions PasswordGeneratorOptions
         {

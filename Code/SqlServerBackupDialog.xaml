@@ -1,4 +1,4 @@
-<Window x:Class="Crypture.SqlServerBackupDialog"
+<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.SqlServerBackupDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Back Up SQL Server Vault" Width="520" Height="230" MinWidth="460" MinHeight="210"
@@ -28,4 +28,4 @@
             <Button Width="100" MinHeight="30" Content="Cancel" IsCancel="True" />
         </StackPanel>
     </Grid>
-</Window>
+</ui:ThemedWindow>

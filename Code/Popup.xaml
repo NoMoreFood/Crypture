@@ -1,0 +1,32 @@
+<local:ThemedWindow x:Class="Crypture.Popup" x:ClassModifier="internal"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Crypture"
+    Width="480" SizeToContent="Height" ResizeMode="NoResize" ShowInTaskbar="False"
+    WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="14"
+    Icon="pack://application:,,,/Crypture;component/Safe.ico" UseLayoutRounding="True">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer x:Name="oMessageScroll" VerticalScrollBarVisibility="Auto"
+            HorizontalScrollBarVisibility="Disabled" Margin="24">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="oIcon" Style="{StaticResource Crypture.Glyph}" FontSize="28"
+                    Width="32" Margin="0,0,16,0" VerticalAlignment="Top" />
+                <TextBox x:Name="oMessage" Grid.Column="1" IsReadOnly="True" TextWrapping="Wrap"
+                    Background="Transparent" BorderThickness="0" Padding="0"
+                    AutomationProperties.Name="Message" />
+            </Grid>
+        </ScrollViewer>
+        <Border Grid.Row="1" Background="{DynamicResource Crypture.PanelBrush}"
+            BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="0,1,0,0" Padding="16,12">
+            <WrapPanel x:Name="oButtons" HorizontalAlignment="Right"
+                KeyboardNavigation.DirectionalNavigation="Cycle" />
+        </Border>
+    </Grid>
+</local:ThemedWindow>

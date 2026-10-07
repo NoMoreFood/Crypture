@@ -1,4 +1,4 @@
-﻿<Window x:Class="Crypture.ItemEditor" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oRootWindow" Title="Item Viewer &amp; Editor" Width="1080" Height="720" MinWidth="920" MinHeight="600" WindowStartupLocation="CenterOwner" PreviewKeyDown="oRootWindow_PreviewKeyDown" Closing="oRootWindow_Closing" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d"
+﻿<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.ItemEditor" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oRootWindow" Title="Item Viewer &amp; Editor" Width="1080" Height="720" MinWidth="920" MinHeight="600" WindowStartupLocation="CenterOwner" PreviewKeyDown="oRootWindow_PreviewKeyDown" Closing="oRootWindow_Closing" Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
     <Window.Resources>
         <local:CheckIfItemIsSelectedConverter x:Key="CheckIfItemIsSelectedConverter" />
@@ -14,8 +14,18 @@
             <!--  Tabs  -->
             <ribbon:RibbonTab Header="Home">
                 <ribbon:RibbonGroup Header="Item Actions">
-                    <ribbon:RibbonButton x:Name="oLoadItemButton" Height="Auto" Margin="6,6,6,0" Click="oLoadItemButton_Click" Label="Decrypt &amp; Load" LargeImageSource="pack://application:,,,/Crypture;component/Images/Load.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
-                    <ribbon:RibbonButton x:Name="oSaveItemButton" Height="Auto" Margin="6,6,6,0" Click="oSaveItemButton_Click" Label="Encrypt &amp; Save" LargeImageSource="pack://application:,,,/Crypture;component/Images/Save.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" />
+                    <ribbon:RibbonButton x:Name="oLoadItemButton" Height="Auto" Margin="6,6,6,0"
+                        Click="oLoadItemButton_Click" Label="Unlock" KeyTip="U"
+                        LargeImageSource="{StaticResource Crypture.UnlockItemIcon}"
+                        ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}"
+                        Style="{StaticResource Crypture.PrimaryRibbonButton}"
+                        ToolTip="Decrypt this item to view and edit its content." />
+                    <ribbon:RibbonButton x:Name="oSaveItemButton" Height="Auto" Margin="6,6,6,0"
+                        Click="oSaveItemButton_Click" Label="Encrypt &amp; Save" KeyTip="S"
+                        LargeImageSource="{StaticResource Crypture.SaveItemIcon}"
+                        ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}"
+                        Style="{StaticResource Crypture.PrimaryRibbonButton}"
+                        ToolTip="Encrypt and save this item (Ctrl+S)." />
                     <ribbon:RibbonButton x:Name="oRemoveItemButton" Height="Auto" Margin="6,6,6,0" Click="oRemoveItemButton_Click" Label="Remove Item" SmallImageSource="pack://application:,,,/Crypture;component/Images/Remove.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                     <ribbon:RibbonButton x:Name="oGeneratePasswordButton" Label="Generate Password..." ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
                         Margin="6,6,6,0" Click="oGeneratePasswordButton_Click"
@@ -23,29 +33,11 @@
                         ToolTip="Generate a password and insert it at the cursor in an unlocked text item." />
                     <ribbon:RibbonButton x:Name="oUploadAFile" Height="Auto" Margin="6,6,6,0" Click="oUploadAFile_Click" Label="Upload File..." SmallImageSource="pack://application:,,,/Crypture;component/Images/Upload.png" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}" />
                 </ribbon:RibbonGroup>
-                <ribbon:RibbonGroup Header="Privacy">
+                <ribbon:RibbonGroup x:Name="oPrivacyGroup" Header="Privacy">
                     <ribbon:RibbonButton x:Name="oLockItemButton" Margin="6,6,6,0" Label="Lock Item"
-                        Click="oLockItemButton_Click" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}" ToolTip="Clear decrypted content (Ctrl+L)"
-                        LargeImageSource="pack://application:,,,/Crypture;component/Images/Save.png" />
-                </ribbon:RibbonGroup>
-                <ribbon:RibbonGroup x:Name="oCertificateSharingGroup" Header="Certificate Sharing">
-                    <ribbon:RibbonMenuButton x:Name="oAddCertDropDown" Margin="6,6,6,0" DisplayMemberPath="Name" Label="Share With..." LargeImageSource="pack://application:,,,/Crypture;component/Images/Share.png" ControlSizeDefinition="{StaticResource Crypture.LargeRibbonControl}">
-                        <ribbon:RibbonMenuButton.ItemContainerStyle>
-                            <Style BasedOn="{StaticResource {x:Type ribbon:RibbonMenuItem}}" TargetType="ribbon:RibbonMenuItem">
-                                <EventSetter Event="Click" Handler="MenuItemWithRadioButtons_Click" />
-                                <Setter Property="IsCheckable" Value="True" />
-                                <Setter Property="StaysOpenOnClick" Value="True" />
-                                <Setter Property="IsChecked">
-                                    <Setter.Value>
-                                        <MultiBinding Converter="{StaticResource CheckIfItemIsSelectedConverter}" Mode="OneWay">
-                                            <Binding ElementName="oRootWindow" Path="UserListSelected" />
-                                            <Binding Path="." />
-                                        </MultiBinding>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ribbon:RibbonMenuButton.ItemContainerStyle>
-                    </ribbon:RibbonMenuButton>
+                        Click="oLockItemButton_Click" ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
+                        KeyTip="L" ToolTip="Clear decrypted content (Ctrl+L)"
+                        SmallImageSource="{StaticResource Crypture.LockItemIcon}" />
                 </ribbon:RibbonGroup>
             </ribbon:RibbonTab>
         </ribbon:Ribbon>
@@ -102,8 +94,12 @@
                                 SelectionChanged="oProtectionChanged" AutomationProperties.Name="Encryption Method">
                                 <ComboBoxItem x:Name="oDpapiNgProtection" Content="User Based" />
                                 <ComboBoxItem x:Name="oCertificateProtection" Content="Certificate Based" />
-                                <ComboBoxItem x:Name="oFidoProtection" Content="FIDO2 Security Key" />
+                                <ComboBoxItem x:Name="oFidoProtection" Content="FIDO2 Security Key"
+                                    ToolTipService.ShowOnDisabled="True" />
                             </ComboBox>
+                            <TextBlock x:Name="oFidoAvailabilityNotice" Visibility="Collapsed" Margin="0,8,0,0"
+                                TextWrapping="Wrap" Foreground="{DynamicResource Crypture.MutedBrush}"
+                                AutomationProperties.Name="FIDO2 Availability" />
                             <TextBlock x:Name="oProtectionDisabledNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Disabled Encryption" />
@@ -185,8 +181,48 @@
                                 </WrapPanel>
                             </StackPanel>
                             <StackPanel x:Name="oCertificatePanel" Visibility="Collapsed" Margin="0,10,0,0">
-                                <TextBlock Text="Select recipient certificates using Share With in the ribbon."
-                                    TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource Crypture.MutedBrush}" />
+                                <TextBlock Text="Who Can Decrypt" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <ribbon:RibbonMenuButton x:Name="oAddCertDropDown" DisplayMemberPath="Name"
+                                    Label="Choose Recipients..." HorizontalAlignment="Left" Margin="0,0,0,8"
+                                    SmallImageSource="pack://application:,,,/Crypture;component/Images/Share.png"
+                                    ControlSizeDefinition="{StaticResource Crypture.SmallRibbonControl}"
+                                    ToolTip="Choose which certificate recipients can decrypt this item.">
+                                    <ribbon:RibbonMenuButton.ItemContainerStyle>
+                                        <Style BasedOn="{StaticResource {x:Type ribbon:RibbonMenuItem}}"
+                                            TargetType="ribbon:RibbonMenuItem">
+                                            <EventSetter Event="Click" Handler="MenuItemWithRadioButtons_Click" />
+                                            <Setter Property="IsCheckable" Value="True" />
+                                            <Setter Property="StaysOpenOnClick" Value="True" />
+                                            <Setter Property="IsChecked">
+                                                <Setter.Value>
+                                                    <MultiBinding Converter="{StaticResource CheckIfItemIsSelectedConverter}"
+                                                        Mode="OneWay">
+                                                        <Binding ElementName="oRootWindow" Path="UserListSelected" />
+                                                        <Binding Path="." />
+                                                        <Binding ElementName="oRootWindow"
+                                                            Path="UserListSelected.Count" />
+                                                    </MultiBinding>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ribbon:RibbonMenuButton.ItemContainerStyle>
+                                </ribbon:RibbonMenuButton>
+                                <TextBlock x:Name="oRecipientEmptyState"
+                                    Text="No recipients selected. Choose recipients before saving."
+                                    TextWrapping="Wrap" Margin="0,0,0,8"
+                                    Foreground="{DynamicResource Crypture.MutedBrush}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding UserListSelected.Count,
+                                                    ElementName=oRootWindow}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                                 <TextBlock Text="{x:Static local:CertificateKeyProtection.AvailabilityDescription}"
                                     TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource Crypture.MutedBrush}" />
                                 <TextBlock x:Name="oCertificateUsageNotice" Visibility="Collapsed" TextWrapping="Wrap"
@@ -194,6 +230,15 @@
                                     AutomationProperties.Name="Certificate Usage Filters" />
                                 <ListView x:Name="oItemSharedWith" MinHeight="80" MaxHeight="180"
                                     IsHitTestVisible="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListView.Style>
+                                        <Style TargetType="ListView" BasedOn="{StaticResource {x:Type ListView}}">
+                                            <Style.Triggers>
+                                                <Trigger Property="HasItems" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ListView.Style>
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Margin="2">
@@ -305,4 +350,4 @@
             </StackPanel>
         </Border>
     </Grid>
-</Window>
+</ui:ThemedWindow>

@@ -82,7 +82,8 @@ internal static partial class RegressionTests
             }
             if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_DEFAULTS_ONLY") == "1" ||
                 Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1" ||
-                Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1" ||
+                Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1")
             {
                 Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 oApplication.Resources = new ResourceDictionary
@@ -91,7 +92,8 @@ internal static partial class RegressionTests
                 };
                 try
                 {
-                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
+                    if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1") TestPopups();
+                    else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_VAULT_OPERATIONS_ONLY") == "1")
                         TestVaultOperations(sDirectory);
                     else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_GENERATOR_ONLY") == "1")
                     {
@@ -891,6 +893,8 @@ internal static partial class RegressionTests
         ItemBrowser oBrowser = null;
         try
         {
+            TestPopups();
+
             // Locking must clear secrets even when the Vault cannot be opened.
             oEditor = new ItemEditor(oItem);
             oEditor.SetEditingControls(true);
@@ -922,6 +926,32 @@ internal static partial class RegressionTests
             PumpUntil(() => oEditor.IsLoaded);
             Check(oEditor.UserListSelected.Count == 2, "Editor displays multiple certificate recipients");
             CheckItemDateDisplay(oEditor);
+            oEditor.UserListSelected.RemoveAt(1);
+            oEditor.SetEditingControls(true);
+            ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = 1;
+            PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
+            var oRecipients = (System.Windows.Controls.Ribbon.RibbonMenuButton)oEditor.FindName("oAddCertDropDown");
+            oRecipients.IsDropDownOpen = true;
+            PumpUntil(() => oRecipients.ItemContainerGenerator.ContainerFromIndex(0) != null);
+            var oRecipient = (System.Windows.Controls.Ribbon.RibbonMenuItem)
+                oRecipients.ItemContainerGenerator.ContainerFromIndex(0);
+            Check(oRecipient.IsChecked && oRecipients.IsVisible,
+                "The inline recipient picker shows the saved recipient as selected");
+            oRecipient.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+            oEditor.UpdateLayout();
+            Check(!oRecipient.IsChecked && oEditor.UserListSelected.Count == 0 &&
+                !((ListView)oEditor.FindName("oItemSharedWith")).IsVisible &&
+                ((TextBlock)oEditor.FindName("oRecipientEmptyState")).IsVisible,
+                "Removing the last recipient updates its check mark and the inline empty state");
+            oRecipient.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+            oEditor.UpdateLayout();
+            Check(oRecipient.IsChecked && oEditor.UserListSelected.Count == 1 &&
+                ((ListView)oEditor.FindName("oItemSharedWith")).IsVisible &&
+                !((TextBlock)oEditor.FindName("oRecipientEmptyState")).IsVisible,
+                "Selecting a recipient restores its check mark and the inline recipient list");
+            oRecipients.IsDropDownOpen = false;
+            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(oEditor, false);
             oEditor.Close();
             oEditor = null;
 
@@ -1260,6 +1290,15 @@ internal static partial class RegressionTests
             oEditor.UpdateLayout();
             Check(!oCopy.IsVisible && !oRich.IsVisible && !oPlain.IsVisible,
                 "Copy is hidden when secret text is locked");
+            var oUnlock = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oLoadItemButton");
+            var oSave = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oSaveItemButton");
+            Check(oUnlock.IsVisible && oUnlock.IsEnabled && oUnlock.ActualWidth >= 28 &&
+                !oSave.IsVisible,
+                "Locking restores a visible unlock action and hides saving");
+            oEditor.SetEditingControls(true);
+            oEditor.UpdateLayout();
+            Check(!oUnlock.IsVisible && oSave.IsVisible && oSave.ActualWidth >= 28,
+                "Unlocking restores a visible save action and hides unlocking");
         }
         finally
         {

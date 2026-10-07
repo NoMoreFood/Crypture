@@ -1,4 +1,4 @@
-﻿<Window x:Class="Crypture.CertWizard" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oWizardWindow" Title="Certificate Generation Wizard" Width="525" Height="550" MinWidth="525" MinHeight="550" WindowStartupLocation="CenterOwner" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" Loaded="oWizardWindow_Loaded" Closed="oWizardWindow_Closed" mc:Ignorable="d"
+﻿<ui:ThemedWindow xmlns:ui="clr-namespace:Crypture" x:Class="Crypture.CertWizard" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:Crypture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" x:Name="oWizardWindow" Title="Certificate Generation Wizard" Width="525" Height="550" MinWidth="525" MinHeight="550" WindowStartupLocation="CenterOwner" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" Loaded="oWizardWindow_Loaded" Closed="oWizardWindow_Closed" mc:Ignorable="d"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
     <DockPanel>
         <Border DockPanel.Dock="Bottom" Padding="8" BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="0,1,0,0">
@@ -173,4 +173,4 @@
             </TabItem>
         </TabControl>
     </DockPanel>
-</Window>
+</ui:ThemedWindow>

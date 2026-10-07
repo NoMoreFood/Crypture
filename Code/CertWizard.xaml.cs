@@ -21,7 +21,7 @@ namespace Crypture
     /// <summary>
     /// Interaction logic for CertWizard.xaml
     /// </summary>
-    public partial class CertWizard : Window
+    public partial class CertWizard : ThemedWindow
     {
         public string SelectedProvider { get; set; }
         public string SelectedSignature { get; set; }
@@ -639,7 +639,7 @@ namespace Crypture
                 }
 
                 // note to the user the create was successful
-                MessageBox.Show(this, bSelfSigned ? "Certificate successfully created."
+                Popup.Show(this, bSelfSigned ? "Certificate successfully created."
                     : "Certificate request saved. The private key remains in the selected Windows key store.",
                     "Creation Successful", MessageBoxButton.OK, MessageBoxImage.Information);
             });
