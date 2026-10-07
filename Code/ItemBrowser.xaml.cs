@@ -427,20 +427,22 @@ namespace Crypture
             long? nSelectedItem = (oItemDataGrid.SelectedItem as Item)?.ItemId;
             long? nSelectedUser = (oCertDataGrid.SelectedItem as User)?.UserId;
             string sSearch = oSearchTextBox.Text.Trim();
+            List<User> oUsers = CertificateList.Where(u =>
+                u.Name.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
+                (u.Sid?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0).ToList();
+            HashSet<long> oMatchingRecipients = oUsers.Select(u => u.UserId).ToHashSet();
             List<Item> oItems = ItemList.Where(i =>
                 (i.Label.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ModifiedByDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ProtectionDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
                     i.ItemTypeDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                    (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) &&
+                    (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+                    i.Instances.Any(j => oMatchingRecipients.Contains(j.UserId))) &&
                 (oHideAccessible.IsChecked != true || ItemCryptography.UsesWindowsProtection(i.Cipher) ||
                     i.Cipher?.CipherParams == ItemCryptography.RecoveryFormat ||
                     i.Cipher?.CipherParams == ItemCryptography.FidoFormat ||
                     i.Instances.Any(j =>
                     PrivateCertificates.Contains(Convert.ToBase64String(j.User.Certificate))))).ToList();
-            List<User> oUsers = CertificateList.Where(u =>
-                u.Name.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                (u.Sid?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0).ToList();
             oItemDataGrid.ItemsSource = oItems;
             oCertDataGrid.ItemsSource = oUsers;
             oItemDataGrid.SelectedItem = oItems.FirstOrDefault(i => i.ItemId == nSelectedItem);

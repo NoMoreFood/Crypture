@@ -38,7 +38,7 @@ internal static partial class RegressionTests
             {
                 oStorage.Create();
                 CryptureEntities.Storage = oStorage;
-                User oUser = new User { Certificate = oCert.RawData };
+                User oUser = new User { Certificate = oCert.RawData, Sid = "S-1-5-21-101-202-303-404" };
                 using (CryptureEntities oContent = new CryptureEntities())
                 {
                     oContent.Users.Add(oUser);
@@ -83,6 +83,16 @@ internal static partial class RegressionTests
             Check(oInitialLoad.Result, "SQLite opens through the asynchronous Vault operation");
             DataGrid oGrid = (DataGrid)oBrowser.FindName("oItemDataGrid");
             Item oOriginal = (Item)oGrid.Items[0];
+            TextBox oSearch = (TextBox)oBrowser.FindName("oSearchTextBox");
+            oSearch.Text = "Vault operations";
+            Check(oGrid.Items.Count == 1 && ReferenceEquals(oGrid.Items[0], oOriginal),
+                "Item search matches a recipient certificate's name");
+            oSearch.Text = "S-1-5-21-101-202-303-404";
+            Check(oGrid.Items.Count == 1 && ReferenceEquals(oGrid.Items[0], oOriginal),
+                "Item search matches a recipient certificate's SID");
+            oSearch.Text = "No matching certificate";
+            Check(oGrid.Items.Count == 0, "Item search excludes unmatched recipient certificates");
+            oSearch.Clear();
             oGrid.SelectedItem = oOriginal;
             FaultingVaultStorage oFailing = new FaultingVaultStorage(oStorageB, true);
             MethodInfo oPrepare = typeof(ItemBrowser).GetMethod("PrepareVaultAsync",
