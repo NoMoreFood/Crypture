@@ -98,7 +98,7 @@ namespace Crypture
 
         public void Compact()
         {
-            using CryptureEntities oContent = new CryptureEntities();
+            using CryptureEntities oContent = new CryptureEntities(this);
             oContent.Database.ExecuteSqlRaw("VACUUM;");
         }
     }

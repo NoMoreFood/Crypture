@@ -48,6 +48,27 @@ internal static partial class RegressionTests
                     Encoding.Unicode.GetBytes(sLabel), new[] { oUser });
             }
 
+            foreach (SqliteVaultStorage oStorage in new[] { oStorageA, oStorageB })
+            {
+                using SqliteConnection oConnection = new SqliteConnection(oStorage.ConnectionString);
+                oConnection.Open();
+                using SqliteCommand oCommand = new SqliteCommand(
+                    "CREATE TABLE CompactTest (Payload BLOB); " +
+                    "INSERT INTO CompactTest VALUES (zeroblob(1048576)); DROP TABLE CompactTest;", oConnection);
+                oCommand.ExecuteNonQuery();
+            }
+            byte[] oActiveBeforeCompact = File.ReadAllBytes(oStorageB.DisplayName);
+            oStorageA.Compact();
+            using (SqliteConnection oConnection = new SqliteConnection(oStorageA.ConnectionString))
+            {
+                oConnection.Open();
+                using SqliteCommand oCommand = new SqliteCommand("PRAGMA freelist_count", oConnection);
+                Check((long)oCommand.ExecuteScalar() == 0,
+                    "Compaction reclaims pages in the storage instance's Vault");
+            }
+            Check(oActiveBeforeCompact.SequenceEqual(File.ReadAllBytes(oStorageB.DisplayName)),
+                "Compacting another storage instance leaves the active Vault unchanged");
+
             // A failure after reading the candidate's rows must retain the original data and write target.
             oBrowser = new ItemBrowser
             {
