@@ -10,7 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Code\Crypture.csproj" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.7" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <None Include="..\Code\App.config" Link="Crypture.exe.config" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Code\Data\SQLite.sql" Link="SQLite.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
