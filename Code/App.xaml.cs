@@ -34,6 +34,32 @@ namespace Crypture
         {
             CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
             AppContext.SetData("APP_CONFIG_FILE", Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"));
+
+            // Select software rendering before creating windows in a Horizon session.
+            if (UseSoftwareRendering()) RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+        }
+
+        private static bool UseSoftwareRendering()
+        {
+            try
+            {
+                // Honor explicit preferences before detecting Horizon's session metadata.
+                if (bool.TryParse(new ConfigurationDefaults().Text("SoftwareRendering", "auto"), out bool bSoftware))
+                    return bSoftware;
+
+                // Read the current RDS session and the single-user desktop locations.
+                using Process oProcess = Process.GetCurrentProcess();
+                using RegistryKey oEnvironment = Registry.CurrentUser.OpenSubKey(@"Volatile Environment");
+                using RegistryKey oSession = oEnvironment?.OpenSubKey(
+                    oProcess.SessionId.ToString(CultureInfo.InvariantCulture));
+                return !string.IsNullOrWhiteSpace(oSession?.GetValue("ViewClient_Protocol") as string) ||
+                    !string.IsNullOrWhiteSpace(oEnvironment?.GetValue("ViewClient_Protocol") as string);
+            }
+            catch (Exception oError) when (oError is InvalidOperationException or IOException or
+                UnauthorizedAccessException or SecurityException)
+            {
+                return false;
+            }
         }
 
         protected override void OnStartup(StartupEventArgs e)
