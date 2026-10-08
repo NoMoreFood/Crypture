@@ -27,6 +27,108 @@ function Sign-File([string] $Path)
     Invoke-Tool $signTool @('verify', '/pa', '/tw', $Path)
 }
 
+function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath)
+{
+    # Derive installer properties and XML edits from the distributed configuration.
+    [xml] $configuration = Get-Content -LiteralPath $ConfigPath -Raw
+    $options = foreach ($node in $configuration.SelectNodes(
+        '/configuration/appSettings/add | /configuration/applicationSettings/*/setting | ' +
+        '/configuration/userSettings/*/setting'))
+    {
+        $isAppSetting = $node.Name -eq 'add'
+        $name = if ($isAppSetting) { $node.GetAttribute('key') } else { $node.GetAttribute('name') }
+        $isXml = !$isAppSetting -and $node.GetAttribute('serializeAs') -eq 'Xml'
+        $value = if ($isAppSetting) { $node.GetAttribute('value') }
+            elseif ($isXml) { $node.SelectSingleNode('value').InnerXml }
+            else { $node.SelectSingleNode('value').InnerText }
+        $path = if ($isAppSetting) { "/configuration/appSettings/add[\[]@key='$name'[\]]" }
+            else { '/configuration/' + $node.ParentNode.ParentNode.Name + '/' + $node.ParentNode.Name +
+                "/setting[\[]@name='$name'[\]]/value" }
+        [pscustomobject] @{ Name = $name; Property = 'CRYPTURE_' + $name.ToUpperInvariant(); Value = $value;
+            Path = $path; IsAppSetting = $isAppSetting; IsXml = $isXml }
+    }
+
+    $wixNamespace = 'http://wixtoolset.org/schemas/v4/wxs'
+    $utilNamespace = 'http://wixtoolset.org/schemas/v4/wxs/util'
+    $settings = [Xml.XmlWriterSettings]::new()
+    $settings.Indent = $true
+    $settings.IndentChars = '    '
+    $settings.NewLineChars = "`r`n"
+    $settings.Encoding = [Text.UTF8Encoding]::new($false)
+    $writer = [Xml.XmlWriter]::Create($OutputPath, $settings)
+    try
+    {
+        $writer.WriteStartElement('Include', $wixNamespace)
+        $writer.WriteAttributeString('xmlns', 'util', $null, $utilNamespace)
+        foreach ($option in $options)
+        {
+            $writer.WriteStartElement('Property', $wixNamespace)
+            $writer.WriteAttributeString('Id', $option.Property)
+            $writer.WriteAttributeString('Secure', 'yes')
+            if ($option.Value.Length -gt 0) { $writer.WriteAttributeString('Value', $option.Value) }
+            $writer.WriteEndElement()
+
+            # An explicitly cleared collection still needs a valid serialized empty value.
+            if ($option.IsXml)
+            {
+                $writer.WriteStartElement('SetProperty', $wixNamespace)
+                $writer.WriteAttributeString('Id', $option.Property)
+                $writer.WriteAttributeString('Value', '<ArrayOfString />')
+                $writer.WriteAttributeString('Before', 'CostFinalize')
+                $writer.WriteAttributeString('Sequence', 'execute')
+                $writer.WriteAttributeString('Condition', 'NOT ' + $option.Property)
+                $writer.WriteEndElement()
+            }
+        }
+
+        # Use native WiX XML actions so configuration does not require an installed .NET runtime.
+        $writer.WriteStartElement('Component', $wixNamespace)
+        $writer.WriteAttributeString('Id', 'CryptureConfiguration')
+        $writer.WriteAttributeString('Directory', 'INSTALLFOLDER')
+        $writer.WriteStartElement('File', $wixNamespace)
+        $writer.WriteAttributeString('Id', 'CryptureConfigurationFile')
+        $writer.WriteAttributeString('Source', '$(var.PublishDirectory)\Crypture.exe.config')
+        $writer.WriteAttributeString('KeyPath', 'yes')
+        $writer.WriteEndElement()
+        $sequence = 0
+        foreach ($option in $options)
+        {
+            $actions = if ($option.IsXml) { @('delete', 'create') } else { @('create') }
+            foreach ($action in $actions)
+            {
+                $writer.WriteStartElement('util', 'XmlConfig', $utilNamespace)
+                $writer.WriteAttributeString('Id', $option.Name + '_' + $action)
+                $writer.WriteAttributeString('File', '[#CryptureConfigurationFile]')
+                $writer.WriteAttributeString('ElementPath', $(if ($option.IsXml) {
+                    $option.Path -replace '/value$', ''
+                } else { $option.Path }))
+                $writer.WriteAttributeString('Action', $action)
+                $writer.WriteAttributeString('Node', $(if ($option.IsXml -and $action -eq 'create') {
+                    'document'
+                } elseif ($option.IsXml) { 'element' } else { 'value' }))
+                $writer.WriteAttributeString('On', 'install')
+                $writer.WriteAttributeString('PreserveModifiedDate', 'yes')
+                $writer.WriteAttributeString('Sequence', [string] (++$sequence))
+                if ($option.IsAppSetting) { $writer.WriteAttributeString('Name', 'value') }
+                if ($action -eq 'create')
+                {
+                    $value = '[' + $option.Property + ']'
+                    if ($option.IsXml) { $value = '<value>' + $value + '</value>' }
+                    $writer.WriteAttributeString('Value', $value)
+                }
+                else { $writer.WriteAttributeString('VerifyPath', 'value') }
+                $writer.WriteEndElement()
+            }
+        }
+        $writer.WriteEndElement()
+        $writer.WriteEndElement()
+    }
+    finally
+    {
+        $writer.Dispose()
+    }
+}
+
 try
 {
     $project = [IO.Path]::GetFullPath("$PSScriptRoot\..\Code\Crypture.csproj")
@@ -56,7 +158,7 @@ try
     $dotnet = (Get-Command dotnet.exe -CommandType Application -ErrorAction Stop).Source
     New-Item -ItemType Directory -Path $stage, $OutputDirectory -Force | Out-Null
 
-    # Restore the latest stable WiX and its matching English installer UI extension.
+    # Restore the latest stable WiX and its matching installer extensions.
     $toolsDirectory = Join-Path $PSScriptRoot '.tools'
     $nugetConfig = Join-Path $stage 'NuGet.Config'
     [IO.File]::WriteAllText($nugetConfig, '<configuration><packageSources><clear />' +
@@ -67,7 +169,10 @@ try
     Push-Location $PSScriptRoot
     try
     {
-        Invoke-Tool $wix @('extension', 'add', "WixToolset.UI.wixext/$wixVersion")
+        foreach ($extension in @('UI', 'Util'))
+        {
+            Invoke-Tool $wix @('extension', 'add', "WixToolset.$extension.wixext/$wixVersion")
+        }
     }
     finally
     {
@@ -76,11 +181,16 @@ try
     $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.UI.wixext\$wixVersion"
     $uiExtension = Get-ChildItem -LiteralPath $extensionDirectory -Recurse -Filter 'WixToolset.UI.wixext.dll' |
         Select-Object -First 1 -ExpandProperty FullName
+    $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.Util.wixext\$wixVersion"
+    $utilExtension = Get-ChildItem -LiteralPath $extensionDirectory -Recurse -Filter 'WixToolset.Util.wixext.dll' |
+        Select-Object -First 1 -ExpandProperty FullName
     $licenseRtf = Join-Path $stage 'License.rtf'
     $licenseText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\Code\Data\License - Crypture.txt'))
     $licenseText = $licenseText.Replace('\', '\\').Replace('{', '\{').Replace('}', '\}')
     $licenseText = $licenseText.Replace("`r", '').Replace("`n", '\par ')
     [IO.File]::WriteAllText($licenseRtf, '{\rtf1\ansi{\fonttbl{\f0 Segoe UI;}}\f0\fs18 ' + $licenseText + '}')
+    $configurationInclude = Join-Path $stage 'Configuration.wxi'
+    Write-InstallerConfiguration (Join-Path $PSScriptRoot '..\Code\App.config') $configurationInclude
 
     if (!$SkipSigning)
     {
@@ -212,10 +322,11 @@ try
         $installerDirectory = Join-Path (Join-Path $stage 'Installers') $architecture
         $installer = Join-Path $OutputDirectory "Crypture-$architecture-$version-installer.msi"
         Invoke-Tool $wix @('build', (Join-Path $PSScriptRoot 'Crypture.wxs'), '-arch', $architecture,
-            '-ext', $uiExtension, '-culture', 'en-us', '-pdbtype', 'none',
+            '-ext', $uiExtension, '-ext', $utilExtension, '-culture', 'en-us', '-pdbtype', 'none',
             '-intermediatefolder', $installerDirectory, '-out', $installer,
             '-d', "ProductName=$ProductName", '-d', "ProductUrl=$ProductUrl", '-d', "Version=$version",
             '-d', "PublishDirectory=$installedDirectory", '-d', "IconPath=$PSScriptRoot\..\Code\Safe.ico",
+            '-d', "ConfigurationInclude=$configurationInclude",
             '-d', "LicenseRtf=$licenseRtf",
             '-d', "DialogBitmap=$PSScriptRoot\Artwork\InstallerDialog.png",
             '-d', "BannerBitmap=$PSScriptRoot\Artwork\InstallerBanner.png")

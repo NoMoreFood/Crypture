@@ -9,6 +9,7 @@
         <Property Id="ARPPRODUCTICON" Value="Crypture.exe" />
         <Property Id="ARPURLINFOABOUT" Value="$(var.ProductUrl)" />
         <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" Before="InstallValidate" Sequence="execute" />
+        <?include $(var.ConfigurationInclude) ?>
 
         <StandardDirectory Id="ProgramFiles6432Folder">
             <Directory Id="INSTALLFOLDER" Name="$(var.ProductName)">
@@ -25,9 +26,11 @@
         <StandardDirectory Id="ProgramMenuFolder" />
         <Feature Id="CryptureFeature" Title="$(var.ProductName)" Level="1">
             <ComponentRef Id="CryptureApplication" />
+            <ComponentRef Id="CryptureConfiguration" />
             <Files Directory="INSTALLFOLDER" Include="$(var.PublishDirectory)\**">
                 <Exclude Files="$(var.PublishDirectory)\Crypture.exe" />
                 <Exclude Files="$(var.PublishDirectory)\e_sqlite3.dll" />
+                <Exclude Files="$(var.PublishDirectory)\Crypture.exe.config" />
             </Files>
         </Feature>
 
