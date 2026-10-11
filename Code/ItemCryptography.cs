@@ -18,8 +18,6 @@ namespace Crypture
     internal static class ItemCryptography
     {
         // Stored item protection formats.
-        internal const long LegacyFormat = 0;
-        internal const long AuthenticatedFormat = 1;
         internal const long PrincipalFormat = 2;
         internal const long CertificateFormat = 3;
         internal const long RecoveryFormat = 4;
@@ -65,9 +63,7 @@ namespace Crypture
             }
         }
 
-        // An absent suite identifies CBC content with format-specific authentication.
         internal static bool HasSupportedContentSuite(Cipher oCipher) =>
-            oCipher.ContentSuite == null && oCipher.CipherParams != FidoFormat ||
             (oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm ||
                 oCipher.ContentSuite == (long)ContentEncryptionSuite.Aes256CbcHmacSha256) &&
             oCipher.CipherParams is PrincipalFormat or CertificateFormat or RecoveryFormat or FidoFormat;
@@ -201,10 +197,7 @@ namespace Crypture
                         oCipher.CipherText.Length > nMaxSize + CbcBlockBytes || oCipher.AuthenticationTag != null) ||
                 ((!bPrincipals && !bRecovery && !bFido || (bRecovery || bFido) && bCertificate) &&
                 (oInstance == null || oCert == null ||
-                oCipher.CipherParams != oInstance.CipherParams ||
-                (oCipher.CipherParams != LegacyFormat && oCipher.CipherParams != AuthenticatedFormat &&
-                    oCipher.CipherParams != CertificateFormat && oCipher.CipherParams != RecoveryFormat &&
-                    oCipher.CipherParams != FidoFormat))))
+                oCipher.CipherParams != oInstance.CipherParams)))
                 throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
             if (bPrincipals) PrincipalProtection.ParseDescriptor(oCipher.ProtectionDescriptor, out _, false);
 
@@ -218,38 +211,21 @@ namespace Crypture
                 if (bFido && !bCertificate) oKeys = FidoKeyProtection.Unwrap(oCipher, oFidoKey);
                 else if (bPrincipals) oKeys = PrincipalProtection.Unprotect(oCipher.ProtectedKey);
                 else if (bRecovery && !bCertificate) oKeys = RecoveryProtection.UnwrapWindowsKeys(oCipher);
-                else if (oCipher.CipherParams == CertificateFormat || bRecovery || bFido)
-                    oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey);
                 else
-                {
-                    using (RSA oRsa = oCert.GetRSAPrivateKey())
-                    {
-                        if (oRsa == null) throw new CryptographicException("The RSA private key is unavailable.");
-                        oKeys = oRsa.Decrypt(oInstance.CipherKey, oCipher.CipherParams == AuthenticatedFormat
-                            ? RSAEncryptionPadding.OaepSHA1 : RSAEncryptionPadding.Pkcs1);
-                    }
-                }
+                    oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey);
 
-                bool bAuthenticated = oCipher.CipherParams != LegacyFormat;
                 byte[] oSignature = bPrincipals || (bRecovery || bFido) && !bCertificate
                     ? oCipher.Signature : oInstance.Signature;
-                if (oKeys.Length != (bAuthenticated ? ContentKeyBytes : AesKeyBytes) || oSignature == null ||
-                    oSignature.Length != (bAuthenticated ? AuthenticationKeyBytes : 0))
+                if (oKeys.Length != ContentKeyBytes || oSignature?.Length != AuthenticationKeyBytes)
                     throw new CryptographicException("The encrypted item is damaged.");
 
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);
-                if (bAuthenticated)
-                {
-                    Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
-                    byte[] oExpected = ComputeSignature(oItem, oAuthenticationKey,
-                        (bRecovery || bFido) && !bCertificate ? null : oInstance);
-                    int nDifference = 0;
-                    for (int nIndex = 0; nIndex < oExpected.Length; nIndex++)
-                        nDifference |= oExpected[nIndex] ^ oSignature[nIndex];
-                    if (nDifference != 0)
-                        throw new CryptographicException(
-                            "The item failed its integrity check. It may have been altered.");
-                }
+                Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
+                byte[] oExpected = ComputeSignature(oItem, oAuthenticationKey,
+                    (bRecovery || bFido) && !bCertificate ? null : oInstance);
+                if (!CryptographicOperations.FixedTimeEquals(oExpected, oSignature))
+                    throw new CryptographicException(
+                        "The item failed its integrity check. It may have been altered.");
 
                 // Release plaintext only after authenticating the metadata, recipient envelope, and content.
                 if (bGcm)
@@ -307,14 +283,7 @@ namespace Crypture
             using (BinaryWriter oWriter = new BinaryWriter(oStream, Encoding.UTF8, true))
             {
                 // Length-prefixed metadata and ciphertext prevent ambiguous authenticated messages.
-                if (oItem.Cipher.ContentSuite != null) oWriter.Write(GetAssociatedData(oItem));
-                else
-                {
-                    oWriter.Write("Crypture");
-                    oWriter.Write(oItem.Cipher.CipherParams);
-                    oWriter.Write(oItem.Label);
-                    oWriter.Write(oItem.ItemType);
-                }
+                oWriter.Write(GetAssociatedData(oItem));
                 oWriter.Write(oItem.Cipher.CipherVector);
                 if (oItem.Cipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm)
                     oWriter.Write(oItem.Cipher.AuthenticationTag);

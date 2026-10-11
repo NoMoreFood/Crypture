@@ -227,10 +227,6 @@ namespace Crypture
                     oReport.Findings.Add(oPolicy);
                     continue;
                 }
-                if (oItem.Cipher.CipherParams != ItemCryptography.LegacyFormat &&
-                    oItem.Cipher.CipherParams != ItemCryptography.AuthenticatedFormat &&
-                    oItem.Cipher.CipherParams != ItemCryptography.CertificateFormat)
-                    oPolicy.Add(HealthStatus.Error, "The saved protection format is not supported.");
                 if (oItem.Instances.Count == 0)
                     oPolicy.Add(HealthStatus.Error, "No certificate recipients are saved for this item.");
                 if (oItem.Instances.Any(i => !oUserIds.Contains(i.UserId)))

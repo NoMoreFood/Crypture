@@ -179,11 +179,11 @@ internal static partial class RegressionTests
                 "Process termination rolls back uncommitted metadata, ciphertext, and recipient changes");
             ValidateConcurrentVault(sDatabase, oCert, oOtherCert);
 
-            // File creation, backup publication, and legacy schema upgrades also have competing callers.
+            // File creation, backup publication, and schema validation also have competing callers.
             oCounts = RunConcurrentClients(sRoot, "create", Enumerable.Range(0, 4).Select(i => "create-" + i));
             Check(oCounts["creations"] == 1 && oCounts["existingFileRejections"] == 3,
                 "Concurrent creation of one Vault filename preserves the single successful creator");
-            DatabaseOperations.EnsureProtectionSchema(Path.Combine(sRoot, "created.cryptdb"));
+            new SqliteVaultStorage(Path.Combine(sRoot, "created.cryptdb")).Validate();
             oCounts = RunConcurrentClients(sRoot, "backup-race",
                 Enumerable.Range(0, 4).Select(i => "backup-race-" + i));
             Check(oCounts["backups"] == 1 && oCounts["existingFileRejections"] == 3 &&
@@ -191,27 +191,11 @@ internal static partial class RegressionTests
                 "Concurrent backups to one filename publish one valid snapshot and clean temporary files");
             ValidateConcurrentVault(Path.Combine(sRoot, "competing-backup.cryptdb"), oCert, oOtherCert);
 
-            string sLegacy = sSchema
-                .Replace("\t[ModifiedByIdentity] nvarchar NULL,\r\n", "")
-                .Replace("\t[ContentSuite] integer NULL,\r\n", "")
-                .Replace("\t[AuthenticationTag] blob NULL,\r\n", "")
-                .Replace("\t[ProtectionDescriptor] nvarchar NULL,\r\n", "")
-                .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
-                .Replace("\t[Signature] blob NULL\r\n", "")
-                .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,",
-                    "[CipherParams] integer DEFAULT '0' NOT NULL")
-                .Replace("DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))", "DEFAULT CURRENT_TIMESTAMP")
-                .Replace("CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [Instance] ([ItemId], [UserId]);\r\n", "")
-                .Replace("CREATE INDEX [IX_Instance_User] ON [Instance] ([UserId]);\r\n", "")
-                .Replace("CREATE INDEX [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);\r\n", "");
-            string sLegacyPath = Path.Combine(sRoot, "legacy.cryptdb");
-            DatabaseOperations.CreateDatabase(sLegacyPath, sLegacy);
-            oCounts = RunConcurrentClients(sRoot, "migration",
-                Enumerable.Range(0, 6).Select(i => "migrate-" + i));
-            CryptureEntities.DatabasePath = sLegacyPath;
-            using (CryptureEntities oContext = new()) oContext.Items.Include(i => i.Cipher).ToList();
-            Check(oCounts["migrations"] == 6 && VaultHasNoPreferences(sLegacyPath),
-                "Six simultaneous legacy Vault opens complete the schema migration without duplicate columns");
+            byte[] oBeforeValidation = File.ReadAllBytes(sDatabase);
+            oCounts = RunConcurrentClients(sRoot, "validation",
+                Enumerable.Range(0, 6).Select(i => "validate-" + i));
+            Check(oCounts["validations"] == 6 && File.ReadAllBytes(sDatabase).SequenceEqual(oBeforeValidation),
+                "Six simultaneous SQLite Vault opens validate the schema without changing the file");
         }
         finally
         {
@@ -319,7 +303,7 @@ internal static partial class RegressionTests
         Dictionary<string, long> oCounts = new[] { "writes", "reads", "overlappingReads", "deletes", "backups",
             "healthChecks", "refreshes", "overlappingRefreshes", "conflicts", "certificateDeletes",
             "missingRecipientRejections", "lastRecipientRejections", "lockTimeouts", "creations",
-            "existingFileRejections", "migrations" }.ToDictionary(k => k, _ => 0L);
+            "existingFileRejections", "validations" }.ToDictionary(k => k, _ => 0L);
         try
         {
             using X509Certificate2 oCert = X509CertificateLoader.LoadPkcs12FromFile(
@@ -355,7 +339,7 @@ internal static partial class RegressionTests
             if (sRole.StartsWith("writer-"))
             {
                 int nWriter = Int32.Parse(sRole[7..]);
-                DatabaseOperations.EnsureProtectionSchema(sDatabase);
+                new SqliteVaultStorage(sDatabase).Validate();
                 for (int nRevision = 1; nRevision <= ConcurrentRevisions; nRevision++)
                 {
                     string sProgress = Path.Combine(sSignals, sRole + ".progress");
@@ -547,10 +531,10 @@ internal static partial class RegressionTests
                     oCounts["existingFileRejections"]++;
                 }
             }
-            else if (sRole.StartsWith("migrate-"))
+            else if (sRole.StartsWith("validate-"))
             {
-                DatabaseOperations.EnsureProtectionSchema(Path.Combine(sRoot, "legacy.cryptdb"));
-                oCounts["migrations"]++;
+                new SqliteVaultStorage(sDatabase).Validate();
+                oCounts["validations"]++;
             }
             else throw new ArgumentException("Unknown concurrency role: " + sRole);
             File.WriteAllText(Path.Combine(sSignals, sRole + ".done"), "");

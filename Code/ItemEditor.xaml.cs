@@ -320,8 +320,7 @@ namespace Crypture
             oTotpPanel.SetActive(bEnabled && ThisItem.ItemType == "totp");
             oContentTitle.Content = ThisItem.ItemType == "totp" ? "TOTP Authenticator" : "Protected Item Content";
             oItemStatus.Text = !bEnabled ? "Locked - decrypt to view or edit this item."
-                : ThisItem.ItemId != 0 && ThisItem.Cipher.CipherParams == ItemCryptography.LegacyFormat
-                ? "Legacy encryption - save this item to add tamper detection." : "Unlocked - content is visible.";
+                : "Unlocked - content is visible.";
             UpdateProtectionControls();
         }
 

@@ -73,7 +73,27 @@ namespace Crypture
             DatabaseOperations.CreateDatabase(sPath, oReader.ReadToEnd());
         }
 
-        public void Validate() => DatabaseOperations.EnsureProtectionSchema(sPath);
+        public void Validate()
+        {
+            // Check the complete schema in a read snapshot without changing the Vault.
+            using SqliteConnection oConnection = (SqliteConnection)OpenHealthConnection();
+            oConnection.Open();
+            using SqliteTransaction oTransaction = oConnection.BeginTransaction(deferred: true);
+            using SqliteCommand oCommand = new SqliteCommand(
+                "SELECT i.[ItemId], i.[ItemType], i.[Label], i.[ModifiedDate], i.[ModifiedBy], " +
+                "i.[ModifiedByIdentity], i.[CreatedDate], c.[ItemId], c.[CipherText], c.[CipherVector], " +
+                "c.[CipherParams], c.[ContentSuite], c.[AuthenticationTag], c.[ProtectionDescriptor], " +
+                "c.[ProtectedKey], c.[Signature], r.[InstanceId], r.[ItemId], r.[UserId], r.[CipherKey], " +
+                "r.[CipherParams], r.[Signature], u.[UserId], u.[Certificate], u.[Sid] " +
+                "FROM [Item] i, [Cipher] c, [Instance] r, [User] u LIMIT 0;",
+                oConnection, oTransaction);
+            try { oCommand.ExecuteNonQuery(); }
+            catch (SqliteException oError) when (oError.SqliteErrorCode == 1)
+            {
+                throw new InvalidDataException("This is not a supported Crypture Vault.", oError);
+            }
+            oTransaction.Commit();
+        }
 
         public void ReadSnapshot(CryptureEntities oContent, Action oRead)
         {

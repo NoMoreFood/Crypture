@@ -242,8 +242,6 @@ namespace Crypture
             ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based")
             : Cipher.CipherParams == ItemCryptography.FidoFormat ? "FIDO2 Security Key"
             : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
-            Cipher.CipherParams == ItemCryptography.LegacyFormat ||
-            Cipher.CipherParams == ItemCryptography.AuthenticatedFormat ||
             Cipher.CipherParams == ItemCryptography.CertificateFormat
             ? "Certificate Based" : "Unsupported") +
             (!String.IsNullOrEmpty(Cipher.EscrowLabel) ? " + Escrow: " + Cipher.EscrowLabel :

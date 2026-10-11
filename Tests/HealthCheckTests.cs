@@ -84,10 +84,11 @@ internal static partial class RegressionTests
                     "INSERT INTO Item (ItemId, Label) VALUES (1, 'Certificate Item'), (2, 'Windows Item'), " +
                     "(3, 'Missing Certificate'), (4, 'Missing Policy'), (5, 'Local Scope'), " +
                     "(6, 'Broken Policy'), (7, 'No Recipients'), (8, 'Unsupported Policy');" +
-                    "INSERT INTO Cipher (ItemId, CipherText, CipherVector, CipherParams, ProtectionDescriptor) " +
-                    "VALUES (1, X'00', X'00', 3, NULL), (2, X'00', X'00', 2, @descriptor), " +
-                    "(3, X'00', X'00', 3, NULL), (5, X'00', X'00', 2, 'LOCAL=user'), " +
-                    "(6, X'00', X'00', 2, 'SID=bad'), (7, X'00', X'00', 3, NULL), (8, X'00', X'00', 99, NULL);" +
+                    "INSERT INTO Cipher (ItemId, CipherText, CipherVector, CipherParams, ContentSuite, " +
+                    "ProtectionDescriptor) VALUES (1, X'00', X'00', 3, 2, NULL), " +
+                    "(2, X'00', X'00', 2, 2, @descriptor), (3, X'00', X'00', 3, 2, NULL), " +
+                    "(5, X'00', X'00', 2, 2, 'LOCAL=user'), (6, X'00', X'00', 2, 2, 'SID=bad'), " +
+                    "(7, X'00', X'00', 3, 2, NULL), (8, X'00', X'00', 99, 2, NULL);" +
                     "INSERT INTO Instance (ItemId, UserId, CipherKey, Signature, CipherParams) " +
                     "VALUES (1, 1, X'00', X'00', 3), (3, 99, X'00', X'00', 3);";
                 oCommand.Parameters.AddWithValue("@cert", oCert.RawData);

@@ -2,8 +2,8 @@ CREATE TABLE [Cipher] (
 	[ItemId] integer  PRIMARY KEY NOT NULL,
 	[CipherText] blob  NOT NULL,
 	[CipherVector] blob  NOT NULL,
-	[CipherParams] integer DEFAULT '0' NOT NULL,
-	[ContentSuite] integer NULL,
+	[CipherParams] integer NOT NULL,
+	[ContentSuite] integer NOT NULL,
 	[AuthenticationTag] blob NULL,
 	[ProtectionDescriptor] nvarchar NULL,
 	[ProtectedKey] blob NULL,
@@ -18,7 +18,7 @@ CREATE TABLE [Instance] (
 	[ItemId]	integer NOT NULL,
 	[UserId]	integer NOT NULL,
 	[CipherKey]	blob NOT NULL,
-	[CipherParams]	integer NOT NULL DEFAULT '0',
+	[CipherParams]	integer NOT NULL,
 	[Signature]	blob NOT NULL
 ,
     FOREIGN KEY ([ItemId])

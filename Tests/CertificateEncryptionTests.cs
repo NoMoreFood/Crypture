@@ -893,7 +893,7 @@ internal static partial class RegressionTests
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
                 sSuiteName + " authenticates the recipient identity");
             oInstance.UserId--;
-            oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.AuthenticatedFormat;
+            oItem.Cipher.CipherParams = oInstance.CipherParams = 1;
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
                 sSuiteName + " rejects a format downgrade");
             oItem.Cipher.CipherParams = oInstance.CipherParams = ItemCryptography.CertificateFormat;
@@ -926,49 +926,6 @@ internal static partial class RegressionTests
         DatabaseOperations.SaveItem(oStored, oPlain, null, PrincipalProtection.LocalUserDescriptor);
         Check(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(nId)).SequenceEqual(oPlain),
             sName + " conversion to Windows protection");
-    }
-
-    private static void EncryptPreviousRsaFormat(Item oItem, byte[] oPlain, X509Certificate2 oCert)
-    {
-        byte[] oKeys = new byte[64];
-        using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oKeys);
-        try
-        {
-            using (Aes oAes = new AesCng())
-            {
-                oAes.Key = oKeys.Take(32).ToArray();
-                using (ICryptoTransform oEncryptor = oAes.CreateEncryptor())
-                    oItem.Cipher = new Cipher
-                    {
-                        CipherParams = 1, CipherVector = oAes.IV,
-                        CipherText = oEncryptor.TransformFinalBlock(oPlain, 0, oPlain.Length)
-                    };
-            }
-            byte[] oSignature;
-            using (HMACSHA256 oHmac = new HMACSHA256(oKeys.Skip(32).ToArray()))
-            using (MemoryStream oStream = new MemoryStream())
-            using (BinaryWriter oWriter = new BinaryWriter(oStream))
-            {
-                oWriter.Write("Crypture");
-                oWriter.Write((long)1);
-                oWriter.Write(oItem.Label);
-                oWriter.Write(oItem.ItemType);
-                oWriter.Write(oItem.Cipher.CipherVector);
-                oWriter.Write(oItem.Cipher.CipherText.Length);
-                oWriter.Write(oItem.Cipher.CipherText);
-                oSignature = oHmac.ComputeHash(oStream.ToArray());
-            }
-            using (RSA oPublic = oCert.GetRSAPublicKey())
-                oItem.Instances.Add(new Instance
-                {
-                    UserId = 1, CipherParams = 1, CipherKey = oPublic.Encrypt(oKeys, RSAEncryptionPadding.OaepSHA1),
-                    Signature = oSignature
-                });
-        }
-        finally
-        {
-            Array.Clear(oKeys, 0, oKeys.Length);
-        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

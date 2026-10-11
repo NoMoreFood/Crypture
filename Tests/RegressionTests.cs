@@ -314,8 +314,8 @@ internal static partial class RegressionTests
             {
                 CipherKey = oPublic.Encrypt(oAes.Key, RSAEncryptionPadding.Pkcs1), Signature = new byte[0]
             };
-            Check(ItemCryptography.Decrypt(oLegacy, oLegacyInstance, oCert).SequenceEqual(oInputs[1]),
-                "Read legacy encryption");
+            RejectCryptography(() => ItemCryptography.Decrypt(oLegacy, oLegacyInstance, oCert),
+                "Reject retired unauthenticated encryption");
         }
     }
 
@@ -442,7 +442,7 @@ internal static partial class RegressionTests
             new byte[64], PrincipalProtection.LocalUserDescriptor);
         Reject(() => ItemCryptography.Decrypt(oProtected), "Reject replacement DPAPI key blob");
         oProtected.Cipher.ProtectedKey = oProtectedKey;
-        oProtected.Cipher.CipherParams = ItemCryptography.AuthenticatedFormat;
+        oProtected.Cipher.CipherParams = 1;
         Reject(() => ItemCryptography.Decrypt(oProtected), "Reject DPAPI format downgrade");
         oProtected.Cipher.CipherParams = ItemCryptography.PrincipalFormat;
         Check(ItemCryptography.Decrypt(oProtected).SequenceEqual(oContent),
@@ -618,84 +618,39 @@ internal static partial class RegressionTests
         Reject(() => DatabaseOperations.CreateDatabase(sBadDatabase, "invalid sql"), "Report schema creation failure");
         Check(!File.Exists(sBadDatabase), "Remove incomplete new Vault");
 
-        string sLegacySchema = sSchema.Replace("\t[ModifiedByIdentity] nvarchar NULL,\r\n", "")
-            .Replace("\t[ContentSuite] integer NULL,\r\n", "")
-            .Replace("\t[AuthenticationTag] blob NULL,\r\n", "")
-            .Replace("\t[ProtectionDescriptor] nvarchar NULL,\r\n", "")
-            .Replace("\t[ProtectedKey] blob NULL,\r\n", "")
-            .Replace("\t[Signature] blob NULL\r\n", "")
-            .Replace("[CipherParams] integer DEFAULT '0' NOT NULL,", "[CipherParams] integer DEFAULT '0' NOT NULL")
-            .Replace("DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))", "DEFAULT CURRENT_TIMESTAMP")
-            .Replace("CREATE UNIQUE INDEX [UX_Instance_Item_User] ON [Instance] ([ItemId], [UserId]);\r\n", "")
-            .Replace("CREATE INDEX [IX_Instance_User] ON [Instance] ([UserId]);\r\n", "")
-            .Replace("CREATE INDEX [IX_Item_ModifiedBy] ON [Item] ([ModifiedBy]);\r\n", "");
-        string sLegacyDatabase = Path.Combine(sDirectory, "legacy-schema.cryptdb");
-        DatabaseOperations.CreateDatabase(sLegacyDatabase, sLegacySchema +
+        // Unsupported schemas are rejected without upgrading columns or deleting stored preferences.
+        string sUnsupportedDatabase = Path.Combine(sDirectory, "unsupported-schema.cryptdb");
+        DatabaseOperations.CreateDatabase(sUnsupportedDatabase,
+            sSchema.Replace("\t[ContentSuite] integer NOT NULL,\r\n", "") +
             "CREATE TABLE PasswordGeneratorSettings (Id integer PRIMARY KEY, MinimumLength integer); " +
             "INSERT INTO PasswordGeneratorSettings VALUES (1, 777);");
-        Item oLegacyItem = new Item { Label = "Before upgrade", ItemType = "text" };
-        byte[] oLegacyPlain = Encoding.Unicode.GetBytes("Preserved legacy content");
-        EncryptPreviousRsaFormat(oLegacyItem, oLegacyPlain, oCert);
-        using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
+        byte[] oUnsupportedOriginal = File.ReadAllBytes(sUnsupportedDatabase);
+        Reject(() => new SqliteVaultStorage(sUnsupportedDatabase).Validate(),
+            "Reject a SQLite Vault missing required encryption columns");
+        Check(File.ReadAllBytes(sUnsupportedDatabase).SequenceEqual(oUnsupportedOriginal),
+            "Rejected SQLite Vaults retain their complete schema and data byte for byte");
+
+        // Validation also succeeds on read-only current Vaults and never changes their bytes.
+        byte[] oStorageOriginal = File.ReadAllBytes(oStorage.DisplayName);
+        FileAttributes oAttributes = File.GetAttributes(oStorage.DisplayName);
+        try
         {
-            DataSource = sLegacyDatabase, Mode = SqliteOpenMode.ReadWrite, Pooling = false
-        }.ConnectionString))
-        {
-            oConnection.Open();
-            using (SqliteCommand oCommand = new SqliteCommand(
-                "INSERT INTO [User] (UserId, Certificate) VALUES (1, @cert); " +
-                "INSERT INTO Item (ItemId, Label, ItemType, CreatedDate, ModifiedDate) " +
-                "VALUES (1, 'Before upgrade', 'text', '2026-01-01 02:03:04', '2026-01-02 03:04:05'); " +
-                "INSERT INTO Cipher (ItemId, CipherParams, CipherText, CipherVector) VALUES (1, 1, @data, @iv); " +
-                "INSERT INTO Instance (ItemId, UserId, CipherParams, CipherKey, Signature) " +
-                "VALUES (1, 1, 1, @key, @tag);", oConnection))
-            {
-                oCommand.Parameters.AddWithValue("@cert", oCert.RawData);
-                oCommand.Parameters.AddWithValue("@data", oLegacyItem.Cipher.CipherText);
-                oCommand.Parameters.AddWithValue("@iv", oLegacyItem.Cipher.CipherVector);
-                oCommand.Parameters.AddWithValue("@key", oLegacyItem.Instances.Single().CipherKey);
-                oCommand.Parameters.AddWithValue("@tag", oLegacyItem.Instances.Single().Signature);
-                oCommand.ExecuteNonQuery();
-            }
+            File.SetAttributes(oStorage.DisplayName, oAttributes | FileAttributes.ReadOnly);
+            oStorage.Validate();
+            oStorage.Validate();
         }
-        // A conflicting recipient must leave the entire upgrade and encrypted data untouched.
-        string sDuplicateDatabase = Path.Combine(sDirectory, "duplicate-recipients.cryptdb");
-        File.Copy(sLegacyDatabase, sDuplicateDatabase);
-        using (SqliteConnection oConnection = new SqliteConnection(new SqliteConnectionStringBuilder
+        finally
         {
-            DataSource = sDuplicateDatabase, Pooling = false
-        }.ConnectionString))
-        {
-            oConnection.Open();
-            using SqliteCommand oCommand = new SqliteCommand("INSERT INTO [Instance] " +
-                "([ItemId], [UserId], [CipherKey], [CipherParams], [Signature]) " +
-                "SELECT [ItemId], [UserId], [CipherKey], [CipherParams], [Signature] FROM [Instance]", oConnection);
-            oCommand.ExecuteNonQuery();
+            File.SetAttributes(oStorage.DisplayName, oAttributes);
         }
-        byte[] oDuplicateOriginal = File.ReadAllBytes(sDuplicateDatabase);
-        Reject(() => DatabaseOperations.EnsureProtectionSchema(sDuplicateDatabase),
-            "Reject a conflicting recipient during the SQLite schema upgrade");
-        Check(File.ReadAllBytes(sDuplicateDatabase).SequenceEqual(oDuplicateOriginal),
-            "A rejected SQLite upgrade preserves duplicate recipient keys and all schema data byte for byte");
-        DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
-        DatabaseOperations.EnsureProtectionSchema(sLegacyDatabase);
-        CryptureEntities.DatabasePath = sLegacyDatabase;
-        Check(VaultHasNoPreferences(sLegacyDatabase),
-            "Legacy Vault migration leaves preferences outside the database");
-        oLegacyItem = DatabaseOperations.LoadItem(1);
-        Check(oLegacyItem.Cipher.ProtectionDescriptor == null && oLegacyItem.ModifiedByIdentity == null,
-            "Upgrade old Vault schema idempotently");
-        Check(ItemCryptography.Decrypt(oLegacyItem, oLegacyItem.Instances.Single(), oCert).SequenceEqual(oLegacyPlain),
-            "Schema migration preserves existing ciphertext and recipient keys");
-        Check(oLegacyItem.CreatedDate == new DateTime(2026, 1, 1, 2, 3, 4) &&
-            oLegacyItem.ModifiedDate == new DateTime(2026, 1, 2, 3, 4, 5) &&
-            oLegacyItem.CreatedDate.Kind == DateTimeKind.Unspecified &&
-            oLegacyItem.ModifiedDate.Kind == DateTimeKind.Unspecified,
-            "Opening a SQLite Vault preserves timestamp values without assuming an unknown offset");
-        TestSqliteRecipientIndexes(sLegacyDatabase, 1, 1);
+        Check(File.ReadAllBytes(oStorage.DisplayName).SequenceEqual(oStorageOriginal),
+            "Repeated read-only SQLite validation preserves the complete Vault");
         string sNotVault = Path.Combine(sDirectory, "not-Vault.db");
         DatabaseOperations.CreateDatabase(sNotVault, "CREATE TABLE Other (Id integer)");
-        Reject(() => DatabaseOperations.EnsureProtectionSchema(sNotVault), "Do not migrate an unrelated Vault");
+        Reject(() => new SqliteVaultStorage(sNotVault).Validate(), "Reject an unrelated SQLite database");
+        string sMissingVault = Path.Combine(sDirectory, "missing.cryptdb");
+        Reject(() => new SqliteVaultStorage(sMissingVault).Validate(), "Reject a missing SQLite Vault");
+        Check(!File.Exists(sMissingVault), "SQLite validation never creates a missing Vault");
 
         CryptureEntities.DatabasePath = sDatabase;
         PasswordOptions oPasswordOptions = new PasswordOptions
@@ -712,7 +667,7 @@ internal static partial class RegressionTests
             oLoadedOptions.ExcludedCharacters == oPasswordOptions.ExcludedCharacters &&
             !oLoadedOptions.RequireEachType && !oLoadedOptions.ExcludeSimilar,
             "Persist every password option including quoted character lists");
-        CryptureEntities.DatabasePath = sLegacyDatabase;
+        CryptureEntities.DatabasePath = oStorage.DisplayName;
         Check(PasswordOptions.LoadPreferences().MaximumLength == 37,
             "Password settings follow the Windows user across Vault files");
         CryptureEntities.DatabasePath = sDatabase;
@@ -974,13 +929,6 @@ internal static partial class RegressionTests
             Check(oDateCell.Text == oItem.ModifiedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
                 "The browser's date column displays saved UTC timestamps in local time");
 
-            // Read a released SQLite timestamp through the same editor bindings.
-            CryptureEntities.DatabasePath = Path.Combine(sDirectory, "legacy-schema.cryptdb");
-            oEditor = new ItemEditor(DatabaseOperations.LoadItem(1));
-            CheckItemDateDisplay(oEditor);
-            oEditor.Close();
-            oEditor = null;
-            CryptureEntities.DatabasePath = sDatabase;
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestVaultOperations(sDirectory);
             TestCertificateCreator();
