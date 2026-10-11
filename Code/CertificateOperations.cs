@@ -170,8 +170,9 @@ namespace Crypture
         internal static CertificateUsageFilter Read()
         {
             Properties.Settings oSettings = Properties.Settings.Default;
-            return new CertificateUsageFilter(oSettings.CertificateKeyUsageInclude, oSettings.CertificateKeyUsageExclude,
-                oSettings.CertificateEnhancedKeyUsageInclude, oSettings.CertificateEnhancedKeyUsageExclude,
+            return new CertificateUsageFilter(oSettings.CertificateKeyUsageInclude,
+                oSettings.CertificateKeyUsageExclude, oSettings.CertificateEnhancedKeyUsageInclude,
+                oSettings.CertificateEnhancedKeyUsageExclude,
                 oSettings.AllowUnrestrictedCertificateKeyUsage, oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage);
         }
 

@@ -181,6 +181,8 @@ internal static partial class RegressionTests
         string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
         byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
         string sConnection = CryptureEntities.ConnectionString;
+        bool bFidoEnabled = Crypture.Properties.Settings.Default.EnableFidoProtection;
+        Func<int> oReadApiVersion = FidoNative.ReadApiVersion;
         ItemEditor oEditor = null;
         SynchronizationContext oPreviousContext = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
@@ -198,11 +200,12 @@ internal static partial class RegressionTests
                 oPlain, null, oFidoKey: oAccess);
             long nId;
             using (CryptureEntities oContext = new CryptureEntities()) nId = oContext.Items.Single().ItemId;
-            oEditor = new ItemEditor(DatabaseOperations.LoadItem(nId))
-            {
-                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oEditor = CreateEditor(DatabaseOperations.LoadItem(nId));
+            oEditor.Left = -20000;
+            oEditor.Top = -20000;
+            oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+            oEditor.ShowActivated = false;
+            oEditor.ShowInTaskbar = false;
             oEditor.Show();
             PumpUntil(() => oEditor.IsLoaded && oEditor.CertificateLoading.IsCompleted);
             ComboBox oMode = (ComboBox)oEditor.FindName("oProtectionMode");
@@ -260,6 +263,35 @@ internal static partial class RegressionTests
                 "Changing from FIDO2 to Windows protection updates the available controls");
             Check(!Utilities.TryOperationAsync(oEditor, () => Task.FromCanceled(new CancellationToken(true)))
                 .GetAwaiter().GetResult(), "Cancelling a security-key operation leaves the editor open");
+
+            // Saved FIDO2 details and recovery must survive unavailable or disabled encryption support.
+            foreach (bool bSupported in new[] { false, true })
+            {
+                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(oEditor, false);
+                oEditor.Close();
+                FidoNative.ReadApiVersion = () => bSupported ? 4 : 0;
+                Crypture.Properties.Settings.Default["EnableFidoProtection"] = !bSupported;
+                oEditor = CreateEditor(new Item { ItemId = nId });
+                oEditor.Left = oEditor.Top = -20000;
+                oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+                oEditor.ShowActivated = oEditor.ShowInTaskbar = false;
+                oEditor.Show();
+                ComboBoxItem oFido = (ComboBoxItem)oEditor.FindName("oFidoProtection");
+                oRecovery = (Button)oEditor.FindName("oFidoRecoveryButton");
+                Check(oFido.Visibility == Visibility.Visible && !oFido.IsEnabled && oRecovery.IsVisible &&
+                    ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex == 2,
+                    "Saved FIDO2 protection remains displayed with recovery when encryption is unavailable");
+                oRecovery.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                PumpUntil(() => ((TextBox)oEditor.FindName("oItemData")).IsEnabled);
+                Check(((TextBox)oEditor.FindName("oItemData")).Text == "Recovered FIDO2 secret" &&
+                    !((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
+                    "Saved recovery decrypts while FIDO2 encryption stays disabled");
+                ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = 0;
+                Check(oFido.Visibility == Visibility.Collapsed &&
+                    ((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
+                    "Changing recovered content to Windows protection hides unavailable FIDO2 and permits saving");
+            }
         }
         finally
         {
@@ -271,6 +303,8 @@ internal static partial class RegressionTests
             }
             File.WriteAllBytes(sConfigPath, oOriginalConfig);
             CryptureEntities.ConnectionString = sConnection;
+            Crypture.Properties.Settings.Default["EnableFidoProtection"] = bFidoEnabled;
+            FidoNative.ReadApiVersion = oReadApiVersion;
             SynchronizationContext.SetSynchronizationContext(oPreviousContext);
         }
     }
@@ -321,23 +355,26 @@ internal static partial class RegressionTests
             // Inspect and close the modal draft on its dispatcher so the actual click handler can finish.
             bool bInspected = false;
             bool bFidoDraft = false;
-            oBrowser.Dispatcher.BeginInvoke(new Action(() =>
+            DispatcherTimer oInspect = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
+            oInspect.Tick += (s, e) =>
             {
                 ItemEditor oDraft = Application.Current.Windows.OfType<ItemEditor>()
-                    .FirstOrDefault(w => w.Owner == oBrowser);
-                if (oDraft != null)
-                {
-                    bFidoDraft = ((ComboBox)oDraft.FindName("oProtectionMode")).SelectedIndex == 2 &&
-                        ((ComboBoxItem)oDraft.FindName("oFidoProtection")).IsEnabled &&
-                        ((TextBlock)oDraft.FindName("oFidoAvailabilityNotice")).Visibility == Visibility.Collapsed &&
-                        ((RibbonButton)oDraft.FindName("oSaveItemButton")).IsEnabled;
-                    oDraft.Close();
-                }
+                    .FirstOrDefault(w => w.Owner == oBrowser && w.IsVisible);
+                if (oDraft == null) return;
+                bFidoDraft = ((ComboBox)oDraft.FindName("oProtectionMode")).SelectedIndex == 2 &&
+                    ((ComboBoxItem)oDraft.FindName("oFidoProtection")).IsEnabled &&
+                    ((RibbonButton)oDraft.FindName("oSaveItemButton")).IsEnabled;
+                oDraft.Close();
                 bInspected = true;
-            }));
-            typeof(ItemBrowser).GetMethod("oAddItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oBrowser, [null, null]);
-            PumpUntil(() => bInspected && !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
+            };
+            oInspect.Start();
+            try
+            {
+                typeof(ItemBrowser).GetMethod("oAddItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(oBrowser, [null, null]);
+                PumpUntil(() => bInspected && !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
+            }
+            finally { oInspect.Stop(); }
             Check(bFidoDraft, "FIDO-only Add New Item opens an editable FIDO2 draft through the click handler");
 
             // The Vault loader enrolls mandatory certificates independently of the certificate mode's UI flag.
@@ -346,7 +383,7 @@ internal static partial class RegressionTests
             oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
             PumpUntil(() => oLoading.IsCompleted);
             Check(oLoading.GetAwaiter().GetResult(), "FIDO-only Vault loads its mandatory certificate policy");
-            oEditor = new ItemEditor();
+            oEditor = CreateEditor();
             PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
             Check(oEditor.UserList.Count == 1 && oEditor.UserListSelected.Count == 1 &&
                 oEditor.UserListSelected.Single().Certificate.SequenceEqual(oCert.RawData) &&
@@ -379,32 +416,28 @@ internal static partial class RegressionTests
 
             // Open the real selector with an unsupported session and retain usable Windows protection.
             oSettings["EnableDpapiNgProtection"] = true;
-            oEditor = new ItemEditor
-            {
-                Width = 920, Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oEditor = CreateEditor();
+            oEditor.Width = 920;
+            oEditor.Left = -20000;
+            oEditor.Top = -20000;
+            oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+            oEditor.ShowActivated = false;
+            oEditor.ShowInTaskbar = false;
             oEditor.Show();
             PumpUntil(() => oEditor.IsLoaded);
             ComboBox oMode = (ComboBox)oEditor.FindName("oProtectionMode");
             ComboBoxItem oFido = (ComboBoxItem)oEditor.FindName("oFidoProtection");
-            TextBlock oAvailability = (TextBlock)oEditor.FindName("oFidoAvailabilityNotice");
             oMode.IsDropDownOpen = true;
-            PumpUntil(() => oFido.IsVisible);
-            Check(!oFido.IsEnabled && oMode.SelectedIndex == 0 &&
-                ToolTipService.GetShowOnDisabled(oFido) && Equals(oFido.ToolTip, oAvailability.Text) &&
-                oAvailability.IsVisible && oAvailability.Text.Contains("Windows session"),
-                "Unsupported FIDO2 remains visible in the selector with a disabled tooltip and explanation");
-            oMode.IsDropDownOpen = false;
             foreach (double nFontSize in new[] { 12.0, 18.0, 24.0 })
             {
                 oEditor.FontSize = nFontSize;
-                oAvailability.BringIntoView();
                 oEditor.UpdateLayout();
-                Check(oAvailability.ActualWidth <= oMode.ActualWidth &&
-                    oAvailability.ActualHeight >= nFontSize && oAvailability.TextWrapping == TextWrapping.Wrap,
-                    "FIDO2 availability text fits the minimum editor width at font size " + nFontSize);
+                Check(!oFido.IsVisible && oFido.Visibility == Visibility.Collapsed && !oFido.IsEnabled &&
+                    oMode.SelectedIndex == 0 && ((ComboBoxItem)oEditor.FindName("oDpapiNgProtection")).IsVisible &&
+                    ((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
+                    "The selector hides unsupported FIDO2 and retains Windows protection, font " + nFontSize);
             }
+            oMode.IsDropDownOpen = false;
             oEditor.Close();
             oEditor = null;
             oSettings["EnableDpapiNgProtection"] = false;
@@ -415,11 +448,10 @@ internal static partial class RegressionTests
             Check(oLoading.GetAwaiter().GetResult() &&
                 !((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
                 "Disabling every protection method keeps Add New Item disabled");
-            oEditor = new ItemEditor();
-            Check(((ComboBoxItem)oEditor.FindName("oFidoProtection")).Visibility == Visibility.Visible &&
-                !((ComboBoxItem)oEditor.FindName("oFidoProtection")).IsEnabled &&
-                ((TextBlock)oEditor.FindName("oFidoAvailabilityNotice")).Text.Contains("Crypture.exe.config"),
-                "Configuration-disabled FIDO2 remains visible and identifies its configuration setting");
+            oEditor = CreateEditor();
+            Check(((ComboBoxItem)oEditor.FindName("oFidoProtection")).Visibility == Visibility.Collapsed &&
+                !((ComboBoxItem)oEditor.FindName("oFidoProtection")).IsEnabled,
+                "The selector hides configuration-disabled FIDO2 for new items");
             oEditor.Close();
             oEditor = null;
             oSettings["EnableFidoProtection"] = true;
@@ -433,11 +465,12 @@ internal static partial class RegressionTests
                 .Invoke(oBrowser, [oSql, oView, true]);
             Check(!((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
                 "FIDO-only settings cannot enable item creation for a SQL Server Vault");
-            oEditor = new ItemEditor();
-            Check(((ComboBoxItem)oEditor.FindName("oFidoProtection")).Visibility == Visibility.Visible &&
+            oEditor = CreateEditor();
+            Check(((ComboBoxItem)oEditor.FindName("oFidoProtection")).Visibility == Visibility.Collapsed &&
                 !((ComboBoxItem)oEditor.FindName("oFidoProtection")).IsEnabled &&
-                ((TextBlock)oEditor.FindName("oFidoAvailabilityNotice")).Text.Contains("file Vaults"),
-                "SQL Server explains why its visible FIDO2 option cannot be selected");
+                ((ComboBoxItem)oEditor.FindName("oLocalUserScope")).Visibility == Visibility.Collapsed &&
+                ((ComboBoxItem)oEditor.FindName("oLocalMachineScope")).Visibility == Visibility.Collapsed,
+                "SQL Server hides FIDO2 and local Windows scopes");
             oEditor.Close();
             oEditor = null;
         }

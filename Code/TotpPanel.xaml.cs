@@ -118,7 +118,8 @@ namespace Crypture
             string sIssuer = oDefaults.Text("Issuer", "").Trim();
             string sAccount = oDefaults.Text("Account", "").Trim();
             if (sIssuer.Length > TotpSecret.MaximumLabelCharacters ||
-                sAccount.Length > TotpSecret.MaximumLabelCharacters || sIssuer.Contains(':') || sAccount.Contains(':') ||
+                sAccount.Length > TotpSecret.MaximumLabelCharacters ||
+                    sIssuer.Contains(':') || sAccount.Contains(':') ||
                 sIssuer.Any(Char.IsControl) || sAccount.Any(Char.IsControl))
                 throw oDefaults.Error("TotpIssuer and TotpAccount must be at most 256 characters, " +
                     "without colons or control characters.");

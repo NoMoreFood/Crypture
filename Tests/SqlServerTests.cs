@@ -237,11 +237,12 @@ internal static partial class RegressionTests
         try
         {
             // Exercise the asynchronous save handler through its busy-state cleanup and window close.
-            oEditor = new ItemEditor
-            {
-                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oEditor = CreateEditor();
+            oEditor.Left = -20000;
+            oEditor.Top = -20000;
+            oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+            oEditor.ShowActivated = false;
+            oEditor.ShowInTaskbar = false;
             oEditor.Show();
             PumpUntil(() => oEditor.IsLoaded && oEditor.CertificateLoading.IsCompleted);
             ((TextBox)oEditor.FindName("oItemLabel")).Text = "SQL Server editor save";
@@ -258,7 +259,7 @@ internal static partial class RegressionTests
                 "Saving a new SQL Server item closes the editor and clears plaintext");
             Item oStored = DatabaseOperations.LoadItem(oEditor.ThisItem.ItemId);
             oEditor.Close();
-            oEditor = new ItemEditor(oStored);
+            oEditor = CreateEditor(oStored);
             CheckItemDateDisplay(oEditor);
             Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
                 oStored.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)) ==
@@ -426,7 +427,8 @@ internal static partial class RegressionTests
         (string Name, Action<SqlCommand> Change)[] oCases =
         {
             ("Ignored escrow recipient format", c => ((DataTable)c.Parameters["@recipients"].Value).Rows
-                .Cast<DataRow>().Single(r => (long)r["UserId"] == oStorage.Escrow.CertificateUserId)["CipherParams"] = 2L),
+                .Cast<DataRow>().Single(r => (long)r["UserId"] == oStorage.Escrow.CertificateUserId)["CipherParams"] =
+                    2L),
             ("Oversized text ciphertext", c => c.Parameters["@cipherText"].Value =
                 new byte[Utilities.MaxItemSize + 1]),
             ("Oversized file ciphertext", c =>

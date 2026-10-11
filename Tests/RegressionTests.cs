@@ -15,11 +15,19 @@ using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Threading.Tasks;
 using Crypture;
 
 internal static partial class RegressionTests
 {
     private static int nChecks;
+
+    private static ItemEditor CreateEditor(Item oItem = null)
+    {
+        var oLoading = Application.Current.Dispatcher.InvokeAsync(() => ItemEditor.CreateAsync(oItem)).Task.Unwrap();
+        PumpUntil(() => oLoading.IsCompleted);
+        return oLoading.GetAwaiter().GetResult();
+    }
 
     private static void Check(bool bCondition, string sName)
     {
@@ -127,7 +135,8 @@ internal static partial class RegressionTests
                     Application oApplication = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                     oApplication.Resources = new ResourceDictionary
                     {
-                        Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml", UriKind.Absolute)
+                        Source = new Uri("pack://application:,,,/Crypture;component/Themes/Controls.xaml",
+                            UriKind.Absolute)
                     };
                     try
                     {
@@ -207,7 +216,8 @@ internal static partial class RegressionTests
 
     private static void TestPortableExtraction(string sDirectory)
     {
-        string[] sArguments = [@"Vault folder\test vault.db", "argument with \"quotes\"", @"trailing\", "Unicode: \u2603"];
+        string[] sArguments = [@"Vault folder\test vault.db",
+            "argument with \"quotes\"", @"trailing\", "Unicode: \u2603"];
         foreach (string sScenario in new[] { "Valid", "Failed", "Retried", "Unwritable" })
         {
             string sRoot = Path.Combine(sDirectory, "Portable", sScenario);
@@ -858,7 +868,7 @@ internal static partial class RegressionTests
             TestPopups();
 
             // Locking must clear secrets even when the Vault cannot be opened.
-            oEditor = new ItemEditor(oItem);
+            oEditor = CreateEditor(oItem);
             oEditor.SetEditingControls(true);
             TextBox oContent = (TextBox)oEditor.FindName("oItemData");
             oContent.Text = "Sensitive text shown only in the test editor";
@@ -878,11 +888,12 @@ internal static partial class RegressionTests
             CryptureEntities.DatabasePath = sDatabase;
 
             // Exercise the recipient list through WPF layout with more than one certificate.
-            oEditor = new ItemEditor(oItem)
-            {
-                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oEditor = CreateEditor(oItem);
+            oEditor.Left = -20000;
+            oEditor.Top = -20000;
+            oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+            oEditor.ShowActivated = false;
+            oEditor.ShowInTaskbar = false;
             oEditor.UserListSelected.Add(new User { Certificate = oEditor.UserListSelected.Single().Certificate });
             oEditor.Show();
             PumpUntil(() => oEditor.IsLoaded);

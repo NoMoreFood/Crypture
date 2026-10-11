@@ -2,6 +2,7 @@ using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Data.Common;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -13,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using Crypture;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
@@ -149,6 +151,61 @@ internal static partial class RegressionTests
                 oBrowser.UpdateLayout();
                 Check(oGrid.RenderSize == oGridSize,
                     "Cancelling a Vault operation preserves the item list size, font " + nFont);
+            }
+            // A real SQLite lock must not freeze either item opening or new-item recipient loading.
+            foreach (Item oSelected in new Item[] { oOriginal, null })
+            foreach (bool bCancel in new[] { false, true })
+            {
+                using SqliteConnection oBlocker = new SqliteConnection(oStorageA.ConnectionString);
+                oBlocker.Open();
+                using SqliteCommand oLock = new SqliteCommand("BEGIN EXCLUSIVE", oBlocker);
+                oLock.ExecuteNonQuery();
+                bool bOpened = false;
+                bool bDataLoaded = false;
+                DispatcherTimer oDismiss = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
+                oDismiss.Tick += (s, e) =>
+                {
+                    ItemEditor oEditor = Application.Current.Windows.OfType<ItemEditor>()
+                        .FirstOrDefault(w => w.Owner == oBrowser && w.IsVisible);
+                    if (oEditor == null) return;
+                    bOpened = true;
+                    bDataLoaded = oEditor.UserList.Count == 1 && (oSelected == null
+                        ? oEditor.ThisItem.ItemId == 0
+                        : oEditor.ThisItem.ItemId == oOriginal.ItemId &&
+                            oEditor.ThisItem.Cipher.CipherText?.Length > 0 && oEditor.UserListSelected.Count == 1);
+                    oEditor.Close();
+                };
+                oDismiss.Start();
+                Task oOpening = oBrowser.Dispatcher.InvokeAsync(() =>
+                    (Task)typeof(ItemBrowser).GetMethod("OpenEditorAsync", nFlags)
+                        .Invoke(oBrowser, new object[] { oSelected })).Task.Unwrap();
+                try
+                {
+                    Stopwatch oWatch = Stopwatch.StartNew();
+                    PumpUntil(() => oWatch.ElapsedMilliseconds >= 300);
+                    Check(!oOpening.IsCompleted && !bOpened && !oGrid.IsEnabled &&
+                        ((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible &&
+                        ((TextBlock)oBrowser.FindName("oDatabaseStatus")).Text == "Loading item...",
+                        "A locked Vault keeps the dispatcher and item-loading feedback responsive");
+                    if (bCancel)
+                        ((Button)oBrowser.FindName("oCancelVaultOperationButton"))
+                            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+                finally
+                {
+                    oLock.CommandText = "ROLLBACK";
+                    oLock.ExecuteNonQuery();
+                }
+                try
+                {
+                    PumpUntil(() => oOpening.IsCompleted);
+                    oOpening.GetAwaiter().GetResult();
+                    PumpUntil(() => !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
+                    Check(oGrid.IsEnabled && (bCancel ? !bOpened : bOpened && bDataLoaded),
+                        bCancel ? "Cancelling item loading prevents a delayed editor from opening" :
+                            "Item loading supplies the full encrypted item and recipients before showing the editor");
+                }
+                finally { oDismiss.Stop(); }
             }
             TestBlockedSqlCancellation(oBrowser, oCert);
 

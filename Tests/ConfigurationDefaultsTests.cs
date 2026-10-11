@@ -131,7 +131,7 @@ internal static partial class RegressionTests
                 ("NewItemRequireAllPrincipals", "True"), ("NewItemIncludeCurrentUser", "False"),
                 ("NewItemIncludeOwnCertificates", "False"), ("TotpAlgorithm", "SHA256"), ("TotpDigits", "8"),
                 ("TotpPeriodSeconds", "60"), ("TotpIssuer", "Team & Operations"), ("TotpAccount", "team@example.com"));
-            ItemEditor oEditor = Keep(new ItemEditor());
+            ItemEditor oEditor = Keep(CreateEditor());
             PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
             Check(oEditor.ThisItem.Label == "Team & Operations" && oEditor.ThisItem.ItemType == "totp" &&
                 ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex == 1 &&
@@ -165,7 +165,7 @@ internal static partial class RegressionTests
             using (CryptureEntities oContext = new CryptureEntities())
                 oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
             Configure(("NewItemType", "Invalid"), ("TotpAlgorithm", "Invalid"));
-            ItemEditor oSaved = Keep(new ItemEditor(oStored));
+            ItemEditor oSaved = Keep(CreateEditor(oStored));
             Check(oSaved.ThisItem.Label == "Saved text" && oSaved.ThisItem.ItemType == "text" &&
                 ((ComboBox)oSaved.FindName("oProtectionMode")).SelectedIndex == 0 &&
                 ((ComboBox)oSaved.FindName("oPrincipalScope")).SelectedIndex == 1,
@@ -174,12 +174,12 @@ internal static partial class RegressionTests
             using (TotpSecret oValue = TotpSecret.Parse(oPanel.ReadUri()))
                 Check(oValue.Algorithm == "SHA512" && oValue.Period == 45,
                     "Saved authenticator settings remain usable despite invalid unused defaults");
-            Invalid(() => Keep(new ItemEditor()), "NewItemType");
+            Invalid(() => Keep(CreateEditor()), "NewItemType");
 
             // Defaults never bypass feature availability or administrator-required certificates.
             Configure(("NewItemProtectionMode", "CertificateBased"), ("NewItemWindowsScope", "Domain"));
             oSettings["EnableCertificateProtection"] = false;
-            ItemEditor oFallback = Keep(new ItemEditor());
+            ItemEditor oFallback = Keep(CreateEditor());
             Check(((ComboBox)oFallback.FindName("oProtectionMode")).SelectedIndex == 0 &&
                 ((ComboBox)oFallback.FindName("oPrincipalScope")).SelectedIndex ==
                     (PrincipalProtection.IsDomainJoined ? 0 : 1),
@@ -198,7 +198,7 @@ internal static partial class RegressionTests
                 oSettings["AutomaticallyAddedCertificatesList"] = new StringCollection
                     { Convert.ToBase64String(oCert.RawData) };
                 Configure(("NewItemProtectionMode", "UserBased"), ("NewItemIncludeOwnCertificates", "False"));
-                ItemEditor oRequired = Keep(new ItemEditor());
+                ItemEditor oRequired = Keep(CreateEditor());
                 PumpUntil(() => oRequired.CertificateLoading.IsCompleted);
                 Check(((ComboBox)oRequired.FindName("oProtectionMode")).SelectedIndex == 1 &&
                     oRequired.UserListSelected.Any(u => u.UserId == oUser.UserId),
@@ -234,7 +234,7 @@ internal static partial class RegressionTests
                     foreach (bool bInclude in new[] { true, false })
                     {
                         Configure(("NewItemIncludeOwnCertificates", bInclude.ToString()));
-                        ItemEditor oOwn = Keep(new ItemEditor());
+                        ItemEditor oOwn = Keep(CreateEditor());
                         PumpUntil(() => oOwn.CertificateLoading.IsCompleted);
                         Check(oOwn.UserListSelected.Any(u => u.UserId == oUser.UserId) == bInclude,
                             "Own-certificate default controls asynchronous private-key selection: " + bInclude);
@@ -249,7 +249,7 @@ internal static partial class RegressionTests
                 }
             }
             Configure(("NewItemType", "File"));
-            ItemEditor oFile = Keep(new ItemEditor());
+            ItemEditor oFile = Keep(CreateEditor());
             PumpUntil(() => oFile.CertificateLoading.IsCompleted);
             Check(((ComboBox)oFile.FindName("oItemTypeSelector")).SelectedIndex == 3 &&
                 !((RibbonButton)oFile.FindName("oSaveItemButton")).IsEnabled &&
@@ -259,11 +259,11 @@ internal static partial class RegressionTests
             Check(oFile.ThisItem.ItemType == "text",
                 "A file draft can switch to a text secret before attaching a file");
             oSettings["ShowItemFileUpload"] = false;
-            ItemEditor oNoUpload = Keep(new ItemEditor());
+            ItemEditor oNoUpload = Keep(CreateEditor());
             Check(oNoUpload.ThisItem.ItemType == "text", "Disabled file uploads override the file-item default");
             oSettings["ShowItemFileUpload"] = bFileUpload;
             Configure(("NewItemType", "RichText"));
-            ItemEditor oRichDefault = Keep(new ItemEditor());
+            ItemEditor oRichDefault = Keep(CreateEditor());
             Check(oRichDefault.ThisItem.ItemType == "richtext" &&
                 ((ComboBox)oRichDefault.FindName("oItemTypeSelector")).SelectedIndex == 1 &&
                 ((RichTextBox)oRichDefault.FindName("oRichItemData")).Visibility == Visibility.Visible,
@@ -344,7 +344,8 @@ internal static partial class RegressionTests
                 oEcdh.KeyUsages.Single(u => u.Selected).Oid == "KeyAgreement",
                 "Automatic certificate usages follow the configured key algorithm");
             Configure(("CertificateGeneratorProvider", "Unavailable"),
-                ("CertificateGeneratorKeyAlgorithm", "Unavailable"), ("CertificateGeneratorHashAlgorithm", "Unavailable"));
+                ("CertificateGeneratorKeyAlgorithm", "Unavailable"),
+                ("CertificateGeneratorHashAlgorithm", "Unavailable"));
             CertWizard oAvailable = Wizard();
             Check(oAvailable.SelectedProvider == sSoftware && oAvailable.SelectedSignature == "RSA" &&
                 (string)((ComboBox)oAvailable.FindName("oHashComboBox")).SelectedItem == "SHA256",
@@ -402,7 +403,8 @@ internal static partial class RegressionTests
                 "SQL Server escrow controls fit above the action buttons");
             var oStart = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath)
             {
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
             };
             oStart.Environment["CRYPTURE_TEST_DEFAULTS_STARTUP"] = "1";
             using (var oProcess = System.Diagnostics.Process.Start(oStart))
@@ -488,7 +490,7 @@ internal static partial class RegressionTests
             Invalid(() => oPanel.ReadUri(), "TotpAccount");
 
             File.Delete(sPath);
-            ItemEditor oBuiltIn = Keep(new ItemEditor());
+            ItemEditor oBuiltIn = Keep(CreateEditor());
             CertWizard oBuiltInWizard = Wizard();
             Check(oBuiltIn.ThisItem.Label == "My New Item" && oBuiltIn.ThisItem.ItemType == "text" &&
                 ((TextBox)oBuiltInWizard.FindName("oKeyLengthTextBox")).Text == "2048" &&

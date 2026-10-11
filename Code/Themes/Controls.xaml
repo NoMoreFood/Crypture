@@ -2,7 +2,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="clr-namespace:Crypture" xmlns:properties="clr-namespace:Crypture.Properties"
     xmlns:ribbon="clr-namespace:System.Windows.Controls.Ribbon;assembly=System.Windows.Controls.Ribbon">
-
     <SolidColorBrush x:Key="Crypture.WindowBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Crypture.PanelBrush" Color="#F6F8FB" />
     <SolidColorBrush x:Key="Crypture.ControlBrush" Color="#FFFFFF" />
@@ -15,7 +14,6 @@
     <SolidColorBrush x:Key="Crypture.AccentTextBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Crypture.DisabledBrush" Color="#687582" />
     <SolidColorBrush x:Key="Crypture.WarningBrush" Color="#9A3412" />
-
     <Pen x:Key="Crypture.VaultLine" Brush="#808080" Thickness="1.5"
         StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
     <Pen x:Key="Crypture.VaultAccentLine" Brush="#808080" Thickness="2"
@@ -79,7 +77,6 @@
             </DrawingGroup>
         </DrawingImage.Drawing>
     </DrawingImage>
-
     <Pen x:Key="Crypture.ActionIconPen" Brush="{DynamicResource Crypture.TextBrush}" Thickness="2"
         StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
     <Pen x:Key="Crypture.PrimaryActionIconPen" Brush="{DynamicResource Crypture.AccentTextBrush}" Thickness="2"
@@ -111,9 +108,7 @@
             </DrawingGroup>
         </DrawingImage.Drawing>
     </DrawingImage>
-
     <local:SecretFontConverter x:Key="Crypture.SecretFontConverter" />
-
     <Style x:Key="Crypture.ControlStyle" TargetType="Control">
         <Setter Property="Background" Value="{DynamicResource Crypture.ControlBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource Crypture.TextBrush}" />
@@ -314,7 +309,8 @@
                         <ToggleButton Focusable="False" ClickMode="Press"
                             Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                            IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent},
+                                Mode=TwoWay}">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
                                     <Border x:Name="Border" Background="{TemplateBinding Background}"
@@ -334,10 +330,12 @@
                             ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                             ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" />
                         <Path Data="M 0,0 L 4,4 L 8,0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
-                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8" IsHitTestVisible="False" />
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8"
+                            IsHitTestVisible="False" />
                         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
                             AllowsTransparency="True" Focusable="False">
-                            <Border MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                            <Border MinWidth="{TemplateBinding ActualWidth}"
+                                MaxHeight="{TemplateBinding MaxDropDownHeight}"
                                 Background="{DynamicResource Crypture.ControlBrush}"
                                 BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="1">
                                 <ScrollViewer CanContentScroll="True">
@@ -633,12 +631,14 @@
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}"
+                        <DataTrigger
+                            Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}"
                             Value="Year">
                             <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden" />
                             <Setter TargetName="PART_YearView" Property="Visibility" Value="Visible" />
                         </DataTrigger>
-                        <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}"
+                        <DataTrigger
+                            Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}"
                             Value="Decade">
                             <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden" />
                             <Setter TargetName="PART_YearView" Property="Visibility" Value="Visible" />
@@ -682,11 +682,14 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ScrollBar">
                     <Grid Background="{TemplateBinding Background}">
-                        <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True"
+                            Orientation="{TemplateBinding Orientation}">
                             <Track.DecreaseRepeatButton>
                                 <RepeatButton x:Name="Decrease" Command="ScrollBar.PageUpCommand" Focusable="False">
                                     <RepeatButton.Template>
-                                        <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.DecreaseRepeatButton>
@@ -709,7 +712,9 @@
                             <Track.IncreaseRepeatButton>
                                 <RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Focusable="False">
                                     <RepeatButton.Template>
-                                        <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
                                     </RepeatButton.Template>
                                 </RepeatButton>
                             </Track.IncreaseRepeatButton>
@@ -728,7 +733,6 @@
             </Setter.Value>
         </Setter>
     </Style>
-
     <!-- Use original Windows 10 glyphs for Windows Server 2016 and later. -->
     <Style x:Key="Crypture.Glyph" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
@@ -788,7 +792,6 @@
         BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
         <Setter Property="ContentTemplate" Value="{StaticResource Crypture.GlyphContent}" />
     </Style>
-
     <ribbon:RibbonControlSizeDefinition x:Key="Crypture.LargeRibbonControl"
         ImageSize="Large" IsLabelVisible="True" />
     <ribbon:RibbonControlSizeDefinition x:Key="Crypture.SmallRibbonControl"

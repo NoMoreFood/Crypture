@@ -85,7 +85,8 @@ internal static partial class RegressionTests
             using TotpSecret oSecret = new TotpSecret(oSeeds[nAlgorithm],
                 sAlgorithm: oAlgorithms[nAlgorithm], nDigits: 8);
             for (int nTime = 0; nTime < oTimes.Length; nTime++)
-                Check(oSecret.GetCode(DateTimeOffset.FromUnixTimeSeconds(oTimes[nTime])) == oExpected[nAlgorithm][nTime],
+                Check(oSecret.GetCode(DateTimeOffset.FromUnixTimeSeconds(oTimes[nTime])) ==
+                    oExpected[nAlgorithm][nTime],
                     "RFC 6238 " + oAlgorithms[nAlgorithm] + " vector at " + oTimes[nTime]);
             string sGenerated = TotpSecret.Generate(oAlgorithms[nAlgorithm]);
             using TotpSecret oGenerated = new TotpSecret(sGenerated, sAlgorithm: oAlgorithms[nAlgorithm]);
@@ -186,7 +187,7 @@ internal static partial class RegressionTests
                 "The Vault contains no plaintext TOTP seed, setup URI, or account");
 
             // Locking must dispose the active key and erase all authenticator plaintext.
-            oEditor = new ItemEditor(oStored);
+            oEditor = CreateEditor(oStored);
             oEditor.SetEditingControls(true);
             TotpPanel oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
             oPanel.LoadUri(Encoding.UTF8.GetString(oPlain));

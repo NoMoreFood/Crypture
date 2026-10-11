@@ -226,8 +226,8 @@ namespace Crypture
                             new CryptographicException(nError));
                     const uint KeyProviderInfoProperty = 2;
                     uint nSize = 0;
-                    bool bPersisted = NativeMethods.CertGetCertificateContextProperty(oCert.Handle, KeyProviderInfoProperty,
-                        IntPtr.Zero, ref nSize);
+                    bool bPersisted = NativeMethods.CertGetCertificateContextProperty(oCert.Handle,
+                        KeyProviderInfoProperty, IntPtr.Zero, ref nSize);
                     return CngKey.Open(oHandle, bPersisted
                         ? CngKeyHandleOpenOptions.None : CngKeyHandleOpenOptions.EphemeralKey);
                 }
@@ -329,7 +329,8 @@ namespace Crypture
                         {
                             if (oPrivate == null || nLength != oPrivate.KeySize / BitsPerByte ||
                                 oEnvelope.Length != nLength + EnvelopeHeaderBytes)
-                                throw new CryptographicException("The RSA private key or recipient envelope is invalid.");
+                                throw new CryptographicException(
+                                    "The RSA private key or recipient envelope is invalid.");
                             return oPrivate.Decrypt(oReader.ReadBytes(nLength), RSAEncryptionPadding.OaepSHA1);
                         }
                     }
@@ -347,7 +348,8 @@ namespace Crypture
                         if (IsEcdh(oAlgorithm))
                         {
                             if (oPrivate.AlgorithmGroup != CngAlgorithmGroup.ECDiffieHellman)
-                                throw new CryptographicException("The certificate's private key only supports signing. " +
+                                throw new CryptographicException(
+                                    "The certificate's private key only supports signing. " +
                                     "Use an ECC certificate with an ECDH private key and Key Agreement permission.");
                             using (ECDiffieHellmanCng oAgreement = new ECDiffieHellmanCng(oPrivate))
                             using (ECDiffieHellmanPublicKey oPublic = ECDiffieHellmanCngPublicKey.FromByteArray(

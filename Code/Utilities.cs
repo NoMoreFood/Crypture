@@ -293,7 +293,8 @@ namespace Crypture
         internal static FontFamily ResolveFont(string sName)
         {
             // Only use installed fonts; missing preferences fall back to Consolas.
-            return FontFamilies.FirstOrDefault(f => String.Equals(f.Source, sName, StringComparison.OrdinalIgnoreCase)) ??
+            return FontFamilies.FirstOrDefault(f => String.Equals(f.Source,
+                sName, StringComparison.OrdinalIgnoreCase)) ??
                 FontFamilies.FirstOrDefault(f => f.Source == "Consolas") ?? new FontFamily("Consolas");
         }
 
@@ -336,12 +337,14 @@ namespace Crypture
 
     public class CheckIfItemIsSelectedConverter : IMultiValueConverter
     {
-        public object Convert(object[] values, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        public object Convert(object[] values, Type targetType,
+            object parameter, System.Globalization.CultureInfo culture)
         {
             return values.Length >= 2 && values[0] is IList oList && oList.Contains(values[1]);
         }
 
-        public object[] ConvertBack(object value, Type[] targetTypes, object parameter, System.Globalization.CultureInfo culture)
+        public object[] ConvertBack(object value, Type[] targetTypes,
+            object parameter, System.Globalization.CultureInfo culture)
         {
             return null;
         }
@@ -356,7 +359,8 @@ namespace Crypture
             return oDate.Kind == DateTimeKind.Utc ? oDate.ToLocalTime() : oDate;
         }
 
-        public object ConvertBack(object value, Type targetTypes, object parameter, System.Globalization.CultureInfo culture)
+        public object ConvertBack(object value, Type targetTypes,
+            object parameter, System.Globalization.CultureInfo culture)
         {
             return null;
         }

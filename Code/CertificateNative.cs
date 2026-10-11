@@ -27,7 +27,8 @@ namespace Crypture
 
         [DllImport("crypt32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
+        internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId,
+            UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
 
         [DllImport("crypt32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

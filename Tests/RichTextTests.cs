@@ -39,11 +39,12 @@ internal static partial class RegressionTests
         try
         {
             // Save formatted content through the editor and reopen the encrypted Vault item.
-            oDraft = new ItemEditor
-            {
-                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oDraft = CreateEditor();
+            oDraft.Left = -20000;
+            oDraft.Top = -20000;
+            oDraft.WindowStartupLocation = WindowStartupLocation.Manual;
+            oDraft.ShowActivated = false;
+            oDraft.ShowInTaskbar = false;
             oDraft.Show();
             PumpUntil(() => oDraft.IsLoaded && oDraft.CertificateLoading.IsCompleted);
             ((TextBox)oDraft.FindName("oItemLabel")).Text = "Saved rich text";
@@ -66,11 +67,12 @@ internal static partial class RegressionTests
             long nItemId;
             using (CryptureEntities oContext = new CryptureEntities())
                 nItemId = oContext.Items.Single().ItemId;
-            oSaved = new ItemEditor(DatabaseOperations.LoadItem(nItemId))
-            {
-                Left = -20000, Top = -20000, WindowStartupLocation = WindowStartupLocation.Manual,
-                ShowActivated = false, ShowInTaskbar = false
-            };
+            oSaved = CreateEditor(DatabaseOperations.LoadItem(nItemId));
+            oSaved.Left = -20000;
+            oSaved.Top = -20000;
+            oSaved.WindowStartupLocation = WindowStartupLocation.Manual;
+            oSaved.ShowActivated = false;
+            oSaved.ShowInTaskbar = false;
             oSaved.Show();
             PumpUntil(() => oSaved.IsLoaded);
             typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)

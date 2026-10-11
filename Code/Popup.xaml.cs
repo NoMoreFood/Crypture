@@ -68,7 +68,8 @@ namespace Crypture
 
         internal static MessageBoxResult Show(string sText, string sCaption,
             MessageBoxButton oButtons = MessageBoxButton.OK, MessageBoxImage oImage = MessageBoxImage.None,
-            MessageBoxResult oDefault = MessageBoxResult.None) => Show(null, sText, sCaption, oButtons, oImage, oDefault);
+            MessageBoxResult oDefault = MessageBoxResult.None) => Show(null,
+                sText, sCaption, oButtons, oImage, oDefault);
 
         internal static MessageBoxResult Show(Window oOwner, string sText, string sCaption,
             MessageBoxButton oButtons = MessageBoxButton.OK, MessageBoxImage oImage = MessageBoxImage.None,

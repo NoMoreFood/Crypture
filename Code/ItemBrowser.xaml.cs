@@ -109,6 +109,7 @@ namespace Crypture
             oSqlServerButton.Visibility = oDefaults.Flag("HideSqlServerOption", false)
                 ? Visibility.Collapsed : Visibility.Visible;
             oAddFromAdButton.IsEnabled = PrincipalProtection.IsDomainJoined;
+            oAddFromAdButton.Visibility = oAddFromAdButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
             RefreshRecentVaults();
 
             // show certificate generator based on settings file
@@ -129,7 +130,8 @@ namespace Crypture
             if (oObject is User)
             {
                 if (CertificateOperations.GetAutomaticCertificates().Where(u => 
-                    StructuralComparisons.StructuralEqualityComparer.Equals(u, ((User) oObject).Certificate)).Count() > 0)
+                    StructuralComparisons.StructuralEqualityComparer.Equals(u,
+                        ((User) oObject).Certificate)).Count() > 0)
                 {
                     Popup.Show(this, "Removal of automatic certificate is prohibited.",
                         "Removal Prohibited", MessageBoxButton.OK, MessageBoxImage.Exclamation);
@@ -332,28 +334,32 @@ namespace Crypture
                 oViewCertButton_Click(sender, e);
         }
 
-        private void oViewItemButton_Click(object sender, RoutedEventArgs e)
+        private async void oViewItemButton_Click(object sender, RoutedEventArgs e)
         {
             Item oItem = oItemDataGrid.SelectedItem as Item;
             if (oItem == null || e is MouseButtonEventArgs &&
-                !(ItemsControl.ContainerFromElement(oItemDataGrid, e.OriginalSource as DependencyObject) is DataGridRow))
+                !(ItemsControl.ContainerFromElement(oItemDataGrid,
+                    e.OriginalSource as DependencyObject) is DataGridRow))
                 return;
-            Utilities.TryOperation(this, () =>
-            {
-                ItemEditor oViewer = new ItemEditor(oItem) { Owner = this };
-                oViewer.ShowDialog();
-                oRefreshItemButton_Click();
-            });
+            await OpenEditorAsync(oItem);
         }
 
-        private void oAddItemButton_Click(object sender, RoutedEventArgs e)
+        private async void oAddItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (!Properties.Settings.Default.EnableDpapiNgProtection &&
                 !Properties.Settings.Default.EnableCertificateProtection &&
                 !FidoKeyProtection.IsEnabled(CryptureEntities.Storage)) return;
+            await OpenEditorAsync();
+        }
+
+        private async Task OpenEditorAsync(Item oItem = null)
+        {
+            ItemEditor oViewer = null;
+            if (!await RunVaultOperationAsync("Loading item...", async oCancellation =>
+                oViewer = await ItemEditor.CreateAsync(oItem, oCancellation))) return;
             Utilities.TryOperation(this, () =>
             {
-                ItemEditor oViewer = new ItemEditor { Owner = this };
+                oViewer.Owner = this;
                 oViewer.ShowDialog();
                 oRefreshItemButton_Click();
             });
@@ -566,6 +572,7 @@ namespace Crypture
             oAddFromStoreButton.IsEnabled = bCanEnroll;
             oAddFromFileButton.IsEnabled = bCanEnroll;
             oAddFromAdButton.IsEnabled = bCanEnroll && PrincipalProtection.IsDomainJoined;
+            oAddFromAdButton.Visibility = oAddFromAdButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
             oMarkEscrowButton.Visibility = oStorage.IsSqlServer && bCanEnroll &&
                 PrincipalProtection.IsDomainJoined
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -729,7 +736,8 @@ namespace Crypture
             if (oPaths.Length == 0)
                 oLoadDatabaseButton.Items.Add(new RibbonMenuItem { Header = "No Recent Vaults", IsEnabled = false });
             oLoadDatabaseButton.Items.Add(new RibbonSeparator());
-            RibbonMenuItem oClear = new RibbonMenuItem { Header = "_Clear Recent Vaults", IsEnabled = oPaths.Length > 0 };
+            RibbonMenuItem oClear = new RibbonMenuItem
+                { Header = "_Clear Recent Vaults", IsEnabled = oPaths.Length > 0 };
             oClear.Click += oClearRecentVaults_Click;
             oLoadDatabaseButton.Items.Add(oClear);
         }

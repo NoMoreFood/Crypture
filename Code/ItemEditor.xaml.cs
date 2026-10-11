@@ -1,4 +1,4 @@
-﻿using System.Windows.Controls.Ribbon;
+using System.Windows.Controls.Ribbon;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;

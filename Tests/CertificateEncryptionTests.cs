@@ -9,6 +9,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Controls.Ribbon;
+using System.Windows;
+using System.Windows.Threading;
 using System.Configuration;
 using System.Xml;
 using System.Formats.Asn1;
@@ -101,7 +103,8 @@ internal static partial class RegressionTests
                 "Certificates must satisfy both the Key Usage and EKU inclusion lists");
             oFilter = new CertificateUsageFilter(" , ; ", "", "", "");
             Check(oFilter.Matches(oClient.RawData) && !oFilter.Matches(new byte[] { 1, 2 }) &&
-                !oFilter.Matches((byte[])null), "Empty filters accept valid certificate data and reject damaged entries");
+                !oFilter.Matches((byte[])null),
+                "Empty filters accept valid certificate data and reject damaged entries");
             Reject(() => new CertificateUsageFilter("MisspelledUsage", "", "", ""),
                 "Reject unknown Key Usage names instead of silently broadening selection");
             Reject(() => new CertificateUsageFilter("", "512", "", ""), "Reject numeric Key Usage filter entries");
@@ -268,9 +271,10 @@ internal static partial class RegressionTests
                 "1.3.6.1.5.5.7.3.2";
             oConfig.SelectSingleNode("//setting[@name='CertificateEnhancedKeyUsageExclude']/value").InnerText =
                 "1.3.6.1.5.5.7.3.3";
-            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateKeyUsage']/value").InnerText = "False";
-            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateEnhancedKeyUsage']/value").InnerText =
+            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateKeyUsage']/value").InnerText =
                 "False";
+            oConfig.SelectSingleNode("//setting[@name='AllowUnrestrictedCertificateEnhancedKeyUsage']/value")
+                .InnerText = "False";
             oConfig.SelectSingleNode("//appSettings/add[@key='RecoveryCertificateBase64']/@value").Value =
                 bRecovery ? Convert.ToBase64String(oRecipient.Certificate) : "";
             File.WriteAllText(sConfigPath, oConfig.OuterXml, new UTF8Encoding(false));
@@ -289,7 +293,8 @@ internal static partial class RegressionTests
                 oSettings.CertificateKeyUsageExclude == "KeyAgreement" &&
                 oSettings.CertificateEnhancedKeyUsageInclude == "1.3.6.1.5.5.7.3.2" &&
                 oSettings.CertificateEnhancedKeyUsageExclude == "1.3.6.1.5.5.7.3.3" &&
-                !oSettings.AllowUnrestrictedCertificateKeyUsage && !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
+                !oSettings.AllowUnrestrictedCertificateKeyUsage &&
+                !oSettings.AllowUnrestrictedCertificateEnhancedKeyUsage,
                 "Adjacent config supplies all six certificate usage defaults");
             Check(oSettings.ShowExpiredCertificates && oSettings.ShowUntrustedCertificates,
                 "Adjacent config supplies both certificate visibility settings");
@@ -297,7 +302,8 @@ internal static partial class RegressionTests
             // A fresh process also verifies the real application's startup config path.
             var oStart = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath)
             {
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
             };
             oStart.Environment["CRYPTURE_TEST_CONFIG_STARTUP"] = "1";
             using (var oProcess = System.Diagnostics.Process.Start(oStart))
@@ -313,7 +319,8 @@ internal static partial class RegressionTests
                     oOutput.GetAwaiter().GetResult().Trim() + oErrors.GetAwaiter().GetResult().Trim());
             }
             CertificateUsageFilter oFilter = CertificateUsageFilter.Read();
-            Check(!oFilter.Matches(oRecipient.Certificate), "Configured usage filters exclude unrelated new recipients");
+            Check(!oFilter.Matches(oRecipient.Certificate),
+                "Configured usage filters exclude unrelated new recipients");
             using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oRecipient.Certificate))
             {
                 Check(CertificateOperations.CheckCertificateStatus(oCert),
@@ -323,8 +330,10 @@ internal static partial class RegressionTests
             }
             Reload("DigitalSignature", bRecovery: true);
             Item oRecoveryItem = new Item { Label = "Filtered Certificate Recovery", ItemType = "text" };
-            byte[] oSecret = Encoding.Unicode.GetBytes("Recovery remains available under restrictive selection filters.");
-            DatabaseOperations.SaveItem(oRecoveryItem, oSecret, Array.Empty<User>(), PrincipalProtection.LocalUserDescriptor);
+            byte[] oSecret =
+                Encoding.Unicode.GetBytes("Recovery remains available under restrictive selection filters.");
+            DatabaseOperations.SaveItem(oRecoveryItem, oSecret,
+                Array.Empty<User>(), PrincipalProtection.LocalUserDescriptor);
             using (CryptureEntities oContent = new CryptureEntities())
                 oRecoveryItem = DatabaseOperations.LoadItem(oContent.Items.Single(i =>
                     i.Label == "Filtered Certificate Recovery").ItemId);
@@ -435,16 +444,27 @@ internal static partial class RegressionTests
         bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
         bool bRevocation = oSettings.PerformCertificateRevocationCheck;
         bool bUntrusted = oSettings.ShowUntrustedCertificates;
+        bool bExpired = oSettings.ShowExpiredCertificates;
         var oAutomatic = oSettings.AutomaticallyAddedCertificatesList;
         try
         {
             oSettings.AllowSelfSignedCertificates = true;
             oSettings.PerformCertificateRevocationCheck = false;
             oSettings["ShowUntrustedCertificates"] = true;
+            oSettings["ShowExpiredCertificates"] = true;
             oSettings["AutomaticallyAddedCertificatesList"] = new System.Collections.Specialized.StringCollection();
             foreach (string sScenario in new[] { "new", "existing", "save", "close" })
             {
                 ItemEditor oEditor = null;
+                string sSaveError = null;
+                DispatcherTimer oDismiss = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
+                oDismiss.Tick += (s, e) =>
+                {
+                    Popup oError = Application.Current.Windows.OfType<Popup>().FirstOrDefault();
+                    if (oError == null) return;
+                    sSaveError = ((TextBox)oError.FindName("oMessage")).Text;
+                    oError.Close();
+                };
                 var oListener = new TcpListener(IPAddress.Loopback, 0);
                 oListener.Start();
                 using (var oCancellation = new CancellationTokenSource())
@@ -510,7 +530,8 @@ internal static partial class RegressionTests
                                 DatabaseOperations.CreateDatabase(sPath,
                                     File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
                                 CryptureEntities.DatabasePath = sPath;
-                                User oUser = new User { Certificate = sScenario == "save" ? oWarm.RawData : oLeaf.RawData };
+                                User oUser = new User { Certificate =
+                                    sScenario == "save" ? oWarm.RawData : oLeaf.RawData };
                                 using (CryptureEntities oContext = new CryptureEntities())
                                 {
                                     oContext.Users.Add(oUser);
@@ -527,7 +548,7 @@ internal static partial class RegressionTests
                                         oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
                                 }
                                 var oWatch = Stopwatch.StartNew();
-                                oEditor = oStored == null ? new ItemEditor() : new ItemEditor(oStored);
+                                oEditor = oStored == null ? CreateEditor() : CreateEditor(oStored);
                                 Check(oWatch.Elapsed < TimeSpan.FromSeconds(3),
                                     sScenario + " editor construction does not wait for certificate network lookups");
                                 oEditor.SetEditingControls(true);
@@ -537,6 +558,7 @@ internal static partial class RegressionTests
                                     "oAddCertDropDown");
                                 if (sScenario == "save")
                                 {
+                                    oDismiss.Start();
                                     PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
                                     oEditor.CertificateLoading.GetAwaiter().GetResult();
                                     oEditor.UserList.Single().Certificate = oLeaf.RawData;
@@ -582,15 +604,46 @@ internal static partial class RegressionTests
                                 oRelease.SetResult(true);
                                 if (sScenario == "save")
                                 {
+                                    PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy",
+                                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oEditor));
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                        Check(sSaveError?.Contains("not valid for encryption") == true &&
+                                            !oContext.Items.Any() && oSave.IsEnabled &&
+                                            ((TextBox)oEditor.FindName("oItemData")).Text == "Saved content",
+                                            "Untrusted visibility cannot authorize saving; the draft is retained");
+
+                                    // Expiry visibility must also preserve the stricter policy used by actual saves.
+                                    using X509Certificate2 oExpired = Certificate(oLeafKey, "Expired editor",
+                                        DateTimeOffset.Now.AddDays(-3), DateTimeOffset.Now.AddDays(-2));
+                                    oEditor.UserList.Single().Certificate = oExpired.RawData;
+                                    sSaveError = null;
+                                    oEditor.Dispatcher.InvokeAsync(() =>
+                                        oSave.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+                                    PumpUntil(() => sSaveError != null && !(bool)typeof(ItemEditor).GetField("bBusy",
+                                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oEditor));
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                        Check(sSaveError.Contains("not valid for encryption") &&
+                                            !oContext.Items.Any() && oSave.IsEnabled &&
+                                            ((TextBox)oEditor.FindName("oItemData")).Text == "Saved content",
+                                            "Expired visibility cannot authorize saving; the draft is retained");
+
+                                    // Replacing an invalid recipient must allow the unchanged draft to be saved.
+                                    oEditor.UserList.Single().Certificate = oWarm.RawData;
+                                    using (CryptureEntities oContext = new CryptureEntities())
+                                    {
+                                        oContext.Users.Find(oUser.UserId).Certificate = oWarm.RawData;
+                                        oContext.SaveChanges();
+                                    }
+                                    oEditor.Dispatcher.InvokeAsync(() =>
+                                        oSave.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
                                     PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted",
                                         BindingFlags.Instance | BindingFlags.NonPublic)
                                         .GetValue(oEditor));
                                     using (CryptureEntities oContext = new CryptureEntities())
                                         oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
                                     Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
-                                        oStored.Instances.Single(), oLeaf)) == "Saved content",
-                                        "Saving completes after background certificate validation " +
-                                        "and preserves content");
+                                        oStored.Instances.Single(), oWarm)) == "Saved content",
+                                        "A valid replacement recipient saves the preserved draft");
                                 }
                                 else
                                 {
@@ -604,6 +657,7 @@ internal static partial class RegressionTests
                         }
                         finally
                         {
+                            oDismiss.Stop();
                             if (oEditor != null)
                             {
                                 typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance |
@@ -626,6 +680,7 @@ internal static partial class RegressionTests
             oSettings.AllowSelfSignedCertificates = bSelfSigned;
             oSettings.PerformCertificateRevocationCheck = bRevocation;
             oSettings["ShowUntrustedCertificates"] = bUntrusted;
+            oSettings["ShowExpiredCertificates"] = bExpired;
             oSettings["AutomaticallyAddedCertificatesList"] = oAutomatic;
         }
     }
@@ -745,7 +800,8 @@ internal static partial class RegressionTests
                 CertificateRequest oIssuerRequest = new CertificateRequest("CN=Test Issuer", oIssuer,
                     HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 oIssuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-                oIssuerRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+                oIssuerRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign,
+                    true));
                 using (X509Certificate2 oIssuerCertificate = oIssuerRequest.CreateSelfSigned(
                     DateTimeOffset.Now.AddDays(-2), DateTimeOffset.Now.AddDays(2)))
                 using (X509Chain oChain = new X509Chain())
