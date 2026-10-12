@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -39,28 +38,12 @@ namespace Crypture
         internal static ContentEncryptionSuite ReadContentEncryptionSuite()
         {
             // Read the adjacent deployment policy at the save boundary without affecting stored-item access.
-            string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
-            try
-            {
-                Configuration oConfig = ConfigurationManager.OpenMappedExeConfiguration(
-                    new ExeConfigurationFileMap { ExeConfigFilename = sPath }, ConfigurationUserLevel.None);
-                string sSuite = oConfig.AppSettings.Settings["ContentEncryptionSuite"]?.Value.Trim();
-                ContentEncryptionSuite nSuite = sSuite switch
-                {
-                    null or nameof(ContentEncryptionSuite.Aes256Gcm) => ContentEncryptionSuite.Aes256Gcm,
-                    nameof(ContentEncryptionSuite.Aes256CbcHmacSha256) => ContentEncryptionSuite.Aes256CbcHmacSha256,
-                    _ => throw new InvalidOperationException("The ContentEncryptionSuite setting in " + sPath +
-                        " must be Aes256Gcm or Aes256CbcHmacSha256.")
-                };
-                if (nSuite == ContentEncryptionSuite.Aes256Gcm && !AesGcm.IsSupported)
-                    throw new PlatformNotSupportedException("AES-256-GCM is unavailable on this computer.");
-                return nSuite;
-            }
-            catch (ConfigurationErrorsException oError)
-            {
-                throw new InvalidOperationException("The encryption settings in " + sPath +
-                    " could not be read. Correct the configuration before saving.", oError);
-            }
+            ContentEncryptionSuite nSuite = Enum.Parse<ContentEncryptionSuite>(new ConfigurationDefaults().Choice(
+                "ContentEncryptionSuite", nameof(ContentEncryptionSuite.Aes256Gcm),
+                Enum.GetNames<ContentEncryptionSuite>()));
+            if (nSuite == ContentEncryptionSuite.Aes256Gcm && !AesGcm.IsSupported)
+                throw new PlatformNotSupportedException("AES-256-GCM is unavailable on this computer.");
+            return nSuite;
         }
 
         internal static bool HasSupportedContentSuite(Cipher oCipher) =>
@@ -72,8 +55,7 @@ namespace Crypture
             string sProtectionDescriptor = null, string sRecoveryDescriptor = null,
             ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm, FidoKeyAccess oFidoKey = null)
         {
-            int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
-                ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
+            int nMaxSize = oItem.IsFile ? Utilities.MaxCompressedItemSize : Utilities.MaxItemSize;
             if (oPlainText == null || oPlainText.Length > nMaxSize)
                 throw new InvalidDataException("Items must be no larger than 64 MB.");
             if (nContentSuite is not (ContentEncryptionSuite.Aes256Gcm or ContentEncryptionSuite.Aes256CbcHmacSha256))
@@ -95,7 +77,7 @@ namespace Crypture
             byte[] oAuthenticationKey = new byte[AuthenticationKeyBytes];
             try
             {
-                using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oKeys);
+                RandomNumberGenerator.Fill(oKeys);
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);
                 Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
                 oItem.Cipher = new Cipher
@@ -180,8 +162,7 @@ namespace Crypture
             FidoKeyAccess oFidoKey = null)
         {
             Cipher oCipher = oItem.Cipher;
-            int nMaxSize = oItem.ItemType is "text" or "richtext" or "totp"
-                ? Utilities.MaxItemSize : Utilities.MaxCompressedItemSize;
+            int nMaxSize = oItem.IsFile ? Utilities.MaxCompressedItemSize : Utilities.MaxItemSize;
             bool bPrincipals = oCipher?.CipherParams == PrincipalFormat;
             bool bRecovery = oCipher?.CipherParams == RecoveryFormat;
             bool bFido = oCipher?.CipherParams == FidoFormat;

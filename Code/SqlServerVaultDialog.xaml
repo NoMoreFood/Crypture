@@ -2,7 +2,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="SQL Server Vault" Width="620" MinWidth="560" SizeToContent="Height"
-    WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+    WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False"
+    FocusManager.FocusedElement="{Binding ElementName=oServer}"
     Background="{DynamicResource Crypture.WindowBrush}"
     Foreground="{DynamicResource Crypture.TextBrush}">
     <Grid Margin="20">
@@ -28,9 +29,9 @@
         <TextBox x:Name="oDatabase" Grid.Row="2" Grid.Column="1" MinHeight="28" Margin="0,0,0,8"
             AutomationProperties.Name="SQL Server database name" />
         <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,6,0,0">
-            <CheckBox x:Name="oTrustCertificate" Content="Trust the server certificate"
+            <CheckBox x:Name="oTrustCertificate" Content="_Trust the server certificate"
                 ToolTip="Use only when you have verified the SQL Server by another means." />
-            <CheckBox x:Name="oCreateDatabase" Margin="0,10,0,0" Content="Create a new database"
+            <CheckBox x:Name="oCreateDatabase" Margin="0,10,0,0" Content="Create a _new database"
                 ToolTip="Requires CREATE DATABASE permission. Existing databases are never overwritten." />
         </StackPanel>
         <Border x:Name="oEscrowPanel" Grid.Row="4" Grid.ColumnSpan="2" Margin="0,12,0,0"
@@ -39,7 +40,7 @@
             <StackPanel>
                 <TextBlock Text="Emergency recovery identity (required for a new Vault)" FontWeight="SemiBold" />
                 <DockPanel Margin="0,8,0,0">
-                    <Button x:Name="oChooseEscrow" Content="Choose..." DockPanel.Dock="Right"
+                    <Button x:Name="oChooseEscrow" Content="C_hoose..." DockPanel.Dock="Right"
                         MinWidth="90" MinHeight="28" Margin="8,0,0,0" Click="oChooseEscrow_Click" />
                     <ComboBox x:Name="oEscrowType" MinHeight="28" SelectedIndex="0"
                         SelectionChanged="oEscrowType_SelectionChanged" AutomationProperties.Name="Escrow type">
@@ -54,13 +55,12 @@
         </Border>
         <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,16" TextWrapping="Wrap"
             Foreground="{DynamicResource Crypture.MutedBrush}">
-            <Run Text="Uses your Windows account over an encrypted connection. Item visibility follows saved " />
+            <Run Text="Uses your Windows account over an encrypted connection. Item visibility follows saved" />
             <Run Text="certificate recipients and Windows protection SIDs. Certificates are shared in the Vault." />
         </TextBlock>
         <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="oConnect" Width="100" MinHeight="30" Margin="0,0,8,0" Content="Connect"
-                IsDefault="True"
-                Click="oConnect_Click" />
+            <Button x:Name="oConnect" Width="100" MinHeight="30" Margin="0,0,8,0" Content="_Connect"
+                IsDefault="True" Click="oConnect_Click" />
             <Button Width="100" MinHeight="30" Content="Cancel" IsCancel="True" />
         </StackPanel>
     </Grid>

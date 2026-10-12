@@ -1,4 +1,5 @@
 using System.Windows.Controls.Ribbon;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -11,7 +12,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -44,8 +44,8 @@ namespace Crypture
         private const int AnyPrincipalIndex = 0;
         private const int AllPrincipalsIndex = 1;
 
-        public Item ThisItem { get; set; } = new Item();
-        public ObservableCollection<User> UserList { get; set; } = new ObservableCollection<User>();
+        public Item ThisItem { get; set; }
+        public ObservableCollection<User> UserList { get; set; }
         public ObservableCollection<User> UserListSelected { get; } = new ObservableCollection<User>();
         public byte[] BinaryItemData { get; set; }
         private bool bLoading = true;
@@ -69,14 +69,45 @@ namespace Crypture
         private long? nStoredModifiedBy;
         private readonly bool bIncludeOwnCertificates = true;
 
-        public ItemEditor(bool bNewItem = true)
+        internal static async Task<ItemEditor> CreateAsync(Item oItem = null,
+            CancellationToken oCancellation = default)
+        {
+            // Read the saved item and its recipient choices before creating the window on the dispatcher.
+            IVaultStorage oStorage = CryptureEntities.Storage;
+            bool bLoadUsers = oItem != null || Properties.Settings.Default.EnableCertificateProtection ||
+                CertificateOperations.GetAutomaticCertificates().Count != 0;
+            var oData = await Task.Run(async () =>
+            {
+                using CryptureEntities oContent = new CryptureEntities(oStorage);
+                Item oStored = oItem == null ? null : await oContent.Items.Include(i => i.User)
+                    .Include(i => i.Cipher).Include(i => i.Instances).ThenInclude(j => j.User)
+                    .SingleOrDefaultAsync(i => i.ItemId == oItem.ItemId, oCancellation);
+                if (oItem != null && oStored == null)
+                    throw new InvalidOperationException("This item has been removed. Refresh the list.");
+                return (Item: oStored, Users: bLoadUsers
+                    ? await oContent.Users.ToListAsync(oCancellation) : new List<User>());
+            }, oCancellation);
+            oCancellation.ThrowIfCancellationRequested();
+            return new ItemEditor(oData.Item, oData.Users);
+        }
+
+        private ItemEditor(Item oItem, List<User> oUsers)
         {
             // Apply configured choices only to new items; saved items supply their own settings.
+            bool bNewItem = oItem == null;
+            ThisItem = oItem ?? new Item();
+            UserList = new ObservableCollection<User>(oUsers);
             ConfigurationDefaults oDefaults = bNewItem ? new ConfigurationDefaults("NewItem") : null;
-            ThisItem.Label = oDefaults?.Text("Label", "My New Item") ?? "My New Item";
-            string sType = oDefaults?.Choice("Type", "Text", "Text", "RichText", "Totp", "File") ?? "Text";
-            ThisItem.ItemType = sType == "RichText" ? "richtext" : sType == "Totp" ? "totp" : sType == "File" &&
-                Properties.Settings.Default.ShowItemFileUpload ? "" : "text";
+            if (bNewItem)
+            {
+                string sType = oDefaults.Choice("Type", "Text", "Text", "RichText", "Totp", "File");
+                ThisItem.Label = oDefaults.Text("Label", "My New Item");
+                ThisItem.ItemType = sType == "RichText" ? "richtext" : sType == "Totp" ? "totp" : sType == "File" &&
+                    Properties.Settings.Default.ShowItemFileUpload ? "" : "text";
+            }
+            sStoredLabel = ThisItem.Label;
+            sStoredItemType = ThisItem.ItemType;
+            nStoredModifiedBy = ThisItem.ModifiedBy;
             string sProtection = oDefaults?.Choice("ProtectionMode", "Automatic",
                 "Automatic", "UserBased", "CertificateBased", "Fido2") ?? "Automatic";
             string sScope = oDefaults?.Choice("WindowsScope", "Automatic",
@@ -112,8 +143,8 @@ namespace Crypture
                 new SortDescription(nameof(User.Name), ListSortDirection.Ascending));
 
             // Load required certificate recipients even when certificate-based encryption is disabled.
-            if (bNewItem && (bCertificatesEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0))
-                LoadUsers(true);
+            if (!bNewItem || bCertificatesEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
+                LoadUsers(bNewItem);
             bool bSqlWindowsProtection = !CryptureEntities.Storage.IsSqlServer || bDomainJoined;
             oDpapiNgProtection.IsEnabled = bDpapiNgEnabled && bSqlWindowsProtection;
             oDpapiNgProtection.Visibility = oDpapiNgProtection.IsEnabled
@@ -121,17 +152,10 @@ namespace Crypture
             oCertificateProtection.IsEnabled = bCertificatesEnabled;
             oCertificateProtection.Visibility = bCertificatesEnabled ? Visibility.Visible : Visibility.Collapsed;
 
-            // Keep FIDO2 discoverable and explain why the current context cannot use it.
             oFidoProtection.IsEnabled = bFidoEnabled;
-            oFidoAvailabilityNotice.Text = !Properties.Settings.Default.EnableFidoProtection
-                ? "FIDO2 protection is disabled in Crypture.exe.config."
-                : CryptureEntities.Storage.IsSqlServer
-                ? "FIDO2 protection is available only for file Vaults."
-                : !bFidoEnabled ? "FIDO2 encryption is unavailable in this Windows session. " +
-                    "Remote Desktop can limit security key support." : null;
-            oFidoProtection.ToolTip = bFidoEnabled ? null : oFidoAvailabilityNotice.Text;
             oPrincipalList.ItemsSource = PrincipalList;
             oDomainScope.IsEnabled = bDomainJoined;
+            oDomainScope.Visibility = bDomainJoined ? Visibility.Visible : Visibility.Collapsed;
             oPrincipalScope.SelectedIndex = !bDomainJoined || String.Equals(Environment.UserDomainName,
                 Environment.MachineName, StringComparison.OrdinalIgnoreCase) ? LocalUserScopeIndex : DomainScopeIndex;
             if (bNewItem)
@@ -158,36 +182,25 @@ namespace Crypture
             {
                 oLocalUserScope.IsEnabled = false;
                 oLocalMachineScope.IsEnabled = false;
+                oLocalUserScope.Visibility = Visibility.Collapsed;
+                oLocalMachineScope.Visibility = Visibility.Collapsed;
                 oPrincipalScope.SelectedIndex = bDomainJoined ? DomainScopeIndex : -1;
                 if (!bDomainJoined && oProtectionMode.SelectedIndex == UserProtectionIndex)
                     oProtectionMode.SelectedIndex = bCertificatesEnabled ? CertificateProtectionIndex : -1;
             }
 
-            // show certificate generator based on settings file
+            // show file upload based on settings file
             oUploadAFile.Visibility = Properties.Settings.Default.ShowItemFileUpload
                 ? Visibility.Visible : Visibility.Collapsed;
 
             // set editing controls
+            if (!bNewItem) LoadProtection();
             SetEditingControls(bNewItem);
             bLoading = false;
         }
 
-        public ItemEditor(Item oItem) : this(false)
-        {
-            ThisItem = DatabaseOperations.LoadItem(oItem.ItemId);
-            sStoredLabel = ThisItem.Label;
-            sStoredItemType = ThisItem.ItemType;
-            nStoredModifiedBy = ThisItem.ModifiedBy;
-            DataContext = ThisItem;
-            LoadUsers(false);
-            LoadProtection();
-            SetEditingControls(false);
-        }
-
         private void LoadUsers(bool bNewItem)
         {
-            using (CryptureEntities oContent = new CryptureEntities())
-                UserList = new ObservableCollection<User>(oContent.Users.ToList());
             List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
 
             // Filter new choices while retaining saved and administrator-required recipients.
@@ -287,7 +300,7 @@ namespace Crypture
             oSaveItemButton.Visibility = bEnabled ? Visibility.Visible : Visibility.Collapsed;
             oItemData.IsEnabled = bEnabled && bPlainText;
             oRichItemData.IsEnabled = bEnabled && bRichText;
-            oItemTypeSelector.IsEnabled = bEnabled && (ThisItem.ItemType is "text" or "richtext" or "totp" ||
+            oItemTypeSelector.IsEnabled = bEnabled && (!ThisItem.IsFile ||
                 ThisItem.ItemId == 0 && BinaryItemData == null);
             bool bWasLoading = bLoading;
             bLoading = true;
@@ -311,7 +324,7 @@ namespace Crypture
             oRichTextToolbar.Visibility = bEnabled && bRichText ? Visibility.Visible : Visibility.Collapsed;
             oCopyContentButton.Visibility = oTextContentPanel.Visibility;
             oCopyContentButton.CommandTarget = bRichText ? oRichItemData : oItemData;
-            oDownloadPanel.Visibility = bEnabled && ThisItem.ItemType is not ("text" or "richtext" or "totp")
+            oDownloadPanel.Visibility = bEnabled && ThisItem.IsFile
                 ? Visibility.Visible : Visibility.Collapsed;
             oDownloadTextBox.Content = BinaryItemData == null && ThisItem.ItemId == 0
                 ? "Choose File Attachment..." : "Save Decrypted File...";
@@ -380,7 +393,8 @@ namespace Crypture
                         // error if there are no selected users
                         if (!bFido && UserListSelected.Count == 0 &&
                             RecoveryPolicy.ReadForStorage(CryptureEntities.Storage).Certificate == null)
-                            throw new InvalidOperationException("Select at least one recipient using Share With.");
+                            throw new InvalidOperationException(
+                                "Select at least one recipient using Choose Recipients.");
                     }
                     List<byte[]> oRequiredCertificates = CertificateOperations.GetAutomaticCertificates();
                     List<User> oRecipients = UserListSelected.Where(u => !bFido ||
@@ -407,7 +421,7 @@ namespace Crypture
                                         oUser.Certificate))
                                     {
                                         CertificateKeyProtection.ValidateForEncryption(oCert);
-                                        if (!CertificateOperations.CheckCertificateStatus(oCert, true))
+                                        if (!CertificateOperations.CheckCertificateStatus(oCert))
                                             throw new InvalidOperationException("The certificate for '" + oUser.Name +
                                                 "' is not valid for encryption. Review the sharing list " +
                                                 "and certificate settings.");
@@ -425,7 +439,7 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType is "text" or "richtext" or "totp" && oPlainText != null)
+                        if (!ThisItem.IsFile && oPlainText != null)
                             Array.Clear(oPlainText, 0, oPlainText.Length);
                     }
                 });
@@ -502,9 +516,8 @@ namespace Crypture
             {
                 await Utilities.TryOperationAsync(this, async () =>
                 {
-                    byte[] oPlainText;
+                    byte[] oPlainText = null;
                     long? nModifier = null;
-                    oPlainText = null;
                     bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
                     if (bFido && !bRecoveryOnly)
                     {
@@ -579,8 +592,7 @@ namespace Crypture
                     }
                     finally
                     {
-                        if (ThisItem.ItemType is "text" or "richtext" or "totp")
-                            Array.Clear(oPlainText, 0, oPlainText.Length);
+                        if (!ThisItem.IsFile) Array.Clear(oPlainText, 0, oPlainText.Length);
                         bLoading = false;
                     }
                 });
@@ -649,13 +661,12 @@ namespace Crypture
             bool bPrincipals = oProtectionMode.SelectedIndex == UserProtectionIndex;
             bool bCertificates = oProtectionMode.SelectedIndex == CertificateProtectionIndex;
             bool bFido = oProtectionMode.SelectedIndex == FidoProtectionIndex;
-            oFidoAvailabilityNotice.Visibility = !bFidoEnabled && !bFido
-                ? Visibility.Visible : Visibility.Collapsed;
+            oFidoProtection.Visibility = bFidoEnabled || bFido ? Visibility.Visible : Visibility.Collapsed;
             bool bProtectionEnabled = bPrincipals && oDpapiNgProtection.IsEnabled ||
                 bCertificates && bCertificatesEnabled || bFido && bFidoEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
                 (!bCertificates || !bLoadingCertificates) &&
-                (ThisItem.ItemType is "text" or "richtext" or "totp" || BinaryItemData != null);
+                (!ThisItem.IsFile || BinaryItemData != null);
             oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
             oProtectionDisabledNotice.Text = bFido && !FidoNative.IsAvailable
                 ? "FIDO2 encryption is unavailable in this Windows session. Use saved recovery access, " +
@@ -720,13 +731,11 @@ namespace Crypture
                 if (ThisItem.Cipher?.CipherParams is ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
                 {
                     bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
-                    Cipher oRecoveryCipher = bFido ? new Cipher
-                        { ProtectedKey = FidoKeyProtection.Read(ThisItem.Cipher).RecoveryKey } : ThisItem.Cipher;
-                    if (oRecoveryCipher.ProtectedKey != null)
-                        foreach (var oEntry in RecoveryProtection.ReadWindowsKeys(oRecoveryCipher))
-                            if (oEntry.Key != ThisItem.Cipher.ProtectionDescriptor)
-                                oDetails.Add("Saved User Based Recovery: " + oEntry.Key);
-                    if ((bFido || ItemCryptography.UsesWindowsProtection(ThisItem.Cipher)) && UserListSelected.Count != 0)
+                    foreach (var oEntry in RecoveryProtection.ReadSavedWindowsKeys(ThisItem.Cipher))
+                        if (oEntry.Key != ThisItem.Cipher.ProtectionDescriptor)
+                            oDetails.Add("Saved User Based Recovery: " + oEntry.Key);
+                    if ((bFido || ItemCryptography.UsesWindowsProtection(ThisItem.Cipher)) &&
+                        UserListSelected.Count != 0)
                         oDetails.Add("Saved Certificate Based Recovery: " +
                             String.Join(", ", UserListSelected.Select(u => u.Name)));
                 }

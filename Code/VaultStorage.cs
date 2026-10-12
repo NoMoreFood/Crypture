@@ -41,23 +41,23 @@ namespace Crypture
     {
         private readonly string sPath;
 
-        internal SqliteVaultStorage(string sDatabasePath)
-        {
-            sPath = sDatabasePath;
-            ConnectionString = String.IsNullOrEmpty(sDatabasePath) ? "" : new SqliteConnectionStringBuilder
+        internal SqliteVaultStorage(string sDatabasePath) : this(sDatabasePath,
+            String.IsNullOrEmpty(sDatabasePath) ? "" : new SqliteConnectionStringBuilder
             {
                 DataSource = sDatabasePath, Mode = SqliteOpenMode.ReadWrite, ForeignKeys = true, Pooling = false
-            }.ConnectionString;
-        }
-
-        private SqliteVaultStorage(string sConnection, bool bRaw)
+            }.ConnectionString)
         {
-            ConnectionString = sConnection;
-            sPath = String.IsNullOrEmpty(sConnection) ? "" : new SqliteConnectionStringBuilder(sConnection).DataSource;
         }
 
-        internal static SqliteVaultStorage FromConnectionString(string sConnection) =>
-            new SqliteVaultStorage(sConnection, true);
+        private SqliteVaultStorage(string sDatabasePath, string sConnection)
+        {
+            sPath = sDatabasePath;
+            ConnectionString = sConnection;
+        }
+
+        internal static SqliteVaultStorage FromConnectionString(string sConnection) => new SqliteVaultStorage(
+            String.IsNullOrEmpty(sConnection) ? "" : new SqliteConnectionStringBuilder(sConnection).DataSource,
+            sConnection);
 
         public string ConnectionString { get; }
         public string DisplayName => sPath;

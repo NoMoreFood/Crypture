@@ -8,7 +8,7 @@ namespace Crypture
 {
     internal sealed class ConfigurationDefaults
     {
-        private static readonly string ConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        internal static readonly string ConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
         private readonly KeyValueConfigurationCollection oSettings;
         private readonly string sPrefix;
 
@@ -53,6 +53,6 @@ namespace Crypture
         }
 
         internal InvalidOperationException Error(string sMessage) =>
-            new InvalidOperationException("Invalid defaults in " + ConfigPath + ": " + sMessage);
+            new InvalidOperationException("Invalid settings in " + ConfigPath + ": " + sMessage);
     }
 }

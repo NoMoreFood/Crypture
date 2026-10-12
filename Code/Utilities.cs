@@ -6,6 +6,7 @@ using System.Collections;
 using System.Windows;
 using System.Threading.Tasks;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -15,40 +16,17 @@ using System.Runtime.InteropServices;
 
 namespace Crypture
 {
-    internal class Utilities
+    internal static class Utilities
     {
         internal const int MaxItemSize = 64 * 1024 * 1024;
 
         // Reserve bounded space for gzip headers and incompressible blocks.
         internal const int MaxCompressedItemSize = MaxItemSize + 1024 * 1024;
 
-        internal static void EnableClipboardTimeout(TextBox oTextBox, Func<string, bool> oCopy = null)
-        {
-            oCopy = oCopy ?? (s => TryOperation(Window.GetWindow(oTextBox), () => App.CopyProtectedText(s)));
-            ExecutedRoutedEventHandler oExecuted = (s, e) =>
-            {
-                e.Handled = true;
-                bool bCut = e.Command == ApplicationCommands.Cut;
-
-                // Copy icons use the whole field; keyboard Copy and Cut keep their selection behavior.
-                bool bAll = !bCut && Equals(e.Parameter, "All");
-                string sText = bAll ? oTextBox.Text : oTextBox.SelectedText;
-                if (!oTextBox.IsEnabled || sText.Length == 0 || (bCut && oTextBox.IsReadOnly)) return;
-                if (oCopy(sText) && bCut) oTextBox.SelectedText = "";
-            };
-            CanExecuteRoutedEventHandler oCanExecute = (s, e) =>
-            {
-                bool bCut = e.Command == ApplicationCommands.Cut;
-                bool bAll = !bCut && Equals(e.Parameter, "All");
-                e.CanExecute = oTextBox.IsEnabled && (bAll ? oTextBox.Text.Length > 0 :
-                    oTextBox.SelectionLength > 0) && (!bCut || !oTextBox.IsReadOnly);
-                e.Handled = true;
-            };
-            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, oExecuted, oCanExecute));
-            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
-            oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
-            oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
-        }
+        internal static void EnableClipboardTimeout(TextBox oTextBox, Func<string, bool> oCopy = null) =>
+            EnableClipboardTimeout(oTextBox, oCopy, bAll => bAll ? oTextBox.Text : oTextBox.SelectedText,
+                bAll => bAll ? oTextBox.Text.Length > 0 : oTextBox.SelectionLength > 0,
+                () => oTextBox.SelectedText = "");
 
         internal static string GetRichText(RichTextBox oTextBox)
         {
@@ -80,30 +58,11 @@ namespace Crypture
         internal static void EnableClipboardTimeout(RichTextBox oTextBox, Func<string, bool> oCopy = null)
         {
             // Rich editing must use the same protected plain-text clipboard path as ordinary secrets.
-            oCopy = oCopy ?? (s => TryOperation(Window.GetWindow(oTextBox), () => App.CopyProtectedText(s)));
-            ExecutedRoutedEventHandler oExecuted = (s, e) =>
-            {
-                e.Handled = true;
-                bool bCut = e.Command == ApplicationCommands.Cut;
-                string sText = !bCut && Equals(e.Parameter, "All")
-                    ? GetRichText(oTextBox) : oTextBox.Selection.Text;
-                if (!oTextBox.IsEnabled || sText.Length == 0 || bCut && oTextBox.IsReadOnly) return;
-                if (oCopy(sText) && bCut) oTextBox.Selection.Text = "";
-            };
-            CanExecuteRoutedEventHandler oCanExecute = (s, e) =>
-            {
-                bool bCut = e.Command == ApplicationCommands.Cut;
-                e.CanExecute = oTextBox.IsEnabled && (!bCut || !oTextBox.IsReadOnly) &&
-                    (!bCut && Equals(e.Parameter, "All") ?
-                        oTextBox.Document.ContentStart.GetInsertionPosition(LogicalDirection.Forward).CompareTo(
-                            oTextBox.Document.ContentEnd.GetInsertionPosition(LogicalDirection.Backward)) != 0 :
-                        !oTextBox.Selection.IsEmpty);
-                e.Handled = true;
-            };
-            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, oExecuted, oCanExecute));
-            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
-            oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
-            oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+            EnableClipboardTimeout(oTextBox, oCopy, bAll => bAll ? GetRichText(oTextBox) : oTextBox.Selection.Text,
+                bAll => bAll ? oTextBox.Document.ContentStart.GetInsertionPosition(LogicalDirection.Forward).CompareTo(
+                    oTextBox.Document.ContentEnd.GetInsertionPosition(LogicalDirection.Backward)) != 0 :
+                    !oTextBox.Selection.IsEmpty,
+                () => oTextBox.Selection.Text = "");
 
             // Paste text only, keeping embedded files and external rich content out of encrypted notes.
             DataObject.AddPastingHandler(oTextBox, (s, e) =>
@@ -116,6 +75,36 @@ namespace Crypture
             });
         }
 
+        private static void EnableClipboardTimeout(TextBoxBase oTextBox, Func<string, bool> oCopy,
+            Func<bool, string> oReadText, Func<bool, bool> oHasText, Action oClearSelection)
+        {
+            oCopy = oCopy ?? (s => TryOperation(Window.GetWindow(oTextBox), () => App.CopyProtectedText(s)));
+
+            // Copy icons use the whole field; keyboard Copy and Cut keep their selection behavior.
+            bool CanRun(ICommand oCommand, object oParameter, out bool bCut, out bool bAll)
+            {
+                bCut = oCommand == ApplicationCommands.Cut;
+                bAll = !bCut && Equals(oParameter, "All");
+                return oTextBox.IsEnabled && (!bCut || !oTextBox.IsReadOnly) && oHasText(bAll);
+            }
+            ExecutedRoutedEventHandler oExecuted = (s, e) =>
+            {
+                e.Handled = true;
+                if (!CanRun(e.Command, e.Parameter, out bool bCut, out bool bAll)) return;
+                string sText = oReadText(bAll);
+                if (sText.Length != 0 && oCopy(sText) && bCut) oClearSelection();
+            };
+            CanExecuteRoutedEventHandler oCanExecute = (s, e) =>
+            {
+                e.CanExecute = CanRun(e.Command, e.Parameter, out _, out _);
+                e.Handled = true;
+            };
+            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, oExecuted, oCanExecute));
+            oTextBox.CommandBindings.Add(new CommandBinding(ApplicationCommands.Cut, oExecuted, oCanExecute));
+            oTextBox.TextChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+            oTextBox.IsEnabledChanged += (s, e) => CommandManager.InvalidateRequerySuggested();
+        }
+
         internal static bool TryOperation(Window oOwner, Action oAction)
         {
             try
@@ -125,9 +114,7 @@ namespace Crypture
             }
             catch (Exception oError)
             {
-                Popup.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
-                    Environment.NewLine + oError.GetBaseException().Message, "Crypture",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowError(oOwner, oError);
                 return false;
             }
         }
@@ -145,12 +132,14 @@ namespace Crypture
             }
             catch (Exception oError)
             {
-                Popup.Show(oOwner, "The operation could not be completed." + Environment.NewLine +
-                    Environment.NewLine + oError.GetBaseException().Message, "Crypture",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowError(oOwner, oError);
                 return false;
             }
         }
+
+        private static void ShowError(Window oOwner, Exception oError) => Popup.Show(oOwner,
+            "The operation could not be completed." + Environment.NewLine + Environment.NewLine +
+            oError.GetBaseException().Message, "Crypture", MessageBoxButton.OK, MessageBoxImage.Error);
 
         internal static byte[] ReadFile(string sPath)
         {
@@ -167,8 +156,7 @@ namespace Crypture
             using (MemoryStream oOutputStream = new MemoryStream())
             {
                 using (GZipStream oZipStream = new GZipStream(oOutputStream, CompressionMode.Compress))
-                using (MemoryStream oInputStream = new MemoryStream(oInputArray))
-                    oInputStream.CopyTo(oZipStream);
+                    oZipStream.Write(oInputArray, 0, oInputArray.Length);
                 return oOutputStream.ToArray();
             }
         }
@@ -178,7 +166,7 @@ namespace Crypture
             const int CopyBufferBytes = 81920;
             using (MemoryStream oInputStream = new MemoryStream(oInputArray))
             using (GZipStream oZipStream = new GZipStream(oInputStream, CompressionMode.Decompress))
-            using (MemoryStream oOutputSream = new MemoryStream())
+            using (MemoryStream oOutputStream = new MemoryStream())
             {
                 byte[] oBuffer = new byte[CopyBufferBytes];
                 try
@@ -186,16 +174,16 @@ namespace Crypture
                     int nRead;
                     while ((nRead = oZipStream.Read(oBuffer, 0, oBuffer.Length)) != 0)
                     {
-                        if (oOutputSream.Length + nRead > MaxItemSize)
+                        if (oOutputStream.Length + nRead > MaxItemSize)
                             throw new InvalidDataException("The expanded file exceeds the 64 MB limit.");
-                        oOutputSream.Write(oBuffer, 0, nRead);
+                        oOutputStream.Write(oBuffer, 0, nRead);
                     }
                 }
                 finally
                 {
                     Array.Clear(oBuffer, 0, oBuffer.Length);
                 }
-                return oOutputSream.ToArray();
+                return oOutputStream.ToArray();
             }
         }
     }

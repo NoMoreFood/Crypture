@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Configuration;
-using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 
@@ -10,6 +7,7 @@ namespace Crypture
 {
     public sealed class PasswordOptions
     {
+        private const int LengthLimit = 1024;
         public int MinimumLength { get; set; } = 20;
         public int MaximumLength { get; set; } = 24;
         public bool IncludeUppercase { get; set; } = true;
@@ -43,55 +41,36 @@ namespace Crypture
         internal static PasswordOptions ReadDefaults()
         {
             // Read the adjacent configuration when the user has no saved generator preferences.
-            string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+            ConfigurationDefaults oDefaults = new ConfigurationDefaults("PasswordGenerator");
+
+            // Preserve built-in defaults for omitted keys and validate the complete character policy.
+            PasswordOptions oOptions = new PasswordOptions();
+            oOptions.MinimumLength = oDefaults.Number(nameof(MinimumLength), oOptions.MinimumLength, 1, LengthLimit);
+            oOptions.MaximumLength = oDefaults.Number(nameof(MaximumLength), oOptions.MaximumLength, 1, LengthLimit);
+            oOptions.IncludeUppercase = oDefaults.Flag(nameof(IncludeUppercase), oOptions.IncludeUppercase);
+            oOptions.IncludeLowercase = oDefaults.Flag(nameof(IncludeLowercase), oOptions.IncludeLowercase);
+            oOptions.IncludeDigits = oDefaults.Flag(nameof(IncludeDigits), oOptions.IncludeDigits);
+            oOptions.IncludeSymbols = oDefaults.Flag(nameof(IncludeSymbols), oOptions.IncludeSymbols);
+            oOptions.SymbolCharacters = oDefaults.Text(nameof(SymbolCharacters), oOptions.SymbolCharacters);
+            oOptions.ExcludedCharacters = oDefaults.Text(nameof(ExcludedCharacters), oOptions.ExcludedCharacters);
+            oOptions.ExcludeSimilar = oDefaults.Flag(nameof(ExcludeSimilar), oOptions.ExcludeSimilar);
+            oOptions.RequireEachType = oDefaults.Flag(nameof(RequireEachType), oOptions.RequireEachType);
             try
             {
-                Configuration oConfig = ConfigurationManager.OpenMappedExeConfiguration(
-                    new ExeConfigurationFileMap { ExeConfigFilename = sPath }, ConfigurationUserLevel.None);
-                string Read(string sName, string sDefault) =>
-                    oConfig.AppSettings.Settings["PasswordGenerator" + sName]?.Value ?? sDefault;
-
-                int ReadNumber(string sName, int nDefault)
-                {
-                    if (Int32.TryParse(Read(sName, nDefault.ToString(CultureInfo.InvariantCulture)).Trim(),
-                        NumberStyles.None, CultureInfo.InvariantCulture, out int nValue)) return nValue;
-                    throw new InvalidOperationException("PasswordGenerator" + sName + " must be a whole number.");
-                }
-
-                bool ReadFlag(string sName, bool bDefault)
-                {
-                    if (Boolean.TryParse(Read(sName, bDefault.ToString()), out bool bValue)) return bValue;
-                    throw new InvalidOperationException("PasswordGenerator" + sName + " must be True or False.");
-                }
-
-                // Preserve built-in defaults for omitted keys and validate the complete character policy.
-                PasswordOptions oOptions = new PasswordOptions();
-                oOptions.MinimumLength = ReadNumber(nameof(MinimumLength), oOptions.MinimumLength);
-                oOptions.MaximumLength = ReadNumber(nameof(MaximumLength), oOptions.MaximumLength);
-                oOptions.IncludeUppercase = ReadFlag(nameof(IncludeUppercase), oOptions.IncludeUppercase);
-                oOptions.IncludeLowercase = ReadFlag(nameof(IncludeLowercase), oOptions.IncludeLowercase);
-                oOptions.IncludeDigits = ReadFlag(nameof(IncludeDigits), oOptions.IncludeDigits);
-                oOptions.IncludeSymbols = ReadFlag(nameof(IncludeSymbols), oOptions.IncludeSymbols);
-                oOptions.SymbolCharacters = Read(nameof(SymbolCharacters), oOptions.SymbolCharacters);
-                oOptions.ExcludedCharacters = Read(nameof(ExcludedCharacters), oOptions.ExcludedCharacters);
-                oOptions.ExcludeSimilar = ReadFlag(nameof(ExcludeSimilar), oOptions.ExcludeSimilar);
-                oOptions.RequireEachType = ReadFlag(nameof(RequireEachType), oOptions.RequireEachType);
                 oOptions.GetCharacterGroups();
-                return oOptions;
             }
-            catch (Exception oError) when (oError is ConfigurationErrorsException or InvalidOperationException)
+            catch (InvalidOperationException oError)
             {
-                throw new InvalidOperationException("Invalid password generator defaults in " + sPath + ": " +
-                    oError.Message);
+                throw oDefaults.Error(oError.Message);
             }
+            return oOptions;
         }
 
         internal List<string> GetCharacterGroups()
         {
-            const int MaximumPasswordLength = 1024;
             const int MaximumSymbolCharacters = 94;
             const int MaximumExcludedCharacters = 256;
-            if (MinimumLength < 1 || MaximumLength > MaximumPasswordLength || MinimumLength > MaximumLength)
+            if (MinimumLength < 1 || MaximumLength > LengthLimit || MinimumLength > MaximumLength)
                 throw new InvalidOperationException(
                     "Lengths must be between 1 and 1024, with minimum at most maximum.");
             if (SymbolCharacters == null || ExcludedCharacters == null ||
@@ -127,51 +106,22 @@ namespace Crypture
         {
             List<string> oGroups = oOptions.GetCharacterGroups();
             string sAlphabet = String.Concat(oGroups);
-            using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create())
-            {
-                int nLength = oOptions.MinimumLength + NextInt(oRandom,
-                    oOptions.MaximumLength - oOptions.MinimumLength + 1);
-                char[] oPassword = new char[nLength];
-                try
-                {
-                    // Reject whole candidates to keep valid passwords uniform at the chosen length.
-                    do
-                    {
-                        for (int nIndex = 0; nIndex < oPassword.Length; nIndex++)
-                            oPassword[nIndex] = sAlphabet[NextInt(oRandom, sAlphabet.Length)];
-                    }
-                    while (oOptions.RequireEachType && oGroups.Any(g => !oPassword.Any(c => g.IndexOf(c) >= 0)));
-                    return new string(oPassword);
-                }
-                finally
-                {
-                    Array.Clear(oPassword, 0, oPassword.Length);
-                }
-            }
-        }
-
-        internal static int NextInt(RandomNumberGenerator oRandom, int nExclusiveMaximum)
-        {
-            if (nExclusiveMaximum < 1) throw new ArgumentOutOfRangeException(nameof(nExclusiveMaximum));
-            byte[] oBytes = new byte[sizeof(uint)];
+            char[] oPassword = new char[RandomNumberGenerator.GetInt32(
+                oOptions.MinimumLength, oOptions.MaximumLength + 1)];
             try
             {
-                const int RandomWordBits = sizeof(uint) * 8;
-                ulong nRange = 1UL << RandomWordBits;
-                ulong nLimit = nRange - nRange % (uint)nExclusiveMaximum;
-                uint nValue;
-                // Discard the incomplete interval so remainder arithmetic does not favor any choice.
+                // Reject whole candidates to keep valid passwords uniform at the chosen length.
                 do
                 {
-                    oRandom.GetBytes(oBytes);
-                    nValue = BitConverter.ToUInt32(oBytes, 0);
+                    for (int nIndex = 0; nIndex < oPassword.Length; nIndex++)
+                        oPassword[nIndex] = sAlphabet[RandomNumberGenerator.GetInt32(sAlphabet.Length)];
                 }
-                while (nValue >= nLimit);
-                return (int)(nValue % (uint)nExclusiveMaximum);
+                while (oOptions.RequireEachType && oGroups.Any(g => !oPassword.Any(c => g.IndexOf(c) >= 0)));
+                return new string(oPassword);
             }
             finally
             {
-                Array.Clear(oBytes, 0, oBytes.Length);
+                Array.Clear(oPassword, 0, oPassword.Length);
             }
         }
     }

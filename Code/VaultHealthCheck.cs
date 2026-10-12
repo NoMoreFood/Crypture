@@ -173,14 +173,11 @@ namespace Crypture
                     bool bFido = oItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
                     try
                     {
-                        Cipher oRecoveryCipher = bFido ? new Cipher
-                            { ProtectedKey = FidoKeyProtection.Read(oItem.Cipher).RecoveryKey } : oItem.Cipher;
+                        var oEntries = RecoveryProtection.ReadSavedWindowsKeys(oItem.Cipher);
                         if (bFido)
                             oPolicy.Add(HealthStatus.Information, "A FIDO2 security key protects this item. " +
                                 "This check does not contact the key or verify decryption access.");
-                        foreach (var oEntry in bFido && oRecoveryCipher.ProtectedKey == null
-                            ? new List<KeyValuePair<string, byte[]>>()
-                            : RecoveryProtection.ReadWindowsKeys(oRecoveryCipher))
+                        foreach (var oEntry in oEntries)
                         {
                             PrincipalProtection.ValidateCustomDescriptor(oEntry.Key);
                             foreach (Match oMatch in Regex.Matches(oEntry.Key, @"S-\d+(?:-\d+)+"))
@@ -256,12 +253,8 @@ namespace Crypture
                         {
                             try
                             {
-                                Cipher oRecoveryCipher = oItem.Cipher.CipherParams == ItemCryptography.FidoFormat
-                                    ? new Cipher { ProtectedKey = FidoKeyProtection.Read(oItem.Cipher).RecoveryKey }
-                                    : oItem.Cipher;
-                                bWindows = oRecoveryCipher.ProtectedKey != null &&
-                                    RecoveryProtection.ReadWindowsKeys(oRecoveryCipher)
-                                        .Any(e => e.Key == oRecovery.Descriptor);
+                                bWindows = RecoveryProtection.ReadSavedWindowsKeys(oItem.Cipher)
+                                    .Any(e => e.Key == oRecovery.Descriptor);
                             }
                             catch (CryptographicException)
                             {

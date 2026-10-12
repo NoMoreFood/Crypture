@@ -4,7 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Crypture.Data"
-        Title="About Crypture" Width="500" Height="400"
+        Title="About Crypture" Width="500" Height="400" MinWidth="420" MinHeight="320"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Icon="pack://application:,,,/Crypture;component/Safe.ico"
         RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"
     Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
@@ -25,6 +26,7 @@
                     Foreground="{DynamicResource Crypture.MutedBrush}" />
                 <TextBlock Text="Software for protecting data at rest." Margin="0,5,0,0" TextWrapping="Wrap"
                     FontWeight="Bold" Foreground="{DynamicResource Crypture.MutedBrush}" />
+                <TextBlock x:Name="oVersion" Margin="0,5,0,0" Foreground="{DynamicResource Crypture.MutedBrush}" />
             </StackPanel>
         </Grid>
         <TabControl Grid.Row="1" Margin="5,0,5,5" Padding="2">

@@ -211,11 +211,9 @@ namespace Crypture
             const uint RequireCngKey = 0x00040000;
             if (!oCert.HasPrivateKey)
                 throw new CryptographicException("The certificate's private key is unavailable in your Windows store.");
-            SafeNCryptKeyHandle oHandle;
-            uint nKeySpec;
-            bool bCallerFrees;
             bool bAcquired = NativeMethods.CryptAcquireCertificatePrivateKey(oCert.Handle,
-                CacheAcquiredKey | RequireCngKey, IntPtr.Zero, out oHandle, out nKeySpec, out bCallerFrees);
+                CacheAcquiredKey | RequireCngKey, IntPtr.Zero, out SafeNCryptKeyHandle oHandle, out _,
+                out bool bCallerFrees);
             int nError = Marshal.GetLastWin32Error();
             using (oHandle)
             {
@@ -283,10 +281,9 @@ namespace Crypture
                     byte[] oContext = GetContext(oCert, oStream.ToArray());
                     oWrappingKey = SP800108HmacCounterKdf.DeriveBytes(oSecret, HashAlgorithmName.SHA256,
                         KeyLabel, oContext, WrappingKeyBytes);
-                    byte[] oNonce = new byte[GcmNonceBytes];
+                    byte[] oNonce = RandomNumberGenerator.GetBytes(GcmNonceBytes);
                     byte[] oTag = new byte[GcmTagBytes];
                     byte[] oCipherText = new byte[oKeys.Length];
-                    using (RandomNumberGenerator oRandom = RandomNumberGenerator.Create()) oRandom.GetBytes(oNonce);
                     using (AesGcm oAes = new AesGcm(oWrappingKey, oTag.Length))
                         oAes.Encrypt(oNonce, oKeys, oCipherText, oTag, oContext);
                     oWriter.Write(oNonce);

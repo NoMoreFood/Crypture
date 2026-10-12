@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Windows;
@@ -35,7 +34,7 @@ namespace Crypture
         {
             oEscrowPanel.Visibility = oCreateDatabase.IsChecked == true
                 ? Visibility.Visible : Visibility.Collapsed;
-            oConnect.Content = oCreateDatabase.IsChecked == true ? "Create" : "Connect";
+            oConnect.Content = oCreateDatabase.IsChecked == true ? "_Create" : "_Connect";
         }
 
         private void oEscrowType_SelectionChanged(object sender, SelectionChangedEventArgs e)

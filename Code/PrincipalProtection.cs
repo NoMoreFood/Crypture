@@ -234,6 +234,8 @@ namespace Crypture
 
     public partial class Item
     {
+        // File attachments keep their extension as the item type; other types hold text content.
+        internal bool IsFile => ItemType is not ("text" or "richtext" or "totp");
         public string ItemTypeDisplay => ItemType == "totp" ? "TOTP" :
             ItemType == "text" ? "Text Secret" : ItemType == "richtext" ? "Rich Text Secret" : "File Attachment";
         public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";

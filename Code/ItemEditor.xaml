@@ -122,7 +122,7 @@
                                 AutomationProperties.Name="Disabled Encryption" />
                             <TextBlock x:Name="oRequiredCertificateNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}">
-                                <Run Text="Required recipient certificates are configured. " />
+                                <Run Text="Required recipient certificates are configured." />
                                 <Run Text="Saving includes their recovery access." />
                             </TextBlock>
                             <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,8,0,0"
@@ -144,7 +144,7 @@
                                 </ComboBox>
                                 <TextBlock x:Name="oDomainNotice" TextWrapping="Wrap" Margin="0,8,0,4"
                                     Foreground="{DynamicResource Crypture.MutedBrush}" Visibility="Collapsed">
-                                    <Run Text="Domain scope needs Active Directory. " />
+                                    <Run Text="Domain scope needs Active Directory." />
                                     <Run Text="Choose a local scope or Certificate Based encryption." />
                                 </TextBlock>
                                 <TextBlock x:Name="oPrincipalHint" TextWrapping="Wrap" Margin="0,8,0,4"
@@ -201,8 +201,8 @@
                             <StackPanel x:Name="oFidoPanel" Visibility="Collapsed" Margin="0,10,0,0">
                                 <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
                                     Foreground="{DynamicResource Crypture.MutedBrush}">
-                                    <Run Text="Requires a FIDO2 security key supporting hmac-secret. Complete the " />
-                                    <Run Text="Windows PIN and touch prompts when saving or decrypting. Keep the " />
+                                    <Run Text="Requires a FIDO2 security key supporting hmac-secret. Complete the" />
+                                    <Run Text="Windows PIN and touch prompts when saving or decrypting. Keep the" />
                                     <Run Text="key available; a Vault backup does not include it." />
                                 </TextBlock>
                                 <TextBlock x:Name="oFidoKeyStatus" TextWrapping="Wrap" Margin="0,0,0,8"
@@ -287,8 +287,8 @@
                                 </ListView>
                                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap"
                                     Foreground="{DynamicResource Crypture.MutedBrush}">
-                                    <Run Text="For post-quantum protection, every recipient, including emergency " />
-                                    <Run Text="recovery, must use a post-quantum algorithm. Each recipient can " />
+                                    <Run Text="For post-quantum protection, every recipient, including emergency" />
+                                    <Run Text="recovery, must use a post-quantum algorithm. Each recipient can" />
                                     <Run Text="decrypt independently." />
                                 </TextBlock>
                             </StackPanel>

@@ -6,10 +6,13 @@
     <UseWPF>true</UseWPF>
     <LangVersion>14.0</LangVersion>
     <Nullable>disable</Nullable>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <RootNamespace>Crypture</RootNamespace>
     <AssemblyName>Crypture</AssemblyName>
-    <Version>2.2.0</Version>
+    <Version>2.3.0</Version>
+    <Company>Bryan Berns</Company>
+    <Copyright>Copyright © Bryan Berns</Copyright>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>Safe.ico</ApplicationIcon>
     <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -27,6 +30,7 @@
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Crypture.Tests" />
     <Resource Include="Safe.ico;Images\*.png" />
     <EmbeddedResource Include="Data\SQLite.sql" LogicalName="Crypture.SqliteSchema" />
     <EmbeddedResource Include="Data\SqlServer.sql" LogicalName="Crypture.SqlServerSchema" />

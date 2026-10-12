@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -26,16 +25,13 @@ namespace Crypture
             return Read();
         }
 
-        internal static RecoveryPolicy Read(string sPath = null)
+        internal static RecoveryPolicy Read()
         {
-            sPath = sPath ?? Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+            ConfigurationDefaults oDefaults = new ConfigurationDefaults();
             try
             {
-                Configuration oConfig = ConfigurationManager.OpenMappedExeConfiguration(
-                    new ExeConfigurationFileMap { ExeConfigFilename = sPath }, ConfigurationUserLevel.None);
-                KeyValueConfigurationCollection oSettings = oConfig.AppSettings.Settings;
-                string sDescriptor = oSettings["RecoveryProtectionDescriptor"]?.Value.Trim();
-                string sCertificate = oSettings["RecoveryCertificateBase64"]?.Value.Trim();
+                string sDescriptor = oDefaults.Text("RecoveryProtectionDescriptor", "").Trim();
+                string sCertificate = oDefaults.Text("RecoveryCertificateBase64", "").Trim();
                 RecoveryPolicy oPolicy = new RecoveryPolicy
                 {
                     Descriptor = String.IsNullOrEmpty(sDescriptor) ? null : sDescriptor
@@ -56,12 +52,11 @@ namespace Crypture
                 }
                 return oPolicy;
             }
-            catch (Exception oError) when (oError is ConfigurationErrorsException || oError is FormatException ||
-                oError is CryptographicException || oError is PlatformNotSupportedException)
+            catch (Exception oError) when (oError is FormatException || oError is CryptographicException ||
+                oError is PlatformNotSupportedException)
             {
-                throw new InvalidOperationException("The emergency recovery settings in " + sPath +
-                    " are invalid. Correct RecoveryProtectionDescriptor or RecoveryCertificateBase64 before saving. " +
-                    oError.Message);
+                throw oDefaults.Error("Correct RecoveryProtectionDescriptor or RecoveryCertificateBase64 before " +
+                    "saving. " + oError.Message);
             }
         }
     }
@@ -144,6 +139,14 @@ namespace Crypture
             {
                 throw new CryptographicException("The recovery key envelope is damaged.", oError);
             }
+        }
+
+        internal static List<KeyValuePair<string, byte[]>> ReadSavedWindowsKeys(Cipher oCipher)
+        {
+            // FIDO2 items carry their optional Windows recovery recipients inside the security key envelope.
+            if (oCipher.CipherParams != ItemCryptography.FidoFormat) return ReadWindowsKeys(oCipher);
+            byte[] oRecoveryKey = FidoKeyProtection.Read(oCipher).RecoveryKey;
+            return oRecoveryKey == null ? [] : ReadWindowsKeys(new Cipher { ProtectedKey = oRecoveryKey });
         }
 
         internal static byte[] UnwrapWindowsKeys(Cipher oCipher)

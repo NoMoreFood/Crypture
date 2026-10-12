@@ -90,7 +90,7 @@
                         </WrapPanel>
                         <TextBlock Margin="0,0,0,12" TextWrapping="Wrap"
                             Foreground="{DynamicResource Crypture.MutedBrush}">
-                            <Run Text="Current User keeps the key with your Windows account. " />
+                            <Run Text="Current User keeps the key with your Windows account." />
                             <Run Text="Computer stores it for this device and requires administrator access." />
                         </TextBlock>
                         <Border Background="{DynamicResource Crypture.PanelBrush}" Padding="12"
@@ -112,8 +112,8 @@
                     <StackPanel Margin="14,6,14,14">
                         <TextBlock TextWrapping="Wrap" Margin="0,8,0,6"
                             Foreground="{DynamicResource Crypture.MutedBrush}">
-                            <Run Text="Key usages describe allowed operations. Crypture encryption needs " />
-                            <Run Text="Key Encipherment for RSA or Key Agreement for ECDH. " />
+                            <Run Text="Key usages describe allowed operations. Crypture encryption needs" />
+                            <Run Text="Key Encipherment for RSA or Key Agreement for ECDH." />
                             <Run Text="Extended usages are optional." />
                         </TextBlock>
                         <Label Content="_Key Usages:" Target="{Binding ElementName=oKeyUsageCombobox}"
@@ -198,7 +198,7 @@
                             ToolTip="Requests Windows key protection. The prompt depends on the provider." />
                         <TextBlock TextWrapping="Wrap" Margin="0,8,0,0"
                             Foreground="{DynamicResource Crypture.MutedBrush}">
-                            <Run Text="ML-KEM needs an issued certificate with a CNG private key. " />
+                            <Run Text="ML-KEM needs an issued certificate with a CNG private key." />
                             <Run Text="This creator cannot self-sign ML-KEM certificates." />
                         </TextBlock>
                     </StackPanel>

@@ -1,6 +1,5 @@
 ﻿using System.IO;
 using System.Reflection;
-using System.Windows;
 
 namespace Crypture
 {
@@ -9,6 +8,7 @@ namespace Crypture
         public AboutBox()
         {
             InitializeComponent();
+            oVersion.Text = "Version " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
             foreach (string sName in new[] { "Crypture.RuntimeNotices", "Crypture.RuntimeThirdPartyNotices" })
             {
                 using (Stream oStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(sName))

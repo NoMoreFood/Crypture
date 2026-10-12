@@ -1,19 +1,15 @@
 ﻿using Microsoft.Win32;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
 using System.Collections.ObjectModel;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.Sqlite;
 using System.DirectoryServices;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
-using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -56,11 +52,10 @@ namespace Crypture
             if (!CertificateOperations.CheckCertificateStatus(oCert, true))
                 throw new InvalidOperationException("Select a valid RSA, ECDH, or ML-KEM encryption certificate. " +
                     "Review the certificate validation settings and selection filters in Crypture.exe.config.");
+            byte[] oData = oCert.RawData;
             using (CryptureEntities oContent = new CryptureEntities())
             {
-                User oExisting = oContent.Users.ToList().FirstOrDefault(u =>
-                    u.Certificate.AsSpan().SequenceEqual(oCert.RawData));
-                if (oExisting != null)
+                if (oContent.Users.ToList().Any(u => u.Certificate.AsSpan().SequenceEqual(oData)))
                 {
                     Popup.Show(this,
                          "The selected certificate is already in the Vault.",
@@ -73,28 +68,21 @@ namespace Crypture
                     if (bFromDirectory)
                         SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier);
                     else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert);
-                    oRefreshItemButton_Click();
                     return true;
                 }
 
                 bool bAmOwner = CertificateOperations.GetPrivateCertificateData().Contains(
-                    Convert.ToBase64String(oCert.RawData)) && Popup.Show(this,
+                    Convert.ToBase64String(oData)) && Popup.Show(this,
                     "Are you the owner of the selected certificate?",
                     "Ownership Confirmation",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
-
-                string sOwnerSid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid
-                    ? sIdentifier : null;
-                User oUser = new User()
+                oContent.Users.Add(new User
                 {
-                    Certificate = oCert.GetRawCertData(),
-                    Sid = sOwnerSid
-                };
-                oContent.Users.Add(oUser);
+                    Certificate = oData,
+                    Sid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid ? sIdentifier : null
+                });
                 oContent.SaveChanges();
-                oRefreshItemButton_Click();
             }
-
             return true;
         }
 
@@ -127,27 +115,18 @@ namespace Crypture
                 oCertDataGrid.SelectedItem : oItemDataGrid.SelectedItem;
 
             // prevent removal of automatic certificate
-            if (oObject is User)
+            if (oObject is User oSelected && CertificateOperations.GetAutomaticCertificates().Any(c =>
+                c.SequenceEqual(oSelected.Certificate)))
             {
-                if (CertificateOperations.GetAutomaticCertificates().Where(u => 
-                    StructuralComparisons.StructuralEqualityComparer.Equals(u,
-                        ((User) oObject).Certificate)).Count() > 0)
-                {
-                    Popup.Show(this, "Removal of automatic certificate is prohibited.",
-                        "Removal Prohibited", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                    return;
-                }
+                Popup.Show(this, "Removal of automatic certificate is prohibited.",
+                    "Removal Prohibited", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                return;
             }
 
             // confirm removal
-            if (oObject == null || Popup.Show(this,
-                    "Are you sure you want to remove '" + ((oObject is User) ?
-                    ((User)oObject).Name : ((Item)oObject).Label) + "'?",
-                    "Removal Confirmation",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-            {
-                return;
-            }
+            if (oObject == null || Popup.Show(this, "Are you sure you want to remove '" +
+                ((oObject as User)?.Name ?? ((Item)oObject).Label) + "'?", "Removal Confirmation",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
 
             // remove select item or user
             Utilities.TryOperation(this, () =>
@@ -171,7 +150,7 @@ namespace Crypture
                     throw new InvalidOperationException("Select a public certificate (.cer). " +
                         "Import private keys using Windows.");
                 using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificateFromFile(oOpenDialog.FileName))
-                    AddCertificate(oCert, CertificateOperations.CurrentUserSid);
+                    if (AddCertificate(oCert, CertificateOperations.CurrentUserSid)) oRefreshItemButton_Click();
             });
         }
 
@@ -201,8 +180,8 @@ namespace Crypture
                         X509SelectionFlag.SingleSelection, new WindowInteropHelper(this).Handle);
 
                     // commit the certificate to the database
-                    foreach (X509Certificate2 oCert in oCollection)
-                        AddCertificate(oCert, CertificateOperations.CurrentUserSid);
+                    if (oCollection.Count != 0 && AddCertificate(oCollection[0], CertificateOperations.CurrentUserSid))
+                        oRefreshItemButton_Click();
                 }
                 finally
                 {
@@ -220,45 +199,54 @@ namespace Crypture
 
                 // show dialog and return if cancelled
                 if (oPicker.ShowDialog() != true) return;
-                foreach (DirectoryAccount oAccount in oPicker.SelectedAccounts)
+                bool bAdded = false;
+                try
                 {
-                    // skip if no certificate information was found
-                    if (oAccount.Certificates.Length == 0)
-                    {
-                        Popup.Show(this, "There was no certificate associated with '" + oAccount.Name + "'.",
-                            "No Certificate Information Found", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                        continue;
-                    }
-
-                    // Filter eligible encryption certificates before opening the selector.
-                    X509Certificate2Collection oCollection = new X509Certificate2Collection();
-                    try
-                    {
-                        foreach (byte[] oCertData in oAccount.Certificates)
-                        {
-                            using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
-                                if (oUsageFilter.Matches(oCert) &&
-                                    CertificateOperations.CheckCertificateStatus(oCert, true))
-                                    oCollection.Add(new X509Certificate2(oCert));
-                        }
-                        if (oCollection.Count == 0) continue;
-
-                        // ask the user which certificate to publish
-                        X509Certificate2Collection oSelected = oCollection.Count == 1 ? oCollection :
-                            X509Certificate2UI.SelectFromCollection(oCollection, "Select Certificate",
-                                "Select Certificate To Add", X509SelectionFlag.SingleSelection,
-                                new WindowInteropHelper(this).Handle);
-                        if (oSelected.Count == 0) continue;
-
-                        // add the certificate to the store
-                        AddCertificate(oSelected[0], oAccount.Sid, true);
-                    }
-                    finally
-                    {
-                        foreach (X509Certificate2 oCert in oCollection) oCert.Dispose();
-                    }
+                    foreach (DirectoryAccount oAccount in oPicker.SelectedAccounts)
+                        bAdded |= AddDirectoryCertificate(oAccount, oUsageFilter);
+                }
+                finally
+                {
+                    // Show every enrolled certificate once, including those added before a later failure.
+                    if (bAdded) oRefreshItemButton_Click();
                 }
             });
+        }
+
+        private bool AddDirectoryCertificate(DirectoryAccount oAccount, CertificateUsageFilter oUsageFilter)
+        {
+            // Filter eligible encryption certificates before opening the selector.
+            X509Certificate2Collection oCollection = new X509Certificate2Collection();
+            try
+            {
+                foreach (byte[] oCertData in oAccount.Certificates)
+                {
+                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
+                        if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert, true))
+                            oCollection.Add(new X509Certificate2(oCert));
+                }
+
+                // Explain why an account contributes nothing instead of skipping it silently.
+                if (oCollection.Count == 0)
+                {
+                    Popup.Show(this, (oAccount.Certificates.Length == 0 ? "There was no certificate associated with '"
+                        : "No certificate matching the usage filters and validation settings was found for '") +
+                        oAccount.Name + "'.", "No Certificate Information Found",
+                        MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                    return false;
+                }
+
+                // ask the user which certificate to publish
+                X509Certificate2Collection oSelected = oCollection.Count == 1 ? oCollection :
+                    X509Certificate2UI.SelectFromCollection(oCollection, "Select Certificate",
+                        "Select Certificate To Add", X509SelectionFlag.SingleSelection,
+                        new WindowInteropHelper(this).Handle);
+                return oSelected.Count != 0 && AddCertificate(oSelected[0], oAccount.Sid, true);
+            }
+            finally
+            {
+                foreach (X509Certificate2 oCert in oCollection) oCert.Dispose();
+            }
         }
 
         private void oMarkEscrowButton_Click(object sender, RoutedEventArgs e)
@@ -841,14 +829,14 @@ namespace Crypture
                 { Owner = this }.ShowDialog());
         }
 
-        private void oCompactDatabaseButton_Click(object sender, RoutedEventArgs e)
+        private async void oCompactDatabaseButton_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
-            {
-                CryptureEntities.Storage.Compact();
-                Popup.Show(this, "Compact operation complete.",
-                    "Operation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
-            });
+            // Rewriting the Vault file can take a while; keep the window responsive and show progress.
+            IVaultStorage oStorage = CryptureEntities.Storage;
+            if (!await RunVaultOperationAsync("Compacting Vault...", oCancellation =>
+                Task.Run(oStorage.Compact, oCancellation))) return;
+            Popup.Show(this, "Compact operation complete.",
+                "Operation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private async void oBackupDatabaseButton_Click(object sender, RoutedEventArgs e)

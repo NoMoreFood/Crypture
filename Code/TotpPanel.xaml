@@ -36,7 +36,7 @@
             <TextBlock x:Name="oValidationMessage" TextWrapping="Wrap" Margin="0,0,0,8"
                 Foreground="{DynamicResource Crypture.WarningBrush}" AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Foreground="{DynamicResource Crypture.MutedBrush}">
-                <Run Text="Codes rotate automatically using this computer's clock. " />
+                <Run Text="Codes rotate automatically using this computer's clock." />
                 <Run Text="Keep Windows time in sync with the service." />
             </TextBlock>
             <Expander x:Name="oSetup" Header="Authenticator Setup" IsExpanded="True"
@@ -126,7 +126,7 @@
                             Style="{StaticResource Crypture.GlyphButton}" Tag="&#xE8C8;" />
                     </WrapPanel>
                     <TextBlock Foreground="{DynamicResource Crypture.MutedBrush}" TextWrapping="Wrap">
-                        <Run Text="Use the service's secret and settings for an existing account. " />
+                        <Run Text="Use the service's secret and settings for an existing account." />
                         <Run Text="Register any new secret with the service before using its codes." />
                     </TextBlock>
                 </StackPanel>

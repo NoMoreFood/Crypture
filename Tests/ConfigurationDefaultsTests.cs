@@ -386,7 +386,7 @@ internal static partial class RegressionTests
                 "SQL Server connection keeps creation-only escrow choices hidden");
             oCreateSql.IsChecked = true;
             Check(oEscrowPanel.Visibility == Visibility.Visible &&
-                ((Button)oSqlDialog.FindName("oConnect")).Content.ToString() == "Create",
+                ((Button)oSqlDialog.FindName("oConnect")).Content.ToString() == "_Create",
                 "SQL Server creation prompts for the escrow identity");
             oSqlDialog.WindowStartupLocation = WindowStartupLocation.Manual;
             oSqlDialog.Left = oSqlDialog.Top = -20000;
