@@ -7,6 +7,12 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Crypture;
 
 internal static partial class RegressionTests
@@ -15,8 +21,10 @@ internal static partial class RegressionTests
     {
         string sPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
         string sConfig = File.ReadAllText(sPath);
+        string sDescriptorValue = SecurityElement.Escape(sDescriptor ?? "")
+            .Replace("\t", "&#x9;").Replace("\r", "&#xD;").Replace("\n", "&#xA;");
         string sSection = "<appSettings><add key=\"RecoveryProtectionDescriptor\" value=\"" +
-            SecurityElement.Escape(sDescriptor ?? "") + "\"/><add key=\"RecoveryCertificateBase64\" value=\"" +
+            sDescriptorValue + "\"/><add key=\"RecoveryCertificateBase64\" value=\"" +
             SecurityElement.Escape(sCertificate ?? "") + "\"/></appSettings>";
         if (!sConfig.Contains("<appSettings>")) throw new Exception("The test configuration lacks appSettings.");
         File.WriteAllText(sPath, Regex.Replace(sConfig, @"<appSettings>.*?</appSettings>",
@@ -37,6 +45,38 @@ internal static partial class RegressionTests
         {
             Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = true;
             Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = false;
+
+            // Exercise configured aliases and native policies through Windows descriptor validation.
+            ProtectionPrincipal oUser = new ProtectionPrincipal(CertificateOperations.CurrentUserSid);
+            ProtectionPrincipal oGroup = new ProtectionPrincipal("S-1-5-32-545");
+            string sAny = PrincipalProtection.CreateDescriptor(new[] { oUser, oGroup }, false);
+            string sAll = PrincipalProtection.CreateDescriptor(new[] { oUser, oGroup }, true);
+            string sMixed = "SID=" + oUser.Sid + " AND SID=" + oGroup.Sid + " OR SID=S-1-1-0";
+            string sLocalMixed = "SID=" + oUser.Sid + " OR LOCAL=user";
+            foreach (var (sConfigured, sExpected) in new[]
+            {
+                (oUser.Name + " OR SID=" + oGroup.Sid, sAny),
+                ("SID=" + oGroup.Sid + " OR " + oUser.Name, sAny),
+                (oUser.Name + " AND SID=" + oGroup.Sid, sAll),
+                ("SID=" + oGroup.Sid + "  AND  SID=" + oUser.Name, sAll),
+                ("SID=" + oUser.Sid + "  OR  SID=" + oGroup.Sid, sAny),
+                ("SID=" + oUser.Sid + "\tOR\tSID=" + oGroup.Sid, sAny),
+                ("SID=" + oUser.Sid + "\nOR\nSID=" + oGroup.Sid, sAny),
+                ("SID=" + oUser.Sid + " OR SID=\\53-1-5-32-545", sAny),
+                (sMixed, sMixed),
+                ("SID=" + oUser.Name + " AND SID=" + oGroup.Sid + " OR SID=S-1-1-0", sMixed),
+                (sLocalMixed, sLocalMixed),
+                ("LOCAL=user OR " + oUser.Name, "LOCAL=user OR SID=" + oUser.Sid),
+                ("SDDL=O:SYG:SYD:(A;;CCDC;;;WD)", "SDDL=O:SYG:SYD:(A;;CCDC;;;WD)"),
+                ("WEBCREDENTIALS=foo\\  OR LOCAL=user", "WEBCREDENTIALS=foo\\  OR LOCAL=user")
+            })
+            {
+                SetRecoveryConfig(sConfigured, null);
+                RecoveryPolicy oPolicy = RecoveryPolicy.Read();
+                Check(oPolicy.Descriptor == sConfigured &&
+                    PrincipalProtection.ResolveRecoveryDescriptor(oPolicy.Descriptor) == sExpected,
+                    "Configured recovery retains native rules and resolves principal terms: " + sConfigured);
+            }
             SetRecoveryConfig(null, null);
             Check(!RecoveryPolicy.Read().IsEnabled, "Empty adjacent recovery settings preserve normal protection");
             DatabaseOperations.CreateDatabase(sPath,
@@ -71,6 +111,21 @@ internal static partial class RegressionTests
             oReport = VaultHealthCheck.Run(sPath, true, false, CancellationToken.None);
             Check(!oReport.Findings.Any(f => f.Severity == HealthStatus.Error || f.Kind == "Emergency Recovery"),
                 "Health check accepts saved recovery envelopes and recognizes current coverage");
+
+            // Native boolean policies retain their expression in saved envelopes and health reports.
+            const string NativeRecovery = "LOCAL=user AND LOCAL=machine OR LOCAL=user";
+            SetRecoveryConfig(NativeRecovery, null);
+            DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
+            Check(RecoveryProtection.ReadWindowsKeys(oCertificateItem.Cipher).Single().Key == NativeRecovery &&
+                ItemCryptography.Decrypt(oCertificateItem).SequenceEqual(oPlain),
+                "Native mixed recovery expressions survive a saved Windows key round trip");
+            oReport = VaultHealthCheck.Run(sPath, true, false, CancellationToken.None);
+            Check(!oReport.Findings.Any(f => f.Severity == HealthStatus.Error || f.Kind == "Emergency Recovery"),
+                "Health check matches a saved native mixed recovery policy");
+            SetRecoveryConfig(PrincipalProtection.LocalUserDescriptor, null);
+            DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
 
             DatabaseOperations.SaveItem(new Item { Label = "Windows Item", ItemType = "text" },
                 oPlain, null, PrincipalProtection.LocalMachineDescriptor);
@@ -134,6 +189,19 @@ internal static partial class RegressionTests
                 "Recovery certificate access is stored in the Vault, independent of current configuration");
 
             // Bad policies and unavailable providers fail without modifying an existing item or its recipients.
+            string sMissingAccount = Environment.MachineName + "\\CryptureMissing-" + Guid.NewGuid().ToString("N");
+            SetRecoveryConfig(sMissingAccount, null);
+            Check(RecoveryPolicy.Read().Descriptor == sMissingAccount,
+                "Configured recovery names are not looked up until encryption");
+            Reject(() => DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary }),
+                "An unresolved recovery name blocks saving");
+            Item oPreserved = LoadItem(oCertificateItem.ItemId);
+            Check(oPreserved.ModifiedDate == oCertificateItem.ModifiedDate &&
+                oPreserved.Cipher.CipherText.SequenceEqual(oCertificateItem.Cipher.CipherText) &&
+                oPreserved.Cipher.ProtectedKey.SequenceEqual(oCertificateItem.Cipher.ProtectedKey) &&
+                oPreserved.Instances.Count == oCertificateItem.Instances.Count &&
+                ItemCryptography.Decrypt(oPreserved).SequenceEqual(oPlain),
+                "Failed name resolution preserves saved content, recipients, and recovery access");
             foreach (string sInvalid in new[] { "not base64", Convert.ToBase64String(new byte[] { 1, 2, 3 }) })
             {
                 SetRecoveryConfig(null, sInvalid);
@@ -209,17 +277,22 @@ internal static partial class RegressionTests
             string sDomainSids = Environment.GetEnvironmentVariable("CRYPTURE_TEST_DOMAIN_SIDS");
             if (PrincipalProtection.IsDomainJoined && !String.IsNullOrWhiteSpace(sDomainSids))
             {
-                string sDomainPolicy = PrincipalProtection.CreateDescriptor(
-                    sDomainSids.Split(';').Select(ProtectionPrincipal.Resolve), false);
-                SetRecoveryConfig(sDomainPolicy, sCertificate);
+                ProtectionPrincipal[] oDomainPrincipals = sDomainSids.Split(';')
+                    .Select(ProtectionPrincipal.Resolve).ToArray();
+                string sDomainPolicy = PrincipalProtection.CreateDescriptor(oDomainPrincipals, false);
+                SetRecoveryConfig(String.Join(" OR ", oDomainPrincipals.Select((p, i) =>
+                    i == 0 ? p.Name : "SID=" + p.Sid)), sCertificate);
                 DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
                 oCertificateItem = LoadItem(oCertificateItem.ItemId);
-                Check(ItemCryptography.Decrypt(oCertificateItem).SequenceEqual(oPlain),
-                    "Domain recovery principals decrypt a certificate item without any certificate private key");
+                Check(RecoveryProtection.ReadWindowsKeys(oCertificateItem.Cipher).Single().Key == sDomainPolicy &&
+                    ItemCryptography.Decrypt(oCertificateItem).SequenceEqual(oPlain),
+                    "Named domain recovery saves SIDs and decrypts without any certificate private key");
                 DatabaseOperations.SaveItem(oWindowsItem, oPlain, new[] { oPrimary },
                     PrincipalProtection.LocalMachineDescriptor);
                 oWindowsItem = LoadItem(oWindowsItem.ItemId);
                 var oEnvelopes = RecoveryProtection.ReadWindowsKeys(oWindowsItem.Cipher);
+                Check(oEnvelopes[1].Key == sDomainPolicy,
+                    "Named domain recovery stores its resolved SID policy independently of the primary scope");
                 byte[] oPrimaryKeys = null, oDomainKeys = null;
                 try
                 {
@@ -244,6 +317,150 @@ internal static partial class RegressionTests
             CryptureEntities.ConnectionString = sPreviousConnection;
             Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = bSelfSigned;
             Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = bRevocation;
+        }
+    }
+
+    private static void TestRecoveryNotice(string sDirectory)
+    {
+        string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
+        string sConnection = CryptureEntities.ConnectionString;
+        bool bOriginalDark = App.IsDarkMode;
+        ItemEditor oEditor = null;
+
+        void CheckDetails(string sExpected, string sName)
+        {
+            Exception oFailure = null;
+            Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                Popup oDialog = Application.Current.Windows.OfType<Popup>().Single();
+                try
+                {
+                    TextBox oMessage = (TextBox)oDialog.FindName("oMessage");
+                    PumpUntil(() => oMessage.Text != "Loading recovery details...");
+                    Check(oDialog.Owner == oEditor && oDialog.Title == "Emergency Recovery" &&
+                        oMessage.Text.Contains(sExpected), sName);
+                    SavePopupImage(oDialog, sExpected == "RecoveryCertificateBase64"
+                        ? "recovery-error" : "recovery-group");
+                }
+                catch (Exception oError) { oFailure = oError; }
+                finally { oDialog.Close(); }
+            }));
+            ((Hyperlink)oEditor.FindName("oRecoveryDetailsLink"))
+                .RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+            if (oFailure != null) throw oFailure;
+        }
+
+        try
+        {
+            string sVault = Path.Combine(sDirectory, "recovery-notice.cryptdb");
+            DatabaseOperations.CreateDatabase(sVault, File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "SQLite.sql")));
+            CryptureEntities.DatabasePath = sVault;
+            ProtectionPrincipal oGroup = new ProtectionPrincipal("S-1-5-32-545");
+            foreach (string sDescriptor in new[] { oGroup.Name, "SID=" + oGroup.Name })
+            {
+                SetRecoveryConfig(sDescriptor, null);
+                oEditor = CreateEditor();
+                oEditor.Left = oEditor.Top = -20000;
+                oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
+                oEditor.ShowActivated = oEditor.ShowInTaskbar = false;
+                oEditor.Show();
+                PumpUntil(() => oEditor.IsLoaded && oEditor.CertificateLoading.IsCompleted);
+                TextBlock oNotice = (TextBlock)oEditor.FindName("oRecoveryNotice");
+                StackPanel oPane = (StackPanel)oNotice.Parent;
+                Check(oNotice.IsVisible && oPane.Children[oPane.Children.Count - 1] == oNotice &&
+                    new TextRange(oNotice.ContentStart, oNotice.ContentEnd).Text.Length < 60,
+                    "Emergency recovery is a concise notice at the end of the editor pane");
+                CheckDetails("Windows: " + oGroup.Name,
+                    "Recovery dialog displays the configured group name: " + sDescriptor);
+
+                // Saved policy metadata is displayed without opening any protected keys.
+                oEditor.ThisItem.Cipher = new Cipher
+                {
+                    CipherParams = ItemCryptography.RecoveryFormat,
+                    ProtectedKey = TestRecoveryEnvelope("SID=" + oGroup.Sid)
+                };
+                oEditor.SetEditingControls(true);
+                CheckDetails("Saved Windows: " + oGroup.Name,
+                    "Recovery dialog displays a saved group SID as its Windows name");
+                foreach (bool bDark in new[] { false, true })
+                foreach (double nFontSize in new[] { 12d, 18d, 24d })
+                foreach (int nMode in new[] { 0, 1 })
+                {
+                    App.ApplyTheme(bDark);
+                    oEditor.FontSize = nFontSize;
+                    oEditor.Width = oEditor.MinWidth;
+                    oEditor.Height = oEditor.MinHeight;
+                    ((ComboBox)oEditor.FindName("oProtectionMode")).SelectedIndex = nMode;
+                    oEditor.UpdateLayout();
+                    oNotice.BringIntoView();
+                    oEditor.UpdateLayout();
+                    Border oEncryption = oPane.Children.OfType<Border>().Single();
+                    Rect oNoticeBounds = oNotice.TransformToAncestor(oPane)
+                        .TransformBounds(new Rect(oNotice.RenderSize));
+                    Rect oEncryptionBounds = oEncryption.TransformToAncestor(oPane)
+                        .TransformBounds(new Rect(oEncryption.RenderSize));
+                    ScrollViewer oScroll = (ScrollViewer)oPane.Parent;
+                    Rect oVisibleBounds = oNotice.TransformToAncestor(oScroll)
+                        .TransformBounds(new Rect(oNotice.RenderSize));
+                    Check(oNoticeBounds.Top >= oEncryptionBounds.Bottom + 8 && oNoticeBounds.Left >= 0 &&
+                        oNoticeBounds.Right <= oPane.ActualWidth + 1 && oNotice.ActualHeight <= nFontSize * 3 &&
+                        oVisibleBounds.Top >= 0 && oVisibleBounds.Bottom <= oScroll.ActualHeight + 1,
+                        "Recovery notice fits below encryption controls, mode " + nMode +
+                        ", font " + nFontSize + ", dark " + bDark);
+
+                    string sRenderDirectory = Environment.GetEnvironmentVariable("CRYPTURE_TEST_RENDER_DIR");
+                    if (String.IsNullOrWhiteSpace(sRenderDirectory)) continue;
+                    Directory.CreateDirectory(sRenderDirectory);
+                    FrameworkElement oContent = (FrameworkElement)oEditor.Content;
+                    RenderTargetBitmap oRender = new RenderTargetBitmap((int)oContent.ActualWidth,
+                        (int)oContent.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    DrawingVisual oVisual = new DrawingVisual();
+                    using (DrawingContext oDrawing = oVisual.RenderOpen())
+                    {
+                        Rect oBounds = new Rect(oContent.RenderSize);
+                        oDrawing.DrawRectangle(oEditor.Background, null, oBounds);
+                        oDrawing.DrawRectangle(new VisualBrush(oContent), null, oBounds);
+                    }
+                    oRender.Render(oVisual);
+                    PngBitmapEncoder oEncoder = new PngBitmapEncoder();
+                    oEncoder.Frames.Add(BitmapFrame.Create(oRender));
+                    using FileStream oFile = File.Create(Path.Combine(sRenderDirectory,
+                        "recovery-editor-" + bDark + "-" + nFontSize + "-" + nMode + ".png"));
+                    oEncoder.Save(oFile);
+                }
+
+                SetRecoveryConfig(oGroup.Name + " S-1-1-0", null);
+                CheckDetails("Windows: " + oGroup.Name + " S-1-1-0",
+                    "Configured group names retain SID-like text without being rewritten");
+
+                // Configuration errors retain their details while the footer stays short.
+                SetRecoveryConfig(null, "not base64");
+                oEditor.SetEditingControls(true);
+                Check(oNotice.IsVisible && ((Run)oEditor.FindName("oRecoverySummary")).Text ==
+                    "Recovery settings need attention. ", "Invalid recovery settings keep a concise warning");
+                CheckDetails("RecoveryCertificateBase64", "Recovery details explain invalid configuration");
+                SetRecoveryConfig(null, null);
+                oEditor.ThisItem.Cipher = null;
+                oEditor.SetEditingControls(true);
+                Check(oNotice.Visibility == Visibility.Collapsed,
+                    "Recovery notice is hidden when no configured or saved recovery exists");
+                oEditor.bHasChanges = false;
+                oEditor.Close();
+                oEditor = null;
+            }
+        }
+        finally
+        {
+            if (oEditor != null)
+            {
+                oEditor.bHasChanges = false;
+                oEditor.Close();
+            }
+            File.WriteAllBytes(sConfigPath, oOriginalConfig);
+            CryptureEntities.ConnectionString = sConnection;
+            App.ApplyTheme(bOriginalDark);
         }
     }
 

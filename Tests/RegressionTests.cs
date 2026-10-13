@@ -114,6 +114,7 @@ internal static partial class RegressionTests
                 {
                     if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_UI_ONLY") == "1")
                     {
+                        TestRecoveryNotice(sDirectory);
                         TestCertificateCreator();
                         TestTotpLayout();
                         TestVaultOperations(sDirectory);
@@ -327,6 +328,10 @@ internal static partial class RegressionTests
             "Build and parse AND policies");
         Check(ProtectionPrincipal.Resolve(oUser.Name).Sid == oUser.Sid, "Resolve a Windows account name to its SID");
         Check(ProtectionPrincipal.Resolve(oUser.Sid).Sid == oUser.Sid, "Accept direct SID entry");
+        Check(PrincipalProtection.ResolveRecoveryDescriptor(oUser.Name) == "SID=" + oUser.Sid,
+            "Resolve a recovery account name to a SID descriptor");
+        Check(PrincipalProtection.ResolveRecoveryDescriptor("SID=" + oUser.Name + " OR SID=" + oGroup.Sid) == sAny,
+            "Resolve named recovery principals in a descriptor");
         Reject(() => PrincipalProtection.CreateDescriptor(new ProtectionPrincipal[0], false),
             "Reject an empty principal policy");
         Reject(() => PrincipalProtection.ParseDescriptor("SID=S-1-5-18 OR LOCAL=machine", out _),
@@ -782,6 +787,7 @@ internal static partial class RegressionTests
         try
         {
             TestPopups();
+            TestRecoveryNotice(sDirectory);
 
             // Locking must clear secrets even when the Vault cannot be opened.
             oEditor = CreateEditor(oItem);

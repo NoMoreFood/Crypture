@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text.RegularExpressions;
 
 namespace Crypture
 {
@@ -116,6 +117,63 @@ namespace Crypture
                 throw new CryptographicException("The recovery protection descriptor is missing or invalid.");
             int nStatus = NCryptCreateProtectionDescriptor(sDescriptor, 0, out DescriptorHandle oDescriptor);
             using (oDescriptor) ThrowIfFailed(nStatus, "create the emergency recovery policy");
+        }
+
+        internal static void ValidateRecoveryDescriptor(string sDescriptor) =>
+            ResolveRecoveryDescriptor(sDescriptor, false);
+
+        internal static string ResolveRecoveryDescriptor(string sDescriptor, bool bResolveNames = true)
+        {
+            if (String.IsNullOrWhiteSpace(sDescriptor) || sDescriptor.Length > MaxDescriptorLength ||
+                sDescriptor.Contains("\0"))
+                throw new CryptographicException("The recovery protection descriptor is missing or invalid.");
+            try
+            {
+                // Resolve each principal independently without changing native providers or boolean precedence.
+                string[] oParts = Regex.Split(sDescriptor, @"(\s+(?:AND|OR)\s+)");
+                bool bPrincipalsOnly = true;
+                int nPrincipals = 0;
+                for (int nIndex = 0; nIndex < oParts.Length; nIndex += 2)
+                {
+                    string sPart = oParts[nIndex].Trim();
+                    bool bSid = sPart.StartsWith(SidPrefix, StringComparison.OrdinalIgnoreCase);
+                    if (!bSid && sPart.Contains('='))
+                    {
+                        bPrincipalsOnly = false;
+                        continue;
+                    }
+                    string sName = (bSid ? sPart.Substring(SidPrefix.Length) : sPart).Trim();
+                    if (String.IsNullOrEmpty(sName))
+                        throw new CryptographicException("The recovery protection descriptor is missing or invalid.");
+                    if (++nPrincipals > MaxPrincipals)
+                        throw new CryptographicException("The recovery protection descriptor has too many principals.");
+
+                    // Decode native SID escapes while retaining Windows account spelling for name lookups.
+                    string sSidName = bSid ? Regex.Replace(sName, @"\\([0-9a-fA-F]{2})",
+                        m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString()) : sName;
+
+                    // A placeholder validates the expression without looking up configured names before encryption.
+                    string sSid = !bResolveNames ? "S-1-1-0" :
+                        sSidName.StartsWith("S-", StringComparison.OrdinalIgnoreCase)
+                            ? new SecurityIdentifier(sSidName).Value : ProtectionPrincipal.Resolve(sName).Sid;
+                    oParts[nIndex] = SidPrefix + sSid;
+                }
+
+                // Simple principal lists share the canonical ordering used by the item editor.
+                bool bAnd = oParts.Any(s => s.Trim() == "AND"), bOr = oParts.Any(s => s.Trim() == "OR");
+                string sResolved = bPrincipalsOnly && !(bAnd && bOr)
+                    ? String.Join(bAnd ? " AND " : " OR ", oParts.Where((s, i) => i % 2 == 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.Ordinal))
+                    : String.Concat(oParts);
+                ValidateCustomDescriptor(sResolved);
+                return sResolved;
+            }
+            catch (Exception oError) when (oError is ArgumentException || oError is IdentityNotMappedException ||
+                oError is InvalidOperationException)
+            {
+                throw new CryptographicException("The emergency recovery Windows principal could not be resolved.",
+                    oError);
+            }
         }
 
         internal static byte[] Protect(byte[] oKeys, string sDescriptor, bool bCustomDescriptor = false)

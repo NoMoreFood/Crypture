@@ -37,8 +37,8 @@ namespace Crypture
                     Descriptor = String.IsNullOrEmpty(sDescriptor) ? null : sDescriptor
                 };
 
-                // Reject invalid configured recipients before allowing a save without recovery.
-                if (oPolicy.Descriptor != null) PrincipalProtection.ValidateCustomDescriptor(oPolicy.Descriptor);
+                // Reject invalid configured descriptors before allowing a save without recovery.
+                if (oPolicy.Descriptor != null) PrincipalProtection.ValidateRecoveryDescriptor(oPolicy.Descriptor);
                 if (String.IsNullOrEmpty(sCertificate)) return oPolicy;
                 if (sCertificate.Length > PrincipalProtection.MaxProtectedKeyLength)
                     throw new CryptographicException("The recovery certificate is too large.");
@@ -79,7 +79,9 @@ namespace Crypture
             using (MemoryStream oStream = new MemoryStream())
             using (BinaryWriter oWriter = new BinaryWriter(oStream, DescriptorEncoding))
             {
-                string[] oDescriptors = new[] { sPrimaryDescriptor, sRecoveryDescriptor }
+                string sResolvedRecoveryDescriptor = sRecoveryDescriptor == null ? null :
+                    PrincipalProtection.ResolveRecoveryDescriptor(sRecoveryDescriptor);
+                string[] oDescriptors = new[] { sPrimaryDescriptor, sResolvedRecoveryDescriptor }
                     .Where(s => s != null).Distinct(StringComparer.Ordinal).ToArray();
                 oWriter.Write(EnvelopeVersion);
                 oWriter.Write(oDescriptors.Length);

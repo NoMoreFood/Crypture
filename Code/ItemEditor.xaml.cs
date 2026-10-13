@@ -55,6 +55,8 @@ namespace Crypture
         private bool bEditing;
         private bool bLoadingCertificates;
         private bool bClosed;
+        private string sRecoveryDetails;
+        private bool bRecoveryInvalid;
         private readonly CancellationTokenSource oCertificateCancellation = new CancellationTokenSource();
         internal Task CertificateLoading { get; private set; } = Task.CompletedTask;
         private readonly bool bDpapiNgEnabled = Properties.Settings.Default.EnableDpapiNgProtection;
@@ -717,43 +719,89 @@ namespace Crypture
         {
             if (oRecoveryNotice == null) return;
             List<string> oDetails = new List<string>();
+            bRecoveryInvalid = false;
             try
             {
                 RecoveryPolicy oPolicy = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage);
                 string sEscrowLabel = (CryptureEntities.Storage as SqlServerVaultStorage)?.Escrow?.Label;
-                if (sEscrowLabel != null) oDetails.Add("Vault Escrow: " + sEscrowLabel);
+                if (sEscrowLabel != null) oDetails.Add("Vault recovery: " + sEscrowLabel);
                 else if (oPolicy.Descriptor != null)
-                    oDetails.Add("User Based Recovery: " + oPolicy.Descriptor);
+                    oDetails.Add("Windows: " + oPolicy.Descriptor);
                 if (oPolicy.Certificate != null)
                 {
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oPolicy.Certificate))
-                        if (sEscrowLabel == null) oDetails.Add("Certificate Based Recovery: " +
+                        if (sEscrowLabel == null) oDetails.Add("Certificate: " +
                             oCert.GetNameInfo(X509NameType.SimpleName, false));
                 }
-                if (oDetails.Count != 0) oDetails.Add("Recovery is added automatically on every save. " +
-                    "Decrypt and save older items to add it. Recovery recipients can decrypt independently.");
+                if (oDetails.Count != 0) oDetails.Add(Environment.NewLine + "Saving applies configured recovery. " +
+                    "Recipients can decrypt independently." + Environment.NewLine);
                 if (!String.IsNullOrWhiteSpace(ThisItem.Cipher?.EscrowLabel))
-                    oDetails.Add("Saved Escrow: " + ThisItem.Cipher.EscrowLabel);
+                    oDetails.Add("Saved vault recovery: " + ThisItem.Cipher.EscrowLabel);
                 if (ThisItem.Cipher?.CipherParams is ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
                 {
                     bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
                     foreach (var oEntry in RecoveryProtection.ReadSavedWindowsKeys(ThisItem.Cipher))
                         if (oEntry.Key != ThisItem.Cipher.ProtectionDescriptor)
-                            oDetails.Add("Saved User Based Recovery: " + oEntry.Key);
+                            oDetails.Add("Saved Windows: " + oEntry.Key);
                     if ((bFido || ItemCryptography.UsesWindowsProtection(ThisItem.Cipher)) &&
                         UserListSelected.Count != 0)
-                        oDetails.Add("Saved Certificate Based Recovery: " +
+                        oDetails.Add("Saved certificate: " +
                             String.Join(", ", UserListSelected.Select(u => u.Name)));
                 }
-                oRecoveryNotice.Text = "Emergency Recovery" + Environment.NewLine +
-                    String.Join(Environment.NewLine, oDetails);
+                oRecoverySummary.Text = oPolicy.IsEnabled ? "Emergency recovery configured. " :
+                    "Emergency recovery saved. ";
             }
             catch (Exception oError) when (oError is InvalidOperationException || oError is CryptographicException)
             {
                 oDetails.Add(oError.Message);
-                oRecoveryNotice.Text = "Emergency Recovery: " + oError.Message;
+                bRecoveryInvalid = true;
+                oRecoverySummary.Text = "Recovery settings need attention. ";
             }
+            sRecoveryDetails = String.Join(Environment.NewLine, oDetails).Trim();
             oRecoveryNotice.Visibility = oDetails.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private void oRecoveryDetails_Click(object sender, RoutedEventArgs e)
+        {
+            if (bBusy) return;
+            UpdateRecoveryNotice();
+            if (String.IsNullOrEmpty(sRecoveryDetails)) return;
+            string sDetails = sRecoveryDetails;
+            Popup oDialog = new Popup(bRecoveryInvalid ? sDetails : "Loading recovery details...",
+                "Emergency Recovery", MessageBoxButton.OK,
+                bRecoveryInvalid ? MessageBoxImage.Warning : MessageBoxImage.Information) { Owner = this };
+            if (!bRecoveryInvalid) oDialog.Loaded += async (s, args) =>
+            {
+                // Resolve saved SIDs for display without delaying the editor or the dialog's first frame.
+                string sMessage = await Task.Run(() =>
+                {
+                    string[] oLines = sDetails.Split(Environment.NewLine);
+                    for (int nIndex = 0; nIndex < oLines.Length; nIndex++)
+                    {
+                        if (!oLines[nIndex].StartsWith("Windows: ", StringComparison.Ordinal) &&
+                            !oLines[nIndex].StartsWith("Saved Windows: ", StringComparison.Ordinal)) continue;
+                        int nPolicyStart = oLines[nIndex].IndexOf(':') + 2;
+                        string[] oParts = Regex.Split(oLines[nIndex].Substring(nPolicyStart),
+                            @"(\s+(?:AND|OR)\s+)");
+                        for (int nPart = 0; nPart < oParts.Length; nPart += 2)
+                        {
+                            string sAccount = oParts[nPart].Trim();
+                            if (sAccount.StartsWith("SID=", StringComparison.OrdinalIgnoreCase))
+                                sAccount = sAccount.Substring(4).Trim();
+                            if (Regex.IsMatch(sAccount, @"^S-\d+(?:-\d+)+$", RegexOptions.IgnoreCase))
+                            {
+                                try { sAccount = new ProtectionPrincipal(sAccount).Name; }
+                                catch (SystemException) { }
+                            }
+                            oParts[nPart] = sAccount;
+                        }
+                        oLines[nIndex] = oLines[nIndex].Substring(0, nPolicyStart) + String.Concat(oParts);
+                    }
+                    return String.Join(Environment.NewLine, oLines);
+                });
+                if (oDialog.IsVisible) ((TextBox)oDialog.FindName("oMessage")).Text = sMessage;
+            };
+            oDialog.ShowDialog();
         }
 
         private void oProtectionChanged(object sender, SelectionChangedEventArgs e)

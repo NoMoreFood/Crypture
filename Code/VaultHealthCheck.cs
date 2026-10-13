@@ -240,22 +240,24 @@ namespace Crypture
                     RecoveryPolicy.ReadForStorage(oStorage, true);
                 if (oRecovery.IsEnabled)
                 {
+                    string sRecoveryDescriptor = oRecovery.Descriptor == null ? null :
+                        PrincipalProtection.ResolveRecoveryDescriptor(oRecovery.Descriptor);
                     HashSet<long> oRecoveryUsers = new HashSet<long>(oUsers.Where(u =>
                         oRecovery.Certificate != null && u.Certificate != null &&
                         u.Certificate.SequenceEqual(oRecovery.Certificate)).Select(u => u.UserId));
                     foreach (Item oItem in oItems.Where(i => i.Cipher != null))
                     {
                         oCancellation.ThrowIfCancellationRequested();
-                        bool bWindows = oRecovery.Descriptor == null ||
+                        bool bWindows = sRecoveryDescriptor == null ||
                             oItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat &&
-                            oItem.Cipher.ProtectionDescriptor == oRecovery.Descriptor;
+                            oItem.Cipher.ProtectionDescriptor == sRecoveryDescriptor;
                         if (!bWindows && oItem.Cipher.CipherParams is
                             ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
                         {
                             try
                             {
                                 bWindows = RecoveryProtection.ReadSavedWindowsKeys(oItem.Cipher)
-                                    .Any(e => e.Key == oRecovery.Descriptor);
+                                    .Any(e => e.Key == sRecoveryDescriptor);
                             }
                             catch (CryptographicException)
                             {
@@ -272,7 +274,7 @@ namespace Crypture
                     }
                 }
             }
-            catch (InvalidOperationException oError)
+            catch (Exception oError) when (oError is InvalidOperationException || oError is CryptographicException)
             {
                 HealthCheckFinding oInvalid = Finding("Emergency Recovery",
                     "Configuration", "Crypture.exe.config", oItems);

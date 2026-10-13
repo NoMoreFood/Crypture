@@ -121,9 +121,6 @@
                                 AutomationProperties.Name="Disabled Encryption" />
                             <TextBlock x:Name="oRequiredCertificateNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}" />
-                            <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,8,0,0"
-                                TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
-                                AutomationProperties.Name="Emergency Recovery" />
                             <StackPanel x:Name="oPrincipalPanel" Margin="0,8,0,0">
                                 <Label Content="_Scope:" Target="{Binding ElementName=oPrincipalScope}"
                                     Padding="0,0,0,4"
@@ -290,6 +287,14 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                    <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,10,0,0"
+                        TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
+                        AutomationProperties.Name="Emergency Recovery">
+                        <Run x:Name="oRecoverySummary" Text="Emergency recovery configured. " />
+                        <Hyperlink x:Name="oRecoveryDetailsLink" Click="oRecoveryDetails_Click"
+                            Foreground="{DynamicResource Crypture.AccentBrush}"
+                            AutomationProperties.Name="Emergency Recovery Details">Details...</Hyperlink>
+                    </TextBlock>
                 </StackPanel>
             </ScrollViewer>
             <Border Width="1" Background="{DynamicResource Crypture.BorderBrush}" DockPanel.Dock="Left" />
