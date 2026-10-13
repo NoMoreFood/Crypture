@@ -23,7 +23,7 @@ namespace Crypture
         internal static bool IsDarkMode { get; private set; }
         private static bool bThemeApplied;
         private static readonly ClipboardExpiration oClipboardExpiration = new ClipboardExpiration();
-        private DispatcherTimer oPrivacyTimer;
+        internal DispatcherTimer oPrivacyTimer;
         private DateTime oLastActivityUtc;
         internal const string ClipboardExclusionFormat = "ExcludeClipboardContentFromMonitorProcessing";
         internal static TimeSpan PrivacyIdleTimeout => TimeSpan.FromMinutes(
@@ -149,7 +149,7 @@ namespace Crypture
                 oLastActivityUtc = DateTime.UtcNow;
         }
 
-        private static void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        internal static void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
         {
             if (e.Reason is not (SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or
                 SessionSwitchReason.RemoteDisconnect)) return;
@@ -217,8 +217,9 @@ namespace Crypture
 
         internal static void ApplyWindowTheme(Window oWindow)
         {
-            // DWM title-bar attribute identifiers.
+            // DWM title-bar attribute identifiers; Windows builds before 18985 use the earlier dark-mode value.
             const int ImmersiveDarkModeAttribute = 20;
+            const int EarlyImmersiveDarkModeAttribute = 19;
             const int CaptionColorAttribute = 35;
             const int CaptionTextColorAttribute = 36;
             IntPtr hWindow = new WindowInteropHelper(oWindow).Handle;
@@ -230,7 +231,8 @@ namespace Crypture
             int nDark = IsDarkMode ? 1 : 0;
             int nCaption = IsDarkMode ? 0x001E1E1E : -1;
             int nText = IsDarkMode ? 0x00F1F1F1 : -1;
-            DwmSetWindowAttribute(hWindow, ImmersiveDarkModeAttribute, ref nDark, sizeof(int));
+            if (DwmSetWindowAttribute(hWindow, ImmersiveDarkModeAttribute, ref nDark, sizeof(int)) != 0)
+                DwmSetWindowAttribute(hWindow, EarlyImmersiveDarkModeAttribute, ref nDark, sizeof(int));
             DwmSetWindowAttribute(hWindow, CaptionColorAttribute, ref nCaption, sizeof(int));
             DwmSetWindowAttribute(hWindow, CaptionTextColorAttribute, ref nText, sizeof(int));
         }

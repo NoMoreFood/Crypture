@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -148,8 +147,7 @@ internal static partial class RegressionTests
         }
         CryptographicOperations.ZeroMemory(oPayload);
         TotpSecret oDisposed = new TotpSecret(RfcTotpSecret);
-        byte[] oKey = (byte[])typeof(TotpSecret).GetField("oKey", BindingFlags.Instance | BindingFlags.NonPublic)
-            .GetValue(oDisposed);
+        byte[] oKey = oDisposed.oKey;
         oDisposed.Dispose();
         Check(oKey.All(b => b == 0), "Disposing a TOTP seed clears its decoded key bytes");
         Reject(() => oDisposed.GetCode(DateTimeOffset.UtcNow), "A disposed TOTP seed cannot generate codes");
@@ -175,7 +173,7 @@ internal static partial class RegressionTests
                 oPayload, null, PrincipalProtection.LocalUserDescriptor);
             Item oStored;
             using (CryptureEntities oContext = new CryptureEntities())
-                oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                oStored = LoadItem(oContext.Items.Single().ItemId);
             oPlain = ItemCryptography.Decrypt(oStored);
             using (TotpSecret oReloaded = TotpSecret.Parse(Encoding.UTF8.GetString(oPlain)))
                 Check(oReloaded.GetBase32() == RfcTotpSecret && oReloaded.Digits == 8 &&
@@ -191,13 +189,10 @@ internal static partial class RegressionTests
             oEditor.SetEditingControls(true);
             TotpPanel oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
             oPanel.LoadUri(Encoding.UTF8.GetString(oPlain));
-            TotpSecret oCached = (TotpSecret)typeof(TotpPanel).GetField("oSecret",
-                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oPanel);
+            TotpSecret oCached = oPanel.oSecret;
             Check(oCached.GetBase32() == RfcTotpSecret, "Unlock loads the active TOTP key before cleanup");
-            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(oEditor, false);
-            typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, new object[] { null, null });
+            oEditor.bHasChanges = false;
+            oEditor.oLockItemButton_Click(null, null);
             TextBlock oCode = (TextBlock)oPanel.FindName("oCurrentCode");
             Check(oCode.Text.Length == 0 && ((TextBox)oPanel.FindName("oSecretInput")).Text.Length == 0,
                 "Lock clears the TOTP seed and code");

@@ -52,7 +52,7 @@ internal static partial class RegressionTests
                 oPlain, new[] { oPrimary });
             Item oCertificateItem;
             using (CryptureEntities oContext = new CryptureEntities())
-                oCertificateItem = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                oCertificateItem = LoadItem(oContext.Items.Single().ItemId);
 
             // Existing items report missing coverage until the user can unlock and save them.
             SetRecoveryConfig(PrincipalProtection.LocalUserDescriptor, null);
@@ -60,7 +60,7 @@ internal static partial class RegressionTests
             Check(oReport.Findings.Any(f => f.Kind == "Emergency Recovery" && f.Severity == HealthStatus.Warning),
                 "Health check reports old items that lack the configured recovery access");
             DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-            oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
             Check(oCertificateItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat &&
                 oCertificateItem.Cipher.ProtectionDescriptor == null,
                 "Adding Windows recovery preserves the primary certificate protection mode");
@@ -76,7 +76,7 @@ internal static partial class RegressionTests
                 oPlain, null, PrincipalProtection.LocalMachineDescriptor);
             Item oWindowsItem;
             using (CryptureEntities oContext = new CryptureEntities())
-                oWindowsItem = DatabaseOperations.LoadItem(
+                oWindowsItem = LoadItem(
                     oContext.Items.Single(i => i.Label == "Windows Item").ItemId);
             Check(RecoveryProtection.ReadWindowsKeys(oWindowsItem.Cipher).Count == 2 &&
                 ItemCryptography.Decrypt(oWindowsItem).SequenceEqual(oPlain),
@@ -85,14 +85,14 @@ internal static partial class RegressionTests
             // A public recovery certificate is enforced even when the caller supplies no certificate recipients.
             SetRecoveryConfig(null, sCertificate);
             DatabaseOperations.SaveItem(oWindowsItem, oPlain, null, PrincipalProtection.LocalMachineDescriptor);
-            oWindowsItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
+            oWindowsItem = LoadItem(oWindowsItem.ItemId);
             Check(oWindowsItem.Instances.Count == 1 && ItemCryptography.Decrypt(oWindowsItem,
                 oWindowsItem.Instances.Single(), oRecoveryCert).SequenceEqual(oPlain),
                 "Configured recovery certificate decrypts a Windows item independently");
             Check(ItemCryptography.Decrypt(oWindowsItem).SequenceEqual(oPlain),
                 "Original Windows access remains usable with certificate recovery");
             DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-            oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
             Instance oRecoveryInstance = oCertificateItem.Instances.Single(i => i.UserId != oPrimary.UserId);
             Check(oCertificateItem.Instances.Count == 2 &&
                 ItemCryptography.Decrypt(oCertificateItem, oRecoveryInstance, oRecoveryCert).SequenceEqual(oPlain),
@@ -102,20 +102,20 @@ internal static partial class RegressionTests
 
             SetRecoveryConfig(PrincipalProtection.LocalUserDescriptor, sCertificate);
             DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-            oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
             Check(ItemCryptography.Decrypt(oCertificateItem).SequenceEqual(oPlain) &&
                 ItemCryptography.Decrypt(oCertificateItem,
                     oCertificateItem.Instances.Single(i => i.UserId != oPrimary.UserId),
                         oRecoveryCert).SequenceEqual(oPlain),
                 "Both recovery settings grant independent access to a certificate item");
             DatabaseOperations.SaveItem(oWindowsItem, oPlain, null, PrincipalProtection.LocalMachineDescriptor);
-            oWindowsItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
+            oWindowsItem = LoadItem(oWindowsItem.ItemId);
             Check(RecoveryProtection.ReadWindowsKeys(oWindowsItem.Cipher).Count == 2 &&
                 oWindowsItem.Instances.Count == 1 && ItemCryptography.Decrypt(oWindowsItem,
                 oWindowsItem.Instances.Single(), oRecoveryCert).SequenceEqual(oPlain),
                 "Both recovery settings grant independent access to a Windows item");
             DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-            oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
             using (CryptureEntities oContext = new CryptureEntities())
                 Check(oContext.Users.Count() == 2 && oCertificateItem.Instances.Count == 2,
                     "Repeated saves deduplicate the automatic recovery certificate");
@@ -125,11 +125,11 @@ internal static partial class RegressionTests
             DatabaseOperations.BackupDatabase(sPath, sBackup);
             SetRecoveryConfig(null, null);
             CryptureEntities.DatabasePath = sBackup;
-            Item oBackup = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            Item oBackup = LoadItem(oCertificateItem.ItemId);
             Check(ItemCryptography.Decrypt(oBackup).SequenceEqual(oPlain),
                 "Vault backups retain recovery access after the adjacent configuration is removed");
             CryptureEntities.DatabasePath = sPath;
-            Check(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(oWindowsItem.ItemId),
+            Check(ItemCryptography.Decrypt(LoadItem(oWindowsItem.ItemId),
                 oWindowsItem.Instances.Single(), oRecoveryCert).SequenceEqual(oPlain),
                 "Recovery certificate access is stored in the Vault, independent of current configuration");
 
@@ -139,7 +139,7 @@ internal static partial class RegressionTests
                 SetRecoveryConfig(null, sInvalid);
                 Reject(() => DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary }),
                     "Invalid recovery certificate blocks saving");
-                Item oUnchanged = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+                Item oUnchanged = LoadItem(oCertificateItem.ItemId);
                 Check(oUnchanged.ModifiedDate == oCertificateItem.ModifiedDate &&
                     oUnchanged.Cipher.CipherText.SequenceEqual(oCertificateItem.Cipher.CipherText) &&
                     oUnchanged.Cipher.ProtectedKey.SequenceEqual(oCertificateItem.Cipher.ProtectedKey) &&
@@ -149,7 +149,7 @@ internal static partial class RegressionTests
             SetRecoveryConfig("LOCAL=not-a-scope", null);
             Reject(() => DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary }),
                 "Invalid Windows recovery rule blocks saving without a fallback scope");
-            Check(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(oCertificateItem.ItemId)).SequenceEqual(oPlain),
+            Check(ItemCryptography.Decrypt(LoadItem(oCertificateItem.ItemId)).SequenceEqual(oPlain),
                 "Invalid configuration does not prevent decryption through the saved recovery policy");
             using (RSA oKey = new RSACng(2048))
             using (X509Certificate2 oExpired = Certificate(oKey, "Expired Recovery", DateTimeOffset.Now.AddDays(-3),
@@ -177,7 +177,7 @@ internal static partial class RegressionTests
             }
             SetRecoveryConfig(PrincipalProtection.LocalUserDescriptor, Convert.ToBase64String(oPrimaryCert.RawData));
             DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-            oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+            oCertificateItem = LoadItem(oCertificateItem.ItemId);
             Check(oCertificateItem.Instances.Count == 1,
                 "Recovery certificate matching a primary recipient is not duplicated");
 
@@ -196,7 +196,7 @@ internal static partial class RegressionTests
                 oContext.SaveChanges();
             }
             DatabaseOperations.RemoveCertificate(oOptionalRecovery.UserId);
-            oWindowsItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
+            oWindowsItem = LoadItem(oWindowsItem.ItemId);
             Check(oWindowsItem.Instances.Count == 0 && ItemCryptography.Decrypt(oWindowsItem).SequenceEqual(oPlain),
                 "Removing an optional recovery certificate preserves primary Windows decryption");
             using (CryptureEntities oContext = new CryptureEntities())
@@ -213,12 +213,12 @@ internal static partial class RegressionTests
                     sDomainSids.Split(';').Select(ProtectionPrincipal.Resolve), false);
                 SetRecoveryConfig(sDomainPolicy, sCertificate);
                 DatabaseOperations.SaveItem(oCertificateItem, oPlain, new[] { oPrimary });
-                oCertificateItem = DatabaseOperations.LoadItem(oCertificateItem.ItemId);
+                oCertificateItem = LoadItem(oCertificateItem.ItemId);
                 Check(ItemCryptography.Decrypt(oCertificateItem).SequenceEqual(oPlain),
                     "Domain recovery principals decrypt a certificate item without any certificate private key");
                 DatabaseOperations.SaveItem(oWindowsItem, oPlain, new[] { oPrimary },
                     PrincipalProtection.LocalMachineDescriptor);
-                oWindowsItem = DatabaseOperations.LoadItem(oWindowsItem.ItemId);
+                oWindowsItem = LoadItem(oWindowsItem.ItemId);
                 var oEnvelopes = RecoveryProtection.ReadWindowsKeys(oWindowsItem.Cipher);
                 byte[] oPrimaryKeys = null, oDomainKeys = null;
                 try

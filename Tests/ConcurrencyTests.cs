@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -80,7 +79,7 @@ internal static partial class RegressionTests
                 Enumerable.Range(0, 8).Select(i => "collision-" + i));
             Check(oCounts["writes"] == 1 && oCounts["conflicts"] == 7,
                 "Eight simultaneous edits produce one committed winner and seven explicit stale-edit rejections");
-            ValidateConcurrentItem(DatabaseOperations.LoadItem(nShared), oCert, oOtherCert);
+            ValidateConcurrentItem(LoadItem(nShared), oCert, oOtherCert);
             oCounts = RunConcurrentClients(sRoot, "delete", new[] { "delete", "resave" });
             using (CryptureEntities oContext = new())
                 Check(oCounts["deletes"] == 1 && oCounts["writes"] + oCounts["conflicts"] == 1 &&
@@ -98,7 +97,7 @@ internal static partial class RegressionTests
             Check(oCounts["writes"] + oCounts["certificateDeletes"] == 1 &&
                 oCounts["missingRecipientRejections"] + oCounts["lastRecipientRejections"] == 1,
                 "Recipient deletion and replacement preserve a readable item and reject the losing operation");
-            Item oRecipientItem = DatabaseOperations.LoadItem(nShared);
+            Item oRecipientItem = LoadItem(nShared);
             ValidateConcurrentItem(oRecipientItem, oCert, oOtherCert, nExpectedRecipients: 1);
             SaveConcurrentItem(oRecipientItem, "recipient:0:2", new[] { oUsers[0] });
 
@@ -124,10 +123,10 @@ internal static partial class RegressionTests
                     }
                     Check(oCounts["writes"] == 1, "A waiting save completes after the database lock is released");
                 }
-                Item oBefore = DatabaseOperations.LoadItem(nIds[0]);
+                Item oBefore = LoadItem(nIds[0]);
                 using (SqliteTransaction oTransaction = oConnection.BeginTransaction())
                     oCounts = RunConcurrentClients(sRoot, "timeout", new[] { "timeout-writer" });
-                Item oAfter = DatabaseOperations.LoadItem(nIds[0]);
+                Item oAfter = LoadItem(nIds[0]);
                 Check(oCounts["lockTimeouts"] == 1 && oAfter.Label == oBefore.Label &&
                     oAfter.Cipher.CipherText.SequenceEqual(oBefore.Cipher.CipherText),
                     "A bounded lock timeout leaves the previously committed encrypted item intact");
@@ -170,9 +169,9 @@ internal static partial class RegressionTests
             }
 
             // Terminate a process after modifying all three item tables inside an uncommitted transaction.
-            Item oBeforeCrash = DatabaseOperations.LoadItem(nIds[0]);
+            Item oBeforeCrash = LoadItem(nIds[0]);
             RunConcurrentClients(sRoot, "crash", new[] { "crash-writer" }, oProcesses => oProcesses[0].Kill(true));
-            Item oAfterCrash = DatabaseOperations.LoadItem(nIds[0]);
+            Item oAfterCrash = LoadItem(nIds[0]);
             Check(oAfterCrash.Label == oBeforeCrash.Label &&
                 oAfterCrash.Cipher.CipherText.SequenceEqual(oBeforeCrash.Cipher.CipherText) &&
                 oAfterCrash.Instances.Count == oBeforeCrash.Instances.Count,
@@ -316,8 +315,8 @@ internal static partial class RegressionTests
             long[] nIds = File.ReadAllLines(Path.Combine(sRoot, "items.txt")).Select(Int64.Parse).ToArray();
             bool bShared = sRole.StartsWith("collision-") || sRole is "delete" or "resave" or
                 "remove-recipient" or "recipient-save";
-            Item oOriginal = bShared ? DatabaseOperations.LoadItem(Int64.Parse(
-                File.ReadAllText(Path.Combine(sRoot, "shared.txt")))) : DatabaseOperations.LoadItem(nIds[0]);
+            Item oOriginal = bShared ? LoadItem(Int64.Parse(
+                File.ReadAllText(Path.Combine(sRoot, "shared.txt")))) : LoadItem(nIds[0]);
             if (sRole == "timeout-writer")
                 CryptureEntities.ConnectionString = new SqliteConnectionStringBuilder(
                     CryptureEntities.ConnectionString) { DefaultTimeout = 1 }.ConnectionString;
@@ -344,7 +343,7 @@ internal static partial class RegressionTests
                 {
                     string sProgress = Path.Combine(sSignals, sRole + ".progress");
                     File.WriteAllText(sProgress, "revision " + nRevision + ": load");
-                    Item oItem = DatabaseOperations.LoadItem(nIds[nWriter]);
+                    Item oItem = LoadItem(nIds[nWriter]);
                     File.WriteAllText(sProgress, "revision " + nRevision + ": update");
                     SaveConcurrentItem(oItem, "concurrent:" + nWriter + ":" + nRevision, oUsers);
                     File.WriteAllText(sProgress, "revision " + nRevision + ": create");
@@ -373,7 +372,7 @@ internal static partial class RegressionTests
                     bool bActive = WritersActive();
                     foreach (long nId in nIds)
                     {
-                        ValidateConcurrentItem(DatabaseOperations.LoadItem(nId), oCert, oOtherCert);
+                        ValidateConcurrentItem(LoadItem(nId), oCert, oOtherCert);
                         oCounts["reads"]++;
                         if (bActive) oCounts["overlappingReads"]++;
                     }
@@ -426,10 +425,8 @@ internal static partial class RegressionTests
                         else
                         {
                             bool bActive = WritersActive();
-                            typeof(ItemBrowser).GetMethod(
-                                "RefreshData", BindingFlags.Instance | BindingFlags.NonPublic)
-                                .Invoke(oBrowser, null);
-                            foreach (Item oItem in oBrowser.ItemList)
+                            foreach (Item oItem in ItemBrowser.ReadVaultDataAsync(CryptureEntities.Storage,
+                                CancellationToken.None).GetAwaiter().GetResult().Items)
                                 ValidateConcurrentItem(oItem, oCert, oOtherCert, false);
                             oCounts["refreshes"]++;
                             if (bActive) oCounts["overlappingRefreshes"]++;

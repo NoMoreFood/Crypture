@@ -2,7 +2,6 @@ using System;
 using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 using Crypture;
 
@@ -13,12 +12,9 @@ internal static partial class RegressionTests
         Crypture.Properties.Settings oSettings = Crypture.Properties.Settings.Default;
         StringCollection oOriginal = oSettings.RecentVaults;
         string sOriginalLastVault = oSettings.LastVault;
-        MethodInfo oLoadVault = typeof(ItemBrowser).GetMethod("LoadDatabaseAsync",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-
         bool LoadVault(string sPath)
         {
-            Task<bool> oLoading = (Task<bool>)oLoadVault.Invoke(oBrowser, new object[] { sPath });
+            Task<bool> oLoading = oBrowser.LoadDatabaseAsync(sPath);
             PumpUntil(() => oLoading.IsCompleted);
             return oLoading.GetAwaiter().GetResult();
         }
@@ -59,9 +55,8 @@ internal static partial class RegressionTests
             oSaved.Reload();
             Check(oSaved.RecentVaults.Cast<string>().SequenceEqual(oSettings.RecentVaults.Cast<string>()),
                 "Recent history persists immediately outside the Vault");
-            typeof(ItemBrowser).GetMethod("oClearRecentVaults_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oBrowser, new object[] { null,
-                    new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent) });
+            oBrowser.oClearRecentVaults_Click(null,
+                new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             Check(oSettings.RecentVaults.Count == 0 && oSettings.LastVault == sSecond,
                 "Clearing recent history preserves automatic reopening of the last Vault");
         }

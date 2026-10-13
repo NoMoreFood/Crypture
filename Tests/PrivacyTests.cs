@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Ribbon;
@@ -21,19 +20,16 @@ internal static partial class RegressionTests
         Ribbon oRibbon = (Ribbon)oEditor.FindName("ribbon");
         DockPanel oPanels = (DockPanel)oEditor.FindName("oEditorPanels");
         Button oReveal = (Button)oEditor.FindName("oRevealButton");
-        FieldInfo oChanges = typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic);
 
         // A saved clean item clears plaintext before the shield can be removed.
         oEditor.SetEditingControls(true);
         oContent.Text = "Saved secret awaiting concealment";
         byte[] oBuffer = [5, 6, 7];
         oEditor.BinaryItemData = oBuffer;
-        oChanges.SetValue(oEditor, false);
-        MethodInfo oSessionSwitch = typeof(App).GetMethod("OnSessionSwitch",
-            BindingFlags.Static | BindingFlags.NonPublic);
-        oSessionSwitch.Invoke(null, [null, new SessionSwitchEventArgs(SessionSwitchReason.SessionUnlock)]);
+        oEditor.bHasChanges = false;
+        App.OnSessionSwitch(null, new SessionSwitchEventArgs(SessionSwitchReason.SessionUnlock));
         Check(oShield.Visibility == Visibility.Collapsed, "Session unlock leaves an active editor unchanged");
-        oSessionSwitch.Invoke(null, [null, new SessionSwitchEventArgs(SessionSwitchReason.SessionLock)]);
+        App.OnSessionSwitch(null, new SessionSwitchEventArgs(SessionSwitchReason.SessionLock));
         PumpUntil(() => oShield.Visibility == Visibility.Visible);
         oEditor.UpdateLayout();
         Grid oRoot = (Grid)oEditor.Content;
@@ -61,7 +57,7 @@ internal static partial class RegressionTests
             oContent.IsEnabled &&
             oContent.Text == "Unsaved draft that must remain available",
             "Reveal restores the unsaved editor and its text");
-        oChanges.SetValue(oEditor, false);
+        oEditor.bHasChanges = false;
 
         string sConnection = CryptureEntities.ConnectionString;
         CryptureEntities.ConnectionString = "";
@@ -76,8 +72,7 @@ internal static partial class RegressionTests
             };
             oGenerator.Show();
             PumpUntil(() => oGenerator.IsLoaded);
-            typeof(PasswordGenerator).GetMethod("oGenerateButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oGenerator, [null, null]);
+            oGenerator.oGenerateButton_Click(null, null);
             TextBox oPassword = (TextBox)oGenerator.FindName("oGeneratedPassword");
             string sPassword = oPassword.Text;
             Border oGeneratorShield = (Border)oGenerator.FindName("oPrivacyShield");

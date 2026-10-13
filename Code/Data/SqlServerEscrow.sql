@@ -4,33 +4,9 @@ CREATE FUNCTION [dbo].[HasRecoveryDescriptor](
 RETURNS bit WITH SCHEMABINDING
 AS
 BEGIN
-    DECLARE @length int = DATALENGTH(@envelope), @position int = 9, @index int = 0,
-        @descriptorLength int, @keyLength int, @descriptor nvarchar(max),
-        @found bit = CASE WHEN @expected IS NULL THEN 1 ELSE 0 END;
-    IF @length IS NULL OR @length < 17 OR @length > 2225184 OR
-       ISNULL([dbo].[ReadEnvelopeInt32](@envelope, 1), 0) <> 1 RETURN 0;
-    DECLARE @count int = [dbo].[ReadEnvelopeInt32](@envelope, 5);
-    IF @count NOT BETWEEN 1 AND 2 RETURN 0;
-    WHILE @index < @count
-    BEGIN
-        SET @descriptorLength = [dbo].[ReadEnvelopeInt32](@envelope, @position);
-        SET @position = @position + 4;
-        IF @descriptorLength IS NULL OR @descriptorLength < 1 OR @descriptorLength > 64000 OR
-           @position + @descriptorLength - 1 > @length RETURN 0;
-        SET @descriptor = CONVERT(nvarchar(max),
-            CONVERT(varchar(max), SUBSTRING(@envelope, @position, @descriptorLength)));
-        IF @index = 0 AND @primary IS NOT NULL AND @descriptor <> @primary RETURN 0;
-        IF @descriptor = @expected SET @found = 1;
-        SET @position = @position + @descriptorLength;
-        SET @keyLength = [dbo].[ReadEnvelopeInt32](@envelope, @position);
-        SET @position = @position + 4;
-        IF @keyLength IS NULL OR @keyLength < 1 OR @keyLength > 1048576 OR
-           @position + @keyLength - 1 > @length RETURN 0;
-        SET @position = @position + @keyLength;
-        SET @index = @index + 1;
-    END;
-    IF @position <> @length + 1 RETURN 0;
-    RETURN @found;
+    RETURN CASE WHEN EXISTS (
+        SELECT 1 FROM [dbo].[RecoveryDescriptors](@envelope, @primary)
+        WHERE @expected IS NULL OR [Descriptor] = @expected) THEN 1 ELSE 0 END;
 END;
 GO
 -- The current Vault policy and the item label are read under the SaveItem transaction.

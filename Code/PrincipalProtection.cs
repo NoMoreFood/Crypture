@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -97,8 +98,15 @@ namespace Crypture
             if (oParts.Length > MaxPrincipals ||
                 oParts.Any(p => !p.StartsWith(SidPrefix, StringComparison.Ordinal)))
                 throw new CryptographicException("The Windows protection policy is not supported.");
-            return oParts.Select(p => new ProtectionPrincipal(p.Substring(SidPrefix.Length),
-                bResolveNames ? null : p.Substring(SidPrefix.Length))).ToList();
+            try
+            {
+                return oParts.Select(p => new ProtectionPrincipal(p.Substring(SidPrefix.Length),
+                    bResolveNames ? null : p.Substring(SidPrefix.Length))).ToList();
+            }
+            catch (ArgumentException)
+            {
+                throw new CryptographicException("The Windows protection policy contains an invalid SID.");
+            }
         }
 
         internal static void ValidateCustomDescriptor(string sDescriptor)
@@ -162,7 +170,8 @@ namespace Crypture
         {
             if (nStatus == 0) return;
             throw new CryptographicException("Windows could not " + sAction + ". " +
-                new Win32Exception(nStatus).Message + " (0x" + nStatus.ToString("X8") + "). " +
+                new Win32Exception(nStatus).Message +
+                " (0x" + nStatus.ToString("X8", CultureInfo.InvariantCulture) + "). " +
                 "For domain principals, check domain connectivity, key distribution services, " +
                 "and account permissions. Local protection requires the original Windows profile or computer.");
         }
@@ -230,23 +239,5 @@ namespace Crypture
 
         [DllImport("kernel32.dll", ExactSpelling = true)]
         private static extern IntPtr LocalFree(IntPtr hMem);
-    }
-
-    public partial class Item
-    {
-        // File attachments keep their extension as the item type; other types hold text content.
-        internal bool IsFile => ItemType is not ("text" or "richtext" or "totp");
-        public string ItemTypeDisplay => ItemType == "totp" ? "TOTP" :
-            ItemType == "text" ? "Text Secret" : ItemType == "richtext" ? "Rich Text Secret" : "File Attachment";
-        public string ModifiedByDisplay => ModifiedByIdentity ?? User?.Name ?? "";
-        public string ProtectionDisplay => Cipher == null ? "Unknown" :
-            (Cipher.CipherParams == ItemCryptography.RecoveryFormat
-            ? (ItemCryptography.UsesWindowsProtection(Cipher) ? "User Based" : "Certificate Based")
-            : Cipher.CipherParams == ItemCryptography.FidoFormat ? "FIDO2 Security Key"
-            : Cipher.CipherParams == ItemCryptography.PrincipalFormat ? "User Based" :
-            Cipher.CipherParams == ItemCryptography.CertificateFormat
-            ? "Certificate Based" : "Unsupported") +
-            (!String.IsNullOrEmpty(Cipher.EscrowLabel) ? " + Escrow: " + Cipher.EscrowLabel :
-                Cipher.CipherParams == ItemCryptography.RecoveryFormat ? " + Recovery" : "");
     }
 }

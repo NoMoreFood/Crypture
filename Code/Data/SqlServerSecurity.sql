@@ -95,40 +95,56 @@ BEGIN
     RETURN CONVERT(int, @value);
 END;
 GO
-CREATE FUNCTION [dbo].[MatchesRecoveryEnvelope](@envelope varbinary(max), @primary nvarchar(max))
-RETURNS bit WITH SCHEMABINDING
+CREATE FUNCTION [dbo].[RecoveryDescriptors](@envelope varbinary(max), @primary nvarchar(max))
+RETURNS @descriptors TABLE ([Descriptor] nvarchar(max) NOT NULL) WITH SCHEMABINDING
 AS
 BEGIN
     -- The recovery key envelope stores one or two UTF-8 descriptors before their protected keys.
+    -- A malformed envelope, or one whose first descriptor differs from the primary, yields no rows.
     DECLARE @length int = DATALENGTH(@envelope), @maximumEnvelopeBytes int = 2225184,
         @maximumDescriptorBytes int = 64000, @maximumKeyBytes int = 1048576;
     IF @length IS NULL OR @length < 17 OR @length > @maximumEnvelopeBytes OR
-       [dbo].[ReadEnvelopeInt32](@envelope, 1) <> 1 RETURN 0;
-    DECLARE @count int = [dbo].[ReadEnvelopeInt32](@envelope, 5);
-    IF @count NOT BETWEEN 1 AND 2 RETURN 0;
+       ISNULL([dbo].[ReadEnvelopeInt32](@envelope, 1), 0) <> 1 RETURN;
+    DECLARE @count int = ISNULL([dbo].[ReadEnvelopeInt32](@envelope, 5), 0);
+    IF @count NOT BETWEEN 1 AND 2 RETURN;
     DECLARE @position int = 9, @index int = 0, @descriptorLength int, @keyLength int,
-        @descriptor nvarchar(max), @allowed bit = 0;
-    WHILE @index < @count
+        @descriptor nvarchar(max), @valid bit = 1;
+    WHILE @index < @count AND @valid = 1
     BEGIN
         SET @descriptorLength = [dbo].[ReadEnvelopeInt32](@envelope, @position);
         SET @position = @position + 4;
         IF @descriptorLength IS NULL OR @descriptorLength < 1 OR
            @descriptorLength > @maximumDescriptorBytes OR
-           @position + @descriptorLength - 1 > @length RETURN 0;
-        SET @descriptor = CONVERT(nvarchar(max),
-            CONVERT(varchar(max), SUBSTRING(@envelope, @position, @descriptorLength)));
-        IF @index = 0 AND @primary IS NOT NULL AND @descriptor <> @primary RETURN 0;
-        IF [dbo].[MatchesDescriptor](@descriptor) = 1 SET @allowed = 1;
-        SET @position = @position + @descriptorLength;
-        SET @keyLength = [dbo].[ReadEnvelopeInt32](@envelope, @position);
-        SET @position = @position + 4;
-        IF @keyLength IS NULL OR @keyLength < 1 OR @keyLength > @maximumKeyBytes OR
-           @position + @keyLength - 1 > @length RETURN 0;
-        SET @position = @position + @keyLength;
-        SET @index = @index + 1;
+           @position + @descriptorLength - 1 > @length SET @valid = 0;
+        ELSE
+        BEGIN
+            SET @descriptor = CONVERT(nvarchar(max),
+                CONVERT(varchar(max), SUBSTRING(@envelope, @position, @descriptorLength)));
+            SET @position = @position + @descriptorLength;
+            SET @keyLength = [dbo].[ReadEnvelopeInt32](@envelope, @position);
+            SET @position = @position + 4;
+            IF (@index = 0 AND @primary IS NOT NULL AND @descriptor <> @primary) OR
+               @keyLength IS NULL OR @keyLength < 1 OR @keyLength > @maximumKeyBytes OR
+               @position + @keyLength - 1 > @length SET @valid = 0;
+            ELSE
+            BEGIN
+                INSERT INTO @descriptors ([Descriptor]) VALUES (@descriptor);
+                SET @position = @position + @keyLength;
+                SET @index = @index + 1;
+            END;
+        END;
     END;
-    IF @position <> @length + 1 RETURN 0;
-    RETURN @allowed;
+    IF @valid = 0 OR @position <> @length + 1 DELETE FROM @descriptors;
+    RETURN;
+END;
+GO
+CREATE FUNCTION [dbo].[MatchesRecoveryEnvelope](@envelope varbinary(max), @primary nvarchar(max))
+RETURNS bit WITH SCHEMABINDING
+AS
+BEGIN
+    RETURN CASE WHEN EXISTS (
+        SELECT 1 FROM [dbo].[RecoveryDescriptors](@envelope, @primary)
+        WHERE [dbo].[MatchesDescriptor]([Descriptor]) = 1) THEN 1 ELSE 0 END;
 END;
 GO
 CREATE FUNCTION [dbo].[CanReadItem](@itemId bigint)

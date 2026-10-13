@@ -378,10 +378,7 @@ namespace Crypture
             }
         }
 
-        private static byte[] GetContext(X509Certificate2 oCert, byte[] oHeader)
-        {
-            using (SHA256 oHash = SHA256.Create())
-                return oHeader.Concat(oHash.ComputeHash(oCert.RawData)).ToArray();
-        }
+        private static byte[] GetContext(X509Certificate2 oCert, byte[] oHeader) =>
+            oHeader.Concat(SHA256.HashData(oCert.RawData)).ToArray();
     }
 }

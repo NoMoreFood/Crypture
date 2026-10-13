@@ -19,7 +19,7 @@ namespace Crypture
         private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         private const int BitsPerByte = 8;
         private const int Base32BitsPerCharacter = 5;
-        private byte[] oKey;
+        internal byte[] oKey;
         internal string Issuer { get; }
         internal string Account { get; }
         internal string Algorithm { get; }

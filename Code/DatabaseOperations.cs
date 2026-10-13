@@ -11,16 +11,11 @@ namespace Crypture
 {
     internal static class DatabaseOperations
     {
-        internal static Item LoadItem(long nItemId)
-        {
-            using (CryptureEntities oContent = new CryptureEntities())
-            {
-                Item oItem = oContent.Items.Include(i => i.User).Include(i => i.Cipher)
-                    .Include(i => i.Instances).ThenInclude(j => j.User).SingleOrDefault(i => i.ItemId == nItemId);
-                if (oItem == null) throw new InvalidOperationException("This item has been removed. Refresh the list.");
-                return oItem;
-            }
-        }
+        // Shown when a save or removal loses a race with another Vault user.
+        internal const string ChangedBeforeSave = "This item changed or was removed by another user. " +
+            "Your edits have been kept open. Copy them before reopening the item.";
+        internal const string ChangedBeforeRemoval = "This item changed or was removed by another user. " +
+            "Refresh the list before removing it.";
 
         internal static void DeleteItem(Item oItem)
         {
@@ -35,8 +30,7 @@ namespace Crypture
             using var oTransaction = oContent.Database.BeginTransaction();
             Item oStored = oContent.Items.Find(oItem.ItemId);
             if (oStored == null || oStored.ModifiedDate != oItem.ModifiedDate)
-                throw new InvalidOperationException("This item changed or was removed by another user. " +
-                    "Refresh the list before removing it.");
+                throw new InvalidOperationException(ChangedBeforeRemoval);
             oContent.Items.Remove(oStored);
             oContent.SaveChanges();
             oTransaction.Commit();
@@ -59,35 +53,33 @@ namespace Crypture
                         throw new InvalidOperationException("The emergency recovery certificate is not valid for " +
                             "encryption. Check its expiry, trust, and certificate validation settings.");
             }
+            Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
             if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
             {
                 // SQL Server saves encrypted rows through a recipient-checked procedure.
                 if (oRecovery.Certificate != null)
                 {
                     using CryptureEntities oDirectory = new CryptureEntities();
-                    User oRecoveryUser = oDirectory.Users.ToList().FirstOrDefault(u =>
-                        u.IsEscrow && u.Certificate.SequenceEqual(oRecovery.Certificate));
+                    User oRecoveryUser = oDirectory.Users.FirstOrDefault(u =>
+                        u.IsEscrow && u.Certificate == oRecovery.Certificate);
                     if (oRecoveryUser == null)
                         throw new InvalidOperationException("The SQL Server recovery certificate must be " +
                             "enrolled by the Vault owner and designated as escrow for its verified " +
                             "Active Directory identity before saving.");
                     if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
                 }
-                Item oSqlEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
-                ItemCryptography.Encrypt(oSqlEncrypted, oPlainText, oUsers,
+                ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
                     sProtectionDescriptor, oRecovery.Descriptor, nContentSuite);
-                SqlServerItemOperations.Save(oSqlServer, oItem, oSqlEncrypted);
+                SqlServerItemOperations.Save(oSqlServer, oItem, oEncrypted);
                 return;
             }
-            Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
             using (CryptureEntities oContent = new CryptureEntities())
             using (var oTransaction = oContent.Database.BeginTransaction())
             {
                 // Enforce recovery at the save boundary, including callers outside the editor.
                 if (oRecovery.Certificate != null)
                 {
-                    User oRecoveryUser = oContent.Users.ToList().FirstOrDefault(u =>
-                        u.Certificate.SequenceEqual(oRecovery.Certificate));
+                    User oRecoveryUser = oContent.Users.FirstOrDefault(u => u.Certificate == oRecovery.Certificate);
                     if (oRecoveryUser == null)
                     {
                         oRecoveryUser = new User { Certificate = oRecovery.Certificate };
@@ -111,8 +103,7 @@ namespace Crypture
                         oStored.Cipher.ProtectionDescriptor != oItem.Cipher.ProtectionDescriptor ||
                         !oStored.Cipher.CipherVector.SequenceEqual(oItem.Cipher.CipherVector) ||
                         !oStored.Cipher.CipherText.SequenceEqual(oItem.Cipher.CipherText))
-                        throw new InvalidOperationException("This item changed or was removed by another user. " +
-                            "Your edits have been kept open. Copy them before reopening the item.");
+                        throw new InvalidOperationException(ChangedBeforeSave);
                 }
                 else
                 {
@@ -137,12 +128,16 @@ namespace Crypture
                 oStored.Cipher.Signature = oEncrypted.Cipher.Signature;
                 oContent.Instances.RemoveRange(oStored.Instances.ToList());
                 oStored.Instances.Clear();
-                foreach (Instance oInstance in oEncrypted.Instances) oStored.Instances.Add(oInstance);
+                foreach (Instance oInstance in oEncrypted.Instances)
+                {
+                    // Save recipients by key; their certificate entities belong to the caller.
+                    oInstance.User = null;
+                    oStored.Instances.Add(oInstance);
+                }
                 try { oContent.SaveChanges(); }
                 catch (DbUpdateConcurrencyException)
                 {
-                    throw new InvalidOperationException("This item changed or was removed by another user. " +
-                        "Your edits have been kept open. Copy them before reopening the item.");
+                    throw new InvalidOperationException(ChangedBeforeSave);
                 }
                 oTransaction.Commit();
             }
@@ -151,37 +146,30 @@ namespace Crypture
         internal static void RemoveCertificate(long nUserId)
         {
             RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage);
+            using CryptureEntities oContent = new CryptureEntities();
+
+            // SQL Server checks remaining recipients in its own procedure; SQLite holds the writer lock here.
+            using var oTransaction = CryptureEntities.Storage.IsSqlServer ? null : oContent.Database.BeginTransaction();
+            User oUser = oContent.Users.Find(nUserId);
+            if (oUser == null) return;
+            if (oRecovery.Certificate != null && oUser.Certificate.SequenceEqual(oRecovery.Certificate))
+                throw new InvalidOperationException(
+                    "The configured emergency recovery certificate cannot be removed.");
             if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
             {
-                using CryptureEntities oDirectory = new CryptureEntities();
-                User oCertificate = oDirectory.Users.Find(nUserId);
-                if (oCertificate == null) return;
-                if (oRecovery.Certificate != null && oCertificate.Certificate.SequenceEqual(oRecovery.Certificate))
-                    throw new InvalidOperationException(
-                        "The configured emergency recovery certificate cannot be removed.");
                 SqlServerItemOperations.RemoveCertificate(oSqlServer, nUserId);
                 return;
             }
-            using (CryptureEntities oContent = new CryptureEntities())
-            using (var oTransaction = oContent.Database.BeginTransaction())
-            {
-                if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
-                    !i.Instances.Any(j => j.UserId != nUserId) && (i.Cipher == null ||
-                    i.Cipher.CipherParams != ItemCryptography.FidoFormat &&
-                    (i.Cipher.CipherParams != ItemCryptography.RecoveryFormat ||
-                        i.Cipher.ProtectionDescriptor == null))))
-                    throw new InvalidOperationException("This certificate is the only recipient " +
-                        "for one or more items. Share those items with another certificate before removing it.");
-
-                User oUser = oContent.Users.Find(nUserId);
-                if (oUser == null) return;
-                if (oRecovery.Certificate != null && oUser.Certificate.SequenceEqual(oRecovery.Certificate))
-                    throw new InvalidOperationException(
-                        "The configured emergency recovery certificate cannot be removed.");
-                oContent.Users.Remove(oUser);
-                oContent.SaveChanges();
-                oTransaction.Commit();
-            }
+            if (oContent.Items.Any(i => i.Instances.Any(j => j.UserId == nUserId) &&
+                !i.Instances.Any(j => j.UserId != nUserId) && (i.Cipher == null ||
+                i.Cipher.CipherParams != ItemCryptography.FidoFormat &&
+                (i.Cipher.CipherParams != ItemCryptography.RecoveryFormat ||
+                    i.Cipher.ProtectionDescriptor == null))))
+                throw new InvalidOperationException("This certificate is the only recipient " +
+                    "for one or more items. Share those items with another certificate before removing it.");
+            oContent.Users.Remove(oUser);
+            oContent.SaveChanges();
+            oTransaction.Commit();
         }
 
         internal static void CreateDatabase(string sPath, string sSchema)

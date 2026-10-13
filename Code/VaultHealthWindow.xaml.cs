@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -59,7 +60,7 @@ namespace Crypture
                 oSummary.Text = oReport.Findings.Count == 0
                     ? "No saved recipients or certificates to check." : oReport.Summary;
                 oProgressText.Text = oReport.ItemCount + " saved items checked at " +
-                    oReport.CheckedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") + ".";
+                    oReport.CheckedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + ".";
                 ShowResults();
             }
             catch (OperationCanceledException)

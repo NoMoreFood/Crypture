@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 
 namespace Crypture
 {
-    public static class NativeMethods
+    internal static class NativeMethods
     {
 #pragma warning disable 0649
 
@@ -23,12 +23,12 @@ namespace Crypture
             internal uint Algid;
         }
 
-        internal delegate bool CryptEnumCallback(IntPtr pInfo, ref OidCollection pvParam);
+        internal delegate bool CryptEnumCallback(IntPtr pInfo, IntPtr pvParam);
 
         [DllImport("crypt32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId,
-            UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
+            UInt32 dwFlags, IntPtr pvParam, CryptEnumCallback oFunc);
 
         [DllImport("crypt32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -46,19 +46,16 @@ namespace Crypture
         internal static extern bool CertGetCertificateContextProperty(IntPtr pCertificate, uint nProperty,
             IntPtr pData, ref uint nSize);
 
-        internal static bool GetExtendedKeyUsagesCallback(IntPtr pInfo, ref OidCollection pvParam)
+        internal static OidCollection GetExtendedKeyUsages()
         {
-            CRYPT_OID_INFO oInfo = (CRYPT_OID_INFO) Marshal.PtrToStructure(pInfo, typeof(CRYPT_OID_INFO));
-            OidCollection ExtendedKeyUsages = (OidCollection)pvParam;
-            ExtendedKeyUsages.Add(new Oid(oInfo.pszOID, oInfo.pwszName));
-            return true;
-        }
-
-        public static OidCollection GetExtendedKeyUsages()
-        {
-            OidCollection ExtendedKeyUsages = new OidCollection();
-            CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, ref ExtendedKeyUsages, GetExtendedKeyUsagesCallback);
-            return ExtendedKeyUsages;
+            OidCollection oUsages = new OidCollection();
+            CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, IntPtr.Zero, (pInfo, pvParam) =>
+            {
+                CRYPT_OID_INFO oInfo = Marshal.PtrToStructure<CRYPT_OID_INFO>(pInfo);
+                oUsages.Add(new Oid(oInfo.pszOID, oInfo.pwszName));
+                return true;
+            });
+            return oUsages;
         }
     }
 }

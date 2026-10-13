@@ -32,7 +32,6 @@ internal static partial class RegressionTests
         try
         {
             TextBox oName = (TextBox)oWizard.FindName("oSubjectTextBox");
-            TextBox oIssuer = (TextBox)oWizard.FindName("oIssuerTextBox");
             TextBox oLength = (TextBox)oWizard.FindName("oKeyLengthTextBox");
             Button oCreate = (Button)oWizard.FindName("oGenerateButton");
             TabControl oTabs = (TabControl)oWizard.FindName("oWizardTabs");
@@ -47,7 +46,6 @@ internal static partial class RegressionTests
             ((CheckBox)oWizard.FindName("oKeyExportableCheckbox")).IsChecked = false;
             ((CheckBox)oWizard.FindName("oPasswordProtectCheckbox")).IsChecked = false;
             oName.Clear();
-            oIssuer.Clear();
             oFrom.SelectedDate = DateTime.Today;
             oUntil.SelectedDate = DateTime.Today.AddYears(1);
             oWizard.Show();
@@ -82,15 +80,11 @@ internal static partial class RegressionTests
             Check(!oCreate.IsEnabled && oNotice.Text.Contains("end date"),
                 "Self-signed creation identifies an invalid date range before creating a key");
             ((RadioButton)oWizard.FindName("oCertificateRequestRadio")).IsChecked = true;
-            oIssuer.Text = "Chosen by the certificate authority";
-            Check(oCreate.IsEnabled && !oFrom.IsEnabled && !oUntil.IsEnabled && !oIssuer.IsEnabled &&
+            Check(oCreate.IsEnabled && !oFrom.IsEnabled && !oUntil.IsEnabled &&
                 ((TextBlock)oWizard.FindName("oGenerationHelp")).Text.Contains(".csr"),
-                "Request mode explains its file output and disables issuer and dates that the CA controls");
+                "Request mode explains its file output and disables dates that the CA controls");
             oSelfSigned.IsChecked = true;
             oUntil.SelectedDate = DateTime.Today.AddYears(1);
-            Check(!oCreate.IsEnabled && oNotice.Text.Contains("issuer"),
-                "Self-signed creation explains a mismatched configured issuer");
-            oIssuer.Clear();
             Check(oCreate.IsEnabled, "Correcting certificate input restores creation immediately");
 
             // Keep the action row visible and key-setting rows stable at the minimum width and enlarged text.
@@ -160,6 +154,8 @@ internal static partial class RegressionTests
             Check(sResultTitle == "Certificate Created" && oCreated?.HasPrivateKey == true &&
                 oCreated.Subject == oCreated.Issuer && oCreate.IsEnabled,
                 "The creator installs a self-signed certificate and restores its controls after success");
+            Check(oCreated.NotBefore == oFrom.SelectedDate && oCreated.NotAfter == oUntil.SelectedDate,
+                "A created certificate is valid from local midnight on the chosen dates");
             using RSA oPublicKey = oCreated.GetRSAPublicKey();
             using RSA oPrivateKey = oCreated.GetRSAPrivateKey();
             byte[] oPayload = [1, 2, 3, 4];

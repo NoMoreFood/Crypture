@@ -8,8 +8,7 @@
     MinWidth="850" MinHeight="440" Icon="pack://application:,,,/Crypture;component/Safe.ico"
     RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True" mc:Ignorable="d"
     ContentRendered="oItemBrowser_ContentRendered" Closing="oItemBrowser_Closing"
-    PreviewKeyDown="oItemBrowser_PreviewKeyDown"
-    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+    PreviewKeyDown="oItemBrowser_PreviewKeyDown">
     <Window.Resources>
         <local:CheckIfDateIsNotSetConverter x:Key="CheckIfDateIsNotSetConverter" />
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />

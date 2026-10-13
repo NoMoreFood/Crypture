@@ -3,10 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
-using System.Collections.ObjectModel;
 using Microsoft.EntityFrameworkCore;
-using System.DirectoryServices;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
@@ -26,8 +25,6 @@ namespace Crypture
     /// </summary>
     public partial class ItemBrowser : ThemedWindow
     {
-        public ObservableCollection<Item> ItemList { get; set; } = new ObservableCollection<Item>();
-
         internal static int RecentVaultLimit => new ConfigurationDefaults().Number("RecentVaultLimit", 10, 0, 50);
         private const string SqlRecentPrefix = "sqlserver:";
 
@@ -36,46 +33,55 @@ namespace Crypture
 
         private string sDatabasePath;
         private bool bCanEnrollCertificates = true;
+        private List<Item> ItemList = new List<Item>();
         private List<User> CertificateList = new List<User>();
-        private HashSet<string> PrivateCertificates = new HashSet<string>();
+        private HashSet<long> AccessibleUsers = new HashSet<long>();
         private CancellationTokenSource oVaultCancellation;
 
-        private sealed record VaultView(List<Item> Items, List<User> Users, HashSet<string> PrivateCertificates,
+        internal sealed record VaultView(List<Item> Items, List<User> Users, HashSet<long> AccessibleUsers,
             string DisplayName, string Title, string RecentEntry, bool CanEnroll, bool CanBackup);
 
-        internal bool AddCertificate(X509Certificate2 oCert, string sIdentifier, bool bFromDirectory = false)
+        private async Task RunCertificateWorkAsync(string sStatus, Action<CancellationToken> oWork)
         {
-            CertificateKeyProtection.ValidateForEncryption(oCert);
-            if (!CertificateUsageFilter.Read().Matches(oCert))
-                throw new InvalidOperationException("This certificate is excluded by the certificate usage filters " +
-                    "in Crypture.exe.config.");
-            if (!CertificateOperations.CheckCertificateStatus(oCert, true))
-                throw new InvalidOperationException("Select a valid RSA, ECDH, or ML-KEM encryption certificate. " +
-                    "Review the certificate validation settings and selection filters in Crypture.exe.config.");
+            // Chain building, directory verification, and SQL Server enrollment stay off the dispatcher.
+            // The Vault operation reports its own failure, so the remaining steps only need to stop.
+            if (!await RunVaultOperationAsync(sStatus, oCancellation =>
+                Task.Run(() => oWork(oCancellation), oCancellation))) throw new OperationCanceledException();
+        }
+
+        private async Task<bool> AddCertificateAsync(X509Certificate2 oCert, string sIdentifier,
+            bool bFromDirectory = false)
+        {
+            IVaultStorage oStorage = CryptureEntities.Storage;
             byte[] oData = oCert.RawData;
-            using (CryptureEntities oContent = new CryptureEntities())
+            bool bExists = false;
+            bool bPrivateKey = false;
+            await RunCertificateWorkAsync("Checking certificate...", oCancellation =>
             {
-                if (oContent.Users.ToList().Any(u => u.Certificate.AsSpan().SequenceEqual(oData)))
-                {
-                    Popup.Show(this,
-                         "The selected certificate is already in the Vault.",
-                         "Certificate In Vault", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                    return false;
-                }
+                CertificateOperations.ValidateForVault(oCert);
+                using CryptureEntities oContent = new CryptureEntities(oStorage);
+                bExists = oContent.Users.Any(u => u.Certificate == oData);
+                if (bExists) return;
+                if (oStorage is not SqlServerVaultStorage oSqlServer)
+                    bPrivateKey = CertificateOperations.GetPrivateCertificateData()
+                        .Contains(Convert.ToBase64String(oData));
+                else if (bFromDirectory)
+                    SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier);
+                else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert);
+            });
+            if (bExists)
+            {
+                Popup.Show(this, "The selected certificate is already in the Vault.",
+                    "Certificate In Vault", MessageBoxButton.OK, MessageBoxImage.Exclamation);
+                return false;
+            }
+            if (oStorage.IsSqlServer) return true;
 
-                if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
-                {
-                    if (bFromDirectory)
-                        SqlServerCertificateEnrollment.EnrollFromDirectory(oSqlServer, oCert, sIdentifier);
-                    else SqlServerCertificateEnrollment.EnrollOwn(oSqlServer, oCert);
-                    return true;
-                }
-
-                bool bAmOwner = CertificateOperations.GetPrivateCertificateData().Contains(
-                    Convert.ToBase64String(oData)) && Popup.Show(this,
-                    "Are you the owner of the selected certificate?",
-                    "Ownership Confirmation",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+            // File Vaults record the owner only when the current user holds the key and confirms it.
+            bool bAmOwner = bPrivateKey && Popup.Show(this, "Are you the owner of the selected certificate?",
+                "Ownership Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+            using (CryptureEntities oContent = new CryptureEntities(oStorage))
+            {
                 oContent.Users.Add(new User
                 {
                     Certificate = oData,
@@ -108,7 +114,7 @@ namespace Crypture
                 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void oRemoveItemUser_Click(object sender, RoutedEventArgs e)
+        private async void oRemoveItemUser_Click(object sender, RoutedEventArgs e)
         {
             // get the selected object based on what button was pressed
             object oObject = (sender == oRemoveCertButton) ?
@@ -129,17 +135,16 @@ namespace Crypture
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
 
             // remove select item or user
-            Utilities.TryOperation(this, () =>
+            if (await RunVaultOperationAsync("Removing...", oCancellation => Task.Run(() =>
             {
                 if (oObject is User oUser) DatabaseOperations.RemoveCertificate(oUser.UserId);
                 else DatabaseOperations.DeleteItem((Item)oObject);
-                oRefreshItemButton_Click();
-            });
+            }, oCancellation))) oRefreshItemButton_Click();
         }
 
-        private void oAddFromFileButton_Click(object sender, RoutedEventArgs e)
+        private async void oAddFromFileButton_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            await Utilities.TryOperationAsync(this, async () =>
             {
                 OpenFileDialog oOpenDialog = new OpenFileDialog
                 {
@@ -150,13 +155,14 @@ namespace Crypture
                     throw new InvalidOperationException("Select a public certificate (.cer). " +
                         "Import private keys using Windows.");
                 using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificateFromFile(oOpenDialog.FileName))
-                    if (AddCertificate(oCert, CertificateOperations.CurrentUserSid)) oRefreshItemButton_Click();
+                    if (await AddCertificateAsync(oCert, CertificateOperations.CurrentUserSid))
+                        oRefreshItemButton_Click();
             });
         }
 
-        private void oAddFromStoreButton_Click(object sender, RoutedEventArgs e)
+        private async void oAddFromStoreButton_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            await Utilities.TryOperationAsync(this, async () =>
             {
                 CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
 
@@ -166,10 +172,16 @@ namespace Crypture
                 {
                     // Filter eligible encryption certificates before opening the selector.
                     X509Certificate2Collection oCollection = new X509Certificate2Collection();
-                    foreach (X509Certificate2 oCert in oCertificates)
-                        if (oUsageFilter.Matches(oCert) &&
-                            CertificateOperations.CheckCertificateStatus(oCert, true))
-                            oCollection.Add(oCert);
+                    await RunCertificateWorkAsync("Checking certificates...", oCancellation =>
+                    {
+                        foreach (X509Certificate2 oCert in oCertificates)
+                        {
+                            oCancellation.ThrowIfCancellationRequested();
+                            if (oUsageFilter.Matches(oCert) &&
+                                CertificateOperations.CheckCertificateStatus(oCert, true))
+                                oCollection.Add(oCert);
+                        }
+                    });
                     if (oCollection.Count == 0)
                         throw new InvalidOperationException("No certificates match the usage filters and " +
                             "certificate validation settings.");
@@ -180,7 +192,8 @@ namespace Crypture
                         X509SelectionFlag.SingleSelection, new WindowInteropHelper(this).Handle);
 
                     // commit the certificate to the database
-                    if (oCollection.Count != 0 && AddCertificate(oCollection[0], CertificateOperations.CurrentUserSid))
+                    if (oCollection.Count != 0 &&
+                        await AddCertificateAsync(oCollection[0], CertificateOperations.CurrentUserSid))
                         oRefreshItemButton_Click();
                 }
                 finally
@@ -190,9 +203,9 @@ namespace Crypture
             });
         }
 
-        private void oAddFromAdButton_Click(object sender, RoutedEventArgs e)
+        private async void oAddFromAdButton_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            await Utilities.TryOperationAsync(this, async () =>
             {
                 CertificateUsageFilter oUsageFilter = CertificateUsageFilter.Read();
                 DirectoryPicker oPicker = new DirectoryPicker(true) { Owner = this };
@@ -203,7 +216,7 @@ namespace Crypture
                 try
                 {
                     foreach (DirectoryAccount oAccount in oPicker.SelectedAccounts)
-                        bAdded |= AddDirectoryCertificate(oAccount, oUsageFilter);
+                        bAdded |= await AddDirectoryCertificateAsync(oAccount, oUsageFilter);
                 }
                 finally
                 {
@@ -213,18 +226,22 @@ namespace Crypture
             });
         }
 
-        private bool AddDirectoryCertificate(DirectoryAccount oAccount, CertificateUsageFilter oUsageFilter)
+        private async Task<bool> AddDirectoryCertificateAsync(DirectoryAccount oAccount,
+            CertificateUsageFilter oUsageFilter)
         {
             // Filter eligible encryption certificates before opening the selector.
             X509Certificate2Collection oCollection = new X509Certificate2Collection();
             try
             {
-                foreach (byte[] oCertData in oAccount.Certificates)
+                await RunCertificateWorkAsync("Checking certificates...", oCancellation =>
                 {
-                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oCertData))
-                        if (oUsageFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert, true))
-                            oCollection.Add(new X509Certificate2(oCert));
-                }
+                    foreach (byte[] oCertData in oAccount.Certificates)
+                    {
+                        oCancellation.ThrowIfCancellationRequested();
+                        if (CertificateOperations.CanSelectCertificate(oCertData, oUsageFilter))
+                            oCollection.Add(X509CertificateLoader.LoadCertificate(oCertData));
+                    }
+                });
 
                 // Explain why an account contributes nothing instead of skipping it silently.
                 if (oCollection.Count == 0)
@@ -241,7 +258,7 @@ namespace Crypture
                     X509Certificate2UI.SelectFromCollection(oCollection, "Select Certificate",
                         "Select Certificate To Add", X509SelectionFlag.SingleSelection,
                         new WindowInteropHelper(this).Handle);
-                return oSelected.Count != 0 && AddCertificate(oSelected[0], oAccount.Sid, true);
+                return oSelected.Count != 0 && await AddCertificateAsync(oSelected[0], oAccount.Sid, true);
             }
             finally
             {
@@ -249,7 +266,7 @@ namespace Crypture
             }
         }
 
-        private void oMarkEscrowButton_Click(object sender, RoutedEventArgs e)
+        private async void oMarkEscrowButton_Click(object sender, RoutedEventArgs e)
         {
             if (oCertDataGrid.SelectedItem is not User oUser ||
                 CryptureEntities.Storage is not SqlServerVaultStorage oStorage) return;
@@ -263,11 +280,9 @@ namespace Crypture
                 "New saves will include it automatically. Existing items keep their saved recovery identity " +
                 "until they are decrypted and saved again.", "Designate Escrow Certificate",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-            Utilities.TryOperation(this, () =>
-            {
-                SqlServerCertificateEnrollment.MarkEscrow(oStorage, oUser);
+            if (await RunVaultOperationAsync("Designating escrow...", oCancellation => Task.Run(() =>
+                SqlServerCertificateEnrollment.MarkEscrow(oStorage, oUser), oCancellation)))
                 oRefreshItemButton_Click();
-            });
         }
 
         private void oThemeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -332,7 +347,7 @@ namespace Crypture
             await OpenEditorAsync(oItem);
         }
 
-        private async void oAddItemButton_Click(object sender, RoutedEventArgs e)
+        internal async void oAddItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (!Properties.Settings.Default.EnableDpapiNgProtection &&
                 !Properties.Settings.Default.EnableCertificateProtection &&
@@ -340,7 +355,7 @@ namespace Crypture
             await OpenEditorAsync();
         }
 
-        private async Task OpenEditorAsync(Item oItem = null)
+        internal async Task OpenEditorAsync(Item oItem = null)
         {
             ItemEditor oViewer = null;
             if (!await RunVaultOperationAsync("Loading item...", async oCancellation =>
@@ -356,26 +371,24 @@ namespace Crypture
         private async void oRefreshItemButton_Click(object sender = null, RoutedEventArgs e = null)
         {
             if (String.IsNullOrEmpty(sDatabasePath)) return;
+            IVaultStorage oStorage = CryptureEntities.Storage;
             await RunVaultOperationAsync("Refreshing Vault...", async oCancellation =>
             {
-                var oData = await ReadVaultDataAsync(CryptureEntities.Storage, oCancellation);
+                // Pick up escrow changes made by the Vault owner since this Vault was opened.
+                var oData = await Task.Run(async () =>
+                {
+                    if (oStorage is SqlServerVaultStorage oSqlStorage)
+                        await oSqlStorage.RefreshEscrowAsync(oCancellation).ConfigureAwait(false);
+                    return await ReadVaultDataAsync(oStorage, oCancellation).ConfigureAwait(false);
+                }, oCancellation);
                 oCancellation.ThrowIfCancellationRequested();
-                ApplyVaultData(oData.Items, oData.Users, oData.PrivateCertificates);
+                ApplyVaultData(oData.Items, oData.Users, oData.AccessibleUsers);
             });
         }
 
-        private void RefreshData()
-        {
-            var oData = ReadVaultDataAsync(CryptureEntities.Storage, CancellationToken.None)
-                .GetAwaiter().GetResult();
-            ApplyVaultData(oData.Items, oData.Users, oData.PrivateCertificates);
-        }
-
-        private static async Task<(List<Item> Items, List<User> Users, HashSet<string> PrivateCertificates)>
+        internal static async Task<(List<Item> Items, List<User> Users, HashSet<long> AccessibleUsers)>
             ReadVaultDataAsync(IVaultStorage oStorage, CancellationToken oCancellation)
         {
-            if (oStorage is SqlServerVaultStorage oSqlStorage)
-                await oSqlStorage.RefreshEscrowAsync(oCancellation).ConfigureAwait(false);
             List<Item> oItems = null;
             List<User> oUsers = null;
             HashSet<string> oPrivate = await Task.Run(CertificateOperations.GetPrivateCertificateData, oCancellation)
@@ -403,14 +416,18 @@ namespace Crypture
                     }
                 }, oCancellation).ConfigureAwait(false);
             }
-            return (oItems.OrderBy(i => i.Label).ToList(), oUsers.OrderBy(u => u.Name).ToList(), oPrivate);
+
+            // Resolve which recipients have a local private key once instead of on every filter pass.
+            return (oItems.OrderBy(i => i.Label).ToList(), oUsers.OrderBy(u => u.Name).ToList(),
+                oUsers.Where(u => oPrivate.Contains(Convert.ToBase64String(u.Certificate)))
+                    .Select(u => u.UserId).ToHashSet());
         }
 
-        private void ApplyVaultData(List<Item> oItems, List<User> oUsers, HashSet<string> oPrivate)
+        private void ApplyVaultData(List<Item> oItems, List<User> oUsers, HashSet<long> oAccessible)
         {
-            ItemList = new ObservableCollection<Item>(oItems);
+            ItemList = oItems;
             CertificateList = oUsers;
-            PrivateCertificates = oPrivate;
+            AccessibleUsers = oAccessible;
             ApplyFilter();
         }
 
@@ -422,21 +439,20 @@ namespace Crypture
             long? nSelectedUser = (oCertDataGrid.SelectedItem as User)?.UserId;
             string sSearch = oSearchTextBox.Text.Trim();
             List<User> oUsers = CertificateList.Where(u =>
-                u.Name.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                (u.Sid?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0).ToList();
+                u.Name.Contains(sSearch, StringComparison.CurrentCultureIgnoreCase) ||
+                u.Sid?.Contains(sSearch, StringComparison.OrdinalIgnoreCase) == true).ToList();
             HashSet<long> oMatchingRecipients = oUsers.Select(u => u.UserId).ToHashSet();
             List<Item> oItems = ItemList.Where(i =>
-                (i.Label.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                    i.ModifiedByDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                    i.ProtectionDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                    i.ItemTypeDisplay.IndexOf(sSearch, StringComparison.CurrentCultureIgnoreCase) >= 0 ||
-                    (i.Cipher?.ProtectionDescriptor?.IndexOf(sSearch, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+                (i.Label.Contains(sSearch, StringComparison.CurrentCultureIgnoreCase) ||
+                    i.ModifiedByDisplay.Contains(sSearch, StringComparison.CurrentCultureIgnoreCase) ||
+                    i.ProtectionDisplay.Contains(sSearch, StringComparison.CurrentCultureIgnoreCase) ||
+                    i.ItemTypeDisplay.Contains(sSearch, StringComparison.CurrentCultureIgnoreCase) ||
+                    i.Cipher?.ProtectionDescriptor?.Contains(sSearch, StringComparison.OrdinalIgnoreCase) == true ||
                     i.Instances.Any(j => oMatchingRecipients.Contains(j.UserId))) &&
                 (oHideAccessible.IsChecked != true || ItemCryptography.UsesWindowsProtection(i.Cipher) ||
                     i.Cipher?.CipherParams == ItemCryptography.RecoveryFormat ||
                     i.Cipher?.CipherParams == ItemCryptography.FidoFormat ||
-                    i.Instances.Any(j =>
-                    PrivateCertificates.Contains(Convert.ToBase64String(j.User.Certificate))))).ToList();
+                    i.Instances.Any(j => AccessibleUsers.Contains(j.UserId)))).ToList();
             oItemDataGrid.ItemsSource = oItems;
             oCertDataGrid.ItemsSource = oUsers;
             oItemDataGrid.SelectedItem = oItems.FirstOrDefault(i => i.ItemId == nSelectedItem);
@@ -520,10 +536,10 @@ namespace Crypture
             }
         }
 
-        private Task<bool> LoadDatabaseAsync(string sDatabase) =>
+        internal Task<bool> LoadDatabaseAsync(string sDatabase) =>
             LoadVaultAsync(new SqliteVaultStorage(Path.GetFullPath(sDatabase)), false);
 
-        private static async Task<VaultView> PrepareVaultAsync(IVaultStorage oStorage, bool bCreate,
+        internal static async Task<VaultView> PrepareVaultAsync(IVaultStorage oStorage, bool bCreate,
             CancellationToken oCancellation)
         {
             if (bCreate) await oStorage.CreateAsync(oCancellation).ConfigureAwait(false);
@@ -535,12 +551,12 @@ namespace Crypture
             string sTitle = sApplicationTitle + " - " + (oStorage.IsSqlServer
                 ? sDisplayName : Path.GetFileName(sDisplayName));
             string sRecentEntry = oStorage is SqlServerVaultStorage oSqlServer
-                ? SqlRecentPrefix + oSqlServer.RecentConnection : Path.GetFullPath(sDisplayName);
-            return new VaultView(oData.Items, oData.Users, oData.PrivateCertificates, sDisplayName,
+                ? SqlRecentPrefix + oSqlServer.ConnectionString : Path.GetFullPath(sDisplayName);
+            return new VaultView(oData.Items, oData.Users, oData.AccessibleUsers, sDisplayName,
                 sTitle, sRecentEntry, oPermissions.CanEnroll, oPermissions.CanBackup);
         }
 
-        private void ApplyVault(IVaultStorage oStorage, VaultView oView, bool bEnableControls)
+        internal void ApplyVault(IVaultStorage oStorage, VaultView oView, bool bEnableControls)
         {
             // Publish a complete view and its storage together after all remote checks have succeeded.
             oItemDataGrid.ItemsSource = null;
@@ -575,7 +591,7 @@ namespace Crypture
             oSearchTextBox.IsEnabled = bEnableControls;
             oDatabaseStatus.Text = oView.DisplayName;
             Title = oView.Title;
-            ApplyVaultData(oView.Items, oView.Users, oView.PrivateCertificates);
+            ApplyVaultData(oView.Items, oView.Users, oView.AccessibleUsers);
             RememberRecentEntry(oView.RecentEntry);
         }
 
@@ -592,7 +608,7 @@ namespace Crypture
             if (bLoaded && bCreate) oAddItemButton_Click(this, null);
         }
 
-        private Task<bool> LoadVaultAsync(IVaultStorage oStorage, bool bCreate) =>
+        internal Task<bool> LoadVaultAsync(IVaultStorage oStorage, bool bCreate) =>
             RunVaultOperationAsync(bCreate ? "Creating Vault..." :
                 oStorage.IsSqlServer ? "Connecting to Vault..." : "Loading Vault...", async oCancellation =>
             {
@@ -683,21 +699,22 @@ namespace Crypture
             // Keep the last Vault even when recent history is disabled.
             Properties.Settings.Default.LastVault = sEntry;
             StringCollection oRecent = new StringCollection();
-            oRecent.AddRange(new[] { sEntry }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
-                .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(RecentVaultLimit).ToArray());
+            oRecent.AddRange(ReadRecentEntries(sEntry));
             Properties.Settings.Default.RecentVaults = oRecent;
             RefreshRecentVaults();
             SaveRecentVaults();
         }
 
+        private static string[] ReadRecentEntries(string sNewest = null) =>
+            new[] { sNewest }.Concat(Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
+            .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(RecentVaultLimit).ToArray();
+
         private void RefreshRecentVaults()
         {
             // Keep menu labels literal so underscores in Vault filenames are not treated as access keys.
             oLoadDatabaseButton.Items.Clear();
-            string[] oPaths = (Properties.Settings.Default.RecentVaults?.Cast<string>() ?? [])
-                .Where(p => !String.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(RecentVaultLimit).ToArray();
+            string[] oPaths = ReadRecentEntries();
             for (int nIndex = 0; nIndex < oPaths.Length; nIndex++)
             {
                 string sPath = oPaths[nIndex];
@@ -716,7 +733,7 @@ namespace Crypture
                 RibbonMenuItem oEntry = new RibbonMenuItem
                 {
                     Header = new TextBlock { Text = (nIndex + 1) + ". " + sLabel },
-                    ToolTip = sTooltip, Tag = sPath, KeyTip = (nIndex + 1).ToString()
+                    ToolTip = sTooltip, Tag = sPath, KeyTip = (nIndex + 1).ToString(CultureInfo.InvariantCulture)
                 };
                 oEntry.Click += oRecentVault_Click;
                 oLoadDatabaseButton.Items.Add(oEntry);
@@ -776,7 +793,7 @@ namespace Crypture
             }
         }
 
-        private void oClearRecentVaults_Click(object sender, RoutedEventArgs e)
+        internal void oClearRecentVaults_Click(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
             oLoadDatabaseButton.IsDropDownOpen = false;
@@ -858,7 +875,7 @@ namespace Crypture
                     Title = "Back Up Vault",
                     Filter = "Crypture Vault File (*.cryptdb)|*.cryptdb",
                     FileName = Path.GetFileNameWithoutExtension(sDatabasePath) + "-backup-" +
-                        DateTime.Now.ToString("yyyyMMdd-HHmmss"),
+                        DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture),
                     DefaultExt = ".cryptdb", AddExtension = true, OverwritePrompt = false
                 };
                 if (oDialog.ShowDialog(this) != true) return;

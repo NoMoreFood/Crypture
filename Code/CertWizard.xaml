@@ -5,7 +5,6 @@
     x:Name="oWizardWindow" Title="Create Certificate" Width="620" Height="680" MinWidth="560" MinHeight="600"
     WindowStartupLocation="CenterOwner" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"
     Loaded="oWizardWindow_Loaded" Closed="oWizardWindow_Closed" mc:Ignorable="d"
-    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}"
     FocusManager.FocusedElement="{Binding ElementName=oSubjectTextBox}">
     <Window.Resources>
         <Style x:Key="FieldLabel" TargetType="Label" BasedOn="{StaticResource Crypture.GlyphLabel}">
@@ -184,11 +183,6 @@
                         <ComboBox x:Name="oHashComboBox" MinHeight="28" IsEditable="False"
                             SelectedItem="{Binding ElementName=oWizardWindow, Path=SelectedHash}"
                             SelectionChanged="oGenerationOptionsChanged" />
-                        <Label Content="_Issuer Name:" Target="{Binding ElementName=oIssuerTextBox}"
-                            Style="{StaticResource FieldLabel}" Tag="&#xE716;" />
-                        <TextBox x:Name="oIssuerTextBox" MinHeight="28" Padding="5,3"
-                            ToolTip="Blank uses the certificate name; a CA sets the issuer for requests."
-                            TextChanged="oGenerationOptionsChanged" />
                         <CheckBox x:Name="oShowLegacyCheckbox" Content="Show Legacy Providers" Margin="0,14,0,6"
                             Checked="oProviderType_Checked" Unchecked="oProviderType_Checked" />
                         <CheckBox x:Name="oKeyExportableCheckbox" Content="Allow Private Key Export" Margin="0,6,0,5"

@@ -7,7 +7,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Reflection;
 using System.Xml.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,6 +14,7 @@ using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Threading;
 using System.Threading.Tasks;
 using Crypture;
 
@@ -28,6 +28,19 @@ internal static partial class RegressionTests
         PumpUntil(() => oLoading.IsCompleted);
         return oLoading.GetAwaiter().GetResult();
     }
+
+    private static Item LoadItem(long nItemId)
+    {
+        using CryptureEntities oContent = new CryptureEntities();
+        return oContent.Items.Include(i => i.User).Include(i => i.Cipher)
+            .Include(i => i.Instances).ThenInclude(j => j.User).Single(i => i.ItemId == nItemId);
+    }
+
+    private static void CreateVault(IVaultStorage oStorage) =>
+        oStorage.CreateAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+    private static void ValidateVault(IVaultStorage oStorage) =>
+        oStorage.ValidateAsync(CancellationToken.None).GetAwaiter().GetResult();
 
     private static void Check(bool bCondition, string sName)
     {
@@ -177,6 +190,7 @@ internal static partial class RegressionTests
                 TestCompression(sDirectory);
                 TestHealthChecks(sDirectory, oKey, oCert);
                 TestRecovery(sDirectory, oCert, oOtherCert);
+                TestRecipientTampering(sDirectory, oCert, oOtherCert);
                 TestDatabase(sDirectory, oCert, oOtherCert);
             }
             Console.WriteLine("Completed " + nChecks + " regression checks.");
@@ -269,7 +283,7 @@ internal static partial class RegressionTests
         Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = true;
         Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = false;
         Check(CertificateOperations.CheckCertificateStatus(oCert), "Accept valid self-signed encryption certificate");
-        Check(new User { Certificate = oCert.RawData }.IsSelfSigned, "Identify self-signed certificate safely");
+        Check(CertificateOperations.IsSelfSigned(oCert), "Identify self-signed certificate safely");
         using (X509Certificate2 oExpired = Certificate(oKey, "Expired", DateTimeOffset.Now.AddDays(-2),
             DateTimeOffset.Now.AddDays(-1)))
             Check(!CertificateOperations.CheckCertificateStatus(oExpired), "Reject expired self-signed certificate");
@@ -503,7 +517,7 @@ internal static partial class RegressionTests
                 oCompressed, null, PrincipalProtection.LocalUserDescriptor);
             long nItemId;
             using (CryptureEntities oContext = new CryptureEntities()) nItemId = oContext.Items.Single().ItemId;
-            byte[] oDownloaded = Utilities.Decompress(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(nItemId)));
+            byte[] oDownloaded = Utilities.Decompress(ItemCryptography.Decrypt(LoadItem(nItemId)));
             Check(oDownloaded.SequenceEqual(oFile), "A 64 MiB incompressible attachment survives a Vault round trip");
         }
         finally
@@ -600,7 +614,7 @@ internal static partial class RegressionTests
         DatabaseOperations.SaveItem(oItem, oPlainText, new[] { oUser });
         long nItemId;
         using (CryptureEntities oContent = new CryptureEntities()) nItemId = oContent.Items.Single().ItemId;
-        oItem = DatabaseOperations.LoadItem(nItemId);
+        oItem = LoadItem(nItemId);
         Check(oItem.Cipher != null && oItem.Instances.Single().User != null && oItem.User != null,
             "Load a complete detached item graph");
         Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Single(), oCert).SequenceEqual(oPlainText),
@@ -611,11 +625,11 @@ internal static partial class RegressionTests
         TestSqliteRecipientIndexes(sDatabase, nItemId, oUser.UserId);
         DateTime oCreated = oItem.CreatedDate;
         byte[] oOriginalVector = oItem.Cipher.CipherVector.ToArray();
-        Item oStale = DatabaseOperations.LoadItem(nItemId);
+        Item oStale = LoadItem(nItemId);
         oItem.Label = "Updated";
         oItem.ModifiedBy = oOtherUser.UserId;
         DatabaseOperations.SaveItem(oItem, oPlainText, new[] { oUser, oOtherUser });
-        oItem = DatabaseOperations.LoadItem(nItemId);
+        oItem = LoadItem(nItemId);
         Check(oItem.CreatedDate == oCreated, "Preserve original creation date on update");
         Check(oItem.ModifiedDate.Kind == DateTimeKind.Utc && oItem.ModifiedDate >= oCreated,
             "SQLite updates retain UTC timestamp kinds and ordering");
@@ -627,12 +641,12 @@ internal static partial class RegressionTests
         User oMissing = new User { UserId = Int64.MaxValue, Certificate = oCert.RawData };
         oItem.Label = "Must not be saved";
         Reject(() => DatabaseOperations.SaveItem(oItem, oPlainText, new[] { oMissing }), "Report save failure");
-        oItem = DatabaseOperations.LoadItem(nItemId);
+        oItem = LoadItem(nItemId);
         Check(oItem.Label == "Updated" && oItem.Instances.Count == 2,
             "Roll back failed save and recipient replacement");
 
         DatabaseOperations.RemoveCertificate(oOtherUser.UserId);
-        oItem = DatabaseOperations.LoadItem(nItemId);
+        oItem = LoadItem(nItemId);
         Check(oItem.Instances.Count == 1 && oItem.ModifiedBy == null, "Remove certificate with alternate recipient");
         Reject(() => DatabaseOperations.RemoveCertificate(oUser.UserId), "Block deletion of final recipient");
         Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Single(), oCert).SequenceEqual(oPlainText),
@@ -646,7 +660,7 @@ internal static partial class RegressionTests
         CryptureEntities.DatabasePath = sBackup;
         Check(VaultHasNoPreferences(sBackup),
             "Vault backups contain no password generator preferences");
-        Item oBackedUp = DatabaseOperations.LoadItem(nItemId);
+        Item oBackedUp = LoadItem(nItemId);
         Check(ItemCryptography.Decrypt(oBackedUp, oBackedUp.Instances.Single(), oCert).SequenceEqual(oPlainText),
             "Open and decrypt Vault backup");
         using (CryptureEntities oContent = new CryptureEntities())
@@ -658,9 +672,9 @@ internal static partial class RegressionTests
             "Do not resurrect deleted item");
 
         CryptureEntities.DatabasePath = sDatabase;
-        Item oBeforeConversion = DatabaseOperations.LoadItem(nItemId);
+        Item oBeforeConversion = LoadItem(nItemId);
         DatabaseOperations.SaveItem(oBeforeConversion, oPlainText, null, PrincipalProtection.LocalUserDescriptor);
-        Item oConverted = DatabaseOperations.LoadItem(nItemId);
+        Item oConverted = LoadItem(nItemId);
         Check(oConverted.Instances.Count == 0 && oConverted.ModifiedBy == null &&
             !String.IsNullOrEmpty(oConverted.ModifiedByIdentity), "Convert certificate item to Windows protection");
         Check(ItemCryptography.Decrypt(oConverted).SequenceEqual(oPlainText), "Reload a persisted DPAPI item");
@@ -669,7 +683,7 @@ internal static partial class RegressionTests
             string sDomainPolicy = "SID=" + CertificateOperations.CurrentUserSid + " OR SID=S-1-1-0";
             Reject(() => DatabaseOperations.SaveItem(oConverted, oPlainText, null, sDomainPolicy),
                 "Reject standalone saves with local SID and Everyone recipients");
-            Item oUnchanged = DatabaseOperations.LoadItem(nItemId);
+            Item oUnchanged = LoadItem(nItemId);
             Check(oUnchanged.Cipher.ProtectionDescriptor == PrincipalProtection.LocalUserDescriptor &&
                 oUnchanged.Cipher.CipherText.SequenceEqual(oConverted.Cipher.CipherText) &&
                 ItemCryptography.Decrypt(oUnchanged).SequenceEqual(oPlainText),
@@ -684,11 +698,11 @@ internal static partial class RegressionTests
         string sWindowsBackup = Path.Combine(sDirectory, "windows-backup.cryptdb");
         DatabaseOperations.BackupDatabase(sDatabase, sWindowsBackup);
         CryptureEntities.DatabasePath = sWindowsBackup;
-        Check(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(nItemId)).SequenceEqual(oPlainText),
+        Check(ItemCryptography.Decrypt(LoadItem(nItemId)).SequenceEqual(oPlainText),
             "DPAPI item remains decryptable from its Vault backup");
         CryptureEntities.DatabasePath = sDatabase;
         DatabaseOperations.SaveItem(oConverted, oPlainText, new[] { oUser });
-        oConverted = DatabaseOperations.LoadItem(nItemId);
+        oConverted = LoadItem(nItemId);
         Check(oConverted.Cipher.ProtectionDescriptor == null && oConverted.Cipher.ProtectedKey == null &&
             oConverted.Cipher.Signature == null && oConverted.Instances.Count == 1,
             "Certificate conversion removes previous Windows policy and wrapped keys");
@@ -774,13 +788,11 @@ internal static partial class RegressionTests
             oEditor.SetEditingControls(true);
             TextBox oContent = (TextBox)oEditor.FindName("oItemData");
             oContent.Text = "Sensitive text shown only in the test editor";
-            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(oEditor, false);
+            oEditor.bHasChanges = false;
             oEditor.BinaryItemData = new byte[] { 1, 2, 3, 4 };
             byte[] oBuffer = oEditor.BinaryItemData;
             CryptureEntities.DatabasePath = Path.Combine(sDirectory, "offline.cryptdb");
-            typeof(ItemEditor).GetMethod("oLockItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, new object[] { null, null });
+            oEditor.oLockItemButton_Click(null, null);
             Check(oContent.Text.Length == 0 && oEditor.BinaryItemData == null && oBuffer.All(b => b == 0),
                 "Lock clears text and binary buffers while Vault is unavailable");
             TestPrivacyConcealment(oEditor);
@@ -825,8 +837,7 @@ internal static partial class RegressionTests
                 !((TextBlock)oEditor.FindName("oRecipientEmptyState")).IsVisible,
                 "Selecting a recipient restores its check mark and the inline recipient list");
             oRecipients.IsDropDownOpen = false;
-            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(oEditor, false);
+            oEditor.bHasChanges = false;
             oEditor.Close();
             oEditor = null;
 
@@ -837,7 +848,7 @@ internal static partial class RegressionTests
             DataGrid oItemGrid = (DataGrid)oBrowser.FindName("oItemDataGrid");
             DataGridTextColumn oDateColumn = oItemGrid.Columns.OfType<DataGridTextColumn>()
                 .Single(c => ((Binding)c.Binding).Path.Path == "ModifiedDate");
-            TextBlock oDateCell = new TextBlock { DataContext = DatabaseOperations.LoadItem(oItem.ItemId) };
+            TextBlock oDateCell = new TextBlock { DataContext = LoadItem(oItem.ItemId) };
             BindingOperations.SetBinding(oDateCell, TextBlock.TextProperty, oDateColumn.Binding);
             Check(oDateCell.Text == oItem.ModifiedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
                 "The browser's date column displays saved UTC timestamps in local time");
@@ -880,8 +891,6 @@ internal static partial class RegressionTests
         var oPreferences = new Crypture.Properties.Settings();
         PasswordOptions oOriginalOptions = oPreferences.PasswordGeneratorOptions;
         PasswordGenerator oGenerator = null;
-        MethodInfo oGenerate = typeof(PasswordGenerator).GetMethod("oGenerateButton_Click",
-            BindingFlags.Instance | BindingFlags.NonPublic);
 
         void Configure(params (string Name, string Value)[] oValues)
         {
@@ -936,7 +945,7 @@ internal static partial class RegressionTests
                 "Standalone generator loads all ten configured defaults");
             Check(new Crypture.Properties.Settings().PasswordGeneratorOptions == null,
                 "Opening the generator does not save application defaults as user preferences");
-            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.oGenerateButton_Click(null, null);
             string sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
                 "Configured symbols, exclusions, lengths, and similar-character choice control generated output");
@@ -953,7 +962,7 @@ internal static partial class RegressionTests
                 ((TextBox)oGenerator.FindName("oMaximumLength")).Text == "12",
                 "Opening a different Vault retains the user's generator preferences");
             Check(VaultHasNoPreferences(sVault), "Opening a generator leaves the Vault free of preferences");
-            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.oGenerateButton_Click(null, null);
             oGenerator.Close();
             Check(VaultHasNoPreferences(sVault), "Generating a password leaves the Vault free of preferences");
 
@@ -963,14 +972,14 @@ internal static partial class RegressionTests
                 ("RequireEachType", "False"));
             CryptureEntities.ConnectionString = "";
             oGenerator = new PasswordGenerator();
-            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.oGenerateButton_Click(null, null);
             sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
                 "Standalone generator preserves saved user preferences when application defaults change");
             oGenerator.Close();
             CryptureEntities.DatabasePath = sVault;
             oGenerator = new PasswordGenerator();
-            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.oGenerateButton_Click(null, null);
             sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length is >= 8 and <= 12 && sPassword.All(c => c == '|'),
                 "Saved user preferences override changed application defaults with a Vault open");
@@ -1017,7 +1026,7 @@ internal static partial class RegressionTests
             oPreferences.Save();
             CryptureEntities.ConnectionString = "";
             oGenerator = new PasswordGenerator();
-            oGenerate.Invoke(oGenerator, new object[] { null, null });
+            oGenerator.oGenerateButton_Click(null, null);
             sPassword = ((TextBox)oGenerator.FindName("oGeneratedPassword")).Text;
             Check(sPassword.Length == 1 && Char.IsAsciiLetter(sPassword[0]),
                 "A user without saved preferences receives current defaults and optional character-type coverage");
@@ -1108,8 +1117,7 @@ internal static partial class RegressionTests
             App.ApplyTheme(true);
             try
             {
-                oRtf = (byte[])typeof(ItemEditor).GetMethod("SaveRichText",
-                    BindingFlags.Instance | BindingFlags.NonPublic).Invoke(oEditor, null);
+                oRtf = oEditor.SaveRichText();
             }
             finally
             {
@@ -1190,8 +1198,7 @@ internal static partial class RegressionTests
         {
             oEditor.ThisItem.ItemType = sOriginalType;
             oEditor.SetEditingControls(true);
-            typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                .SetValue(oEditor, false);
+            oEditor.bHasChanges = false;
             oEditor.Width = nOriginalWidth;
             oEditor.FontSize = nOriginalFontSize;
         }
@@ -1215,8 +1222,6 @@ internal static partial class RegressionTests
             ScrollViewer oScroll = (ScrollViewer)((Grid)oGenerator.Content).Children[0];
             Border oResult = (Border)oGenerator.FindName("oPasswordResult");
             TextBox oPassword = (TextBox)oGenerator.FindName("oGeneratedPassword");
-            MethodInfo oGenerate = typeof(PasswordGenerator).GetMethod("oGenerateButton_Click",
-                BindingFlags.Instance | BindingFlags.NonPublic);
             foreach (double nFontSize in new[] { 12d, 18d })
             {
                 oGenerator.FontSize = nFontSize;
@@ -1226,7 +1231,7 @@ internal static partial class RegressionTests
                     ((TextBox)oGenerator.FindName("oMaximumLength")).Text = nLength.ToString();
                     oScroll.ScrollToTop();
                     oGenerator.UpdateLayout();
-                    oGenerate.Invoke(oGenerator, new object[] { null, null });
+                    oGenerator.oGenerateButton_Click(null, null);
                     oGenerator.UpdateLayout();
                     Rect oBounds = oResult.TransformToAncestor(oScroll).TransformBounds(
                         new Rect(oResult.RenderSize));

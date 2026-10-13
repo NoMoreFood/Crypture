@@ -18,7 +18,7 @@ namespace Crypture
     public partial class TotpPanel : UserControl
     {
         private readonly DispatcherTimer oTimer;
-        private TotpSecret oSecret;
+        internal TotpSecret oSecret;
         private bool bLoading = true;
         private bool bActive;
         private bool bHasSetup;

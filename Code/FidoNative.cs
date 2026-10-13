@@ -1,6 +1,7 @@
 using Microsoft.Win32.SafeHandles;
 using System;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -206,7 +207,8 @@ namespace Crypture
                 Marshal.PtrToStringUni(WebAuthNGetErrorName(nStatus)) == "NotAllowedError")
                 throw new OperationCanceledException("The security key operation was cancelled or timed out.");
             throw new CryptographicException("Windows could not use the FIDO2 security key. " +
-                new Win32Exception(nStatus).Message + " (0x" + nStatus.ToString("X8") + "). " +
+                new Win32Exception(nStatus).Message +
+                " (0x" + nStatus.ToString("X8", CultureInfo.InvariantCulture) + "). " +
                 "Connect a FIDO2 key supporting hmac-secret and complete its PIN and touch prompts.");
         }
 

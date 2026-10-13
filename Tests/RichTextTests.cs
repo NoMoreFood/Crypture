@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -59,15 +58,14 @@ internal static partial class RegressionTests
             oContent.Document.Blocks.Add(oParagraph);
             Check(((RibbonButton)oDraft.FindName("oSaveItemButton")).IsEnabled,
                 "A rich text item can be saved with Windows user protection");
-            typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oDraft, [null, new RoutedEventArgs()]);
+            oDraft.oSaveItemButton_Click(null, new RoutedEventArgs());
             PumpUntil(() => !oDraft.IsVisible);
             oDraft = null;
 
             long nItemId;
             using (CryptureEntities oContext = new CryptureEntities())
                 nItemId = oContext.Items.Single().ItemId;
-            oSaved = CreateEditor(DatabaseOperations.LoadItem(nItemId));
+            oSaved = CreateEditor(LoadItem(nItemId));
             oSaved.Left = -20000;
             oSaved.Top = -20000;
             oSaved.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -75,8 +73,7 @@ internal static partial class RegressionTests
             oSaved.ShowInTaskbar = false;
             oSaved.Show();
             PumpUntil(() => oSaved.IsLoaded);
-            typeof(ItemEditor).GetMethod("oLoadItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oSaved, [null, new RoutedEventArgs()]);
+            oSaved.oLoadItemButton_Click(null, new RoutedEventArgs());
             RichTextBox oReopened = (RichTextBox)oSaved.FindName("oRichItemData");
             PumpUntil(() => oReopened.IsVisible);
             TextPointer oFirstText = oReopened.Document.ContentStart;
@@ -93,8 +90,7 @@ internal static partial class RegressionTests
         {
             if (oDraft != null)
             {
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oDraft, false);
+                oDraft.bHasChanges = false;
                 oDraft.Close();
             }
             oSaved?.Close();

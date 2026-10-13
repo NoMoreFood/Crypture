@@ -7,8 +7,7 @@
     Title="Item Viewer &amp; Editor" Width="1080" Height="720" MinWidth="920" MinHeight="600"
     WindowStartupLocation="CenterOwner" PreviewKeyDown="oRootWindow_PreviewKeyDown" Closing="oRootWindow_Closing"
     Icon="pack://application:,,,/Crypture;component/Safe.ico" RenderOptions.BitmapScalingMode="HighQuality"
-    SnapsToDevicePixels="True" mc:Ignorable="d"
-    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+    SnapsToDevicePixels="True" mc:Ignorable="d">
     <Window.Resources>
         <local:CheckIfItemIsSelectedConverter x:Key="CheckIfItemIsSelectedConverter" />
         <local:CheckIfDateIsNotSetConverter x:Key="CheckIfDateIsNotSetConverter" />
@@ -121,10 +120,7 @@
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Disabled Encryption" />
                             <TextBlock x:Name="oRequiredCertificateNotice" Visibility="Collapsed" Margin="0,8,0,0"
-                                TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}">
-                                <Run Text="Required recipient certificates are configured." />
-                                <Run Text="Saving includes their recovery access." />
-                            </TextBlock>
+                                TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}" />
                             <TextBlock x:Name="oRecoveryNotice" Visibility="Collapsed" Margin="0,8,0,0"
                                 TextWrapping="Wrap" Foreground="{DynamicResource Crypture.WarningBrush}"
                                 AutomationProperties.Name="Emergency Recovery" />

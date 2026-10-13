@@ -19,22 +19,15 @@ namespace Crypture
         bool IsSqlServer { get; }
         bool SupportsCompact { get; }
         void Configure(DbContextOptionsBuilder oOptions);
-        void Create();
-        void Validate();
-        void ReadSnapshot(CryptureEntities oContent, Action oRead);
         DbConnection OpenHealthConnection();
         DbTransaction BeginHealthSnapshot(DbConnection oConnection);
-        void Backup(string sDestination);
         void Compact();
-
-        Task CreateAsync(CancellationToken oCancellation) => Task.Run(Create, oCancellation);
-        Task ValidateAsync(CancellationToken oCancellation) => Task.Run(Validate, oCancellation);
-        Task ReadSnapshotAsync(CryptureEntities oContent, Func<Task> oRead, CancellationToken oCancellation) =>
-            Task.Run(() => ReadSnapshot(oContent, () => oRead().GetAwaiter().GetResult()), oCancellation);
+        Task CreateAsync(CancellationToken oCancellation);
+        Task ValidateAsync(CancellationToken oCancellation);
+        Task ReadSnapshotAsync(CryptureEntities oContent, Func<Task> oRead, CancellationToken oCancellation);
+        Task BackupAsync(string sDestination, CancellationToken oCancellation);
         Task<(bool CanEnroll, bool CanBackup)> ReadPermissionsAsync(CancellationToken oCancellation) =>
             Task.FromResult((true, true));
-        Task BackupAsync(string sDestination, CancellationToken oCancellation) =>
-            Task.Run(() => Backup(sDestination), oCancellation);
     }
 
     internal sealed class SqliteVaultStorage : IVaultStorage
@@ -66,14 +59,22 @@ namespace Crypture
 
         public void Configure(DbContextOptionsBuilder oOptions) => oOptions.UseSqlite(ConnectionString);
 
-        public void Create()
+        // File Vault work is synchronous; run it on the thread pool to keep callers responsive.
+        public Task CreateAsync(CancellationToken oCancellation) => Task.Run(Create, oCancellation);
+        public Task ValidateAsync(CancellationToken oCancellation) => Task.Run(Validate, oCancellation);
+        public Task ReadSnapshotAsync(CryptureEntities oContent, Func<Task> oRead, CancellationToken oCancellation) =>
+            Task.Run(() => ReadSnapshot(oContent, () => oRead().GetAwaiter().GetResult()), oCancellation);
+        public Task BackupAsync(string sDestination, CancellationToken oCancellation) =>
+            Task.Run(() => Backup(sDestination), oCancellation);
+
+        internal void Create()
         {
             using StreamReader oReader = new StreamReader(typeof(SqliteVaultStorage).Assembly
                 .GetManifestResourceStream("Crypture.SqliteSchema"));
             DatabaseOperations.CreateDatabase(sPath, oReader.ReadToEnd());
         }
 
-        public void Validate()
+        internal void Validate()
         {
             // Check the complete schema in a read snapshot without changing the Vault.
             using SqliteConnection oConnection = (SqliteConnection)OpenHealthConnection();
@@ -95,7 +96,7 @@ namespace Crypture
             oTransaction.Commit();
         }
 
-        public void ReadSnapshot(CryptureEntities oContent, Action oRead)
+        internal void ReadSnapshot(CryptureEntities oContent, Action oRead)
         {
             // Deferred SQLite reads keep one version without taking a writer lock before the first query.
             oContent.Database.OpenConnection();
@@ -114,7 +115,7 @@ namespace Crypture
         public DbTransaction BeginHealthSnapshot(DbConnection oConnection) =>
             ((SqliteConnection)oConnection).BeginTransaction(deferred: true);
 
-        public void Backup(string sDestination) => DatabaseOperations.BackupDatabase(sPath, sDestination);
+        internal void Backup(string sDestination) => DatabaseOperations.BackupDatabase(sPath, sDestination);
 
         public void Compact()
         {
@@ -125,6 +126,7 @@ namespace Crypture
 
     internal sealed class SqlServerVaultStorage : IVaultStorage
     {
+        private const int VaultMarkerId = 1;
         private readonly SqlConnectionStringBuilder oBuilder;
 
         internal SqlServerVaultStorage(string sConnection)
@@ -134,6 +136,10 @@ namespace Crypture
                 throw new ArgumentException("Enter a SQL Server name and database name.");
             if (!oBuilder.IntegratedSecurity || oBuilder.UserID.Length != 0 || oBuilder.Password.Length != 0)
                 throw new ArgumentException("SQL Server Vaults require Windows integrated authentication.");
+
+            // Recipient certificates travel over this connection, so never accept an unencrypted one.
+            if (oBuilder.Encrypt.Equals(SqlConnectionEncryptOption.Optional))
+                oBuilder.Encrypt = SqlConnectionEncryptOption.Mandatory;
             ConnectionString = oBuilder.ConnectionString;
         }
 
@@ -142,13 +148,11 @@ namespace Crypture
         public bool IsSqlServer => true;
         public bool SupportsCompact => false;
         internal string DatabaseName => oBuilder.InitialCatalog;
-        internal string RecentConnection => ConnectionString;
         internal SqlServerEscrowChoice EscrowChoice { get; set; }
+        internal bool GrantDomainUsers { get; set; } = true;
         internal SqlServerEscrowPolicy Escrow { get; private set; }
 
         public void Configure(DbContextOptionsBuilder oOptions) => oOptions.UseSqlServer(ConnectionString);
-
-        public void Create() => CreateAsync(CancellationToken.None).GetAwaiter().GetResult();
 
         public async Task CreateAsync(CancellationToken oCancellation)
         {
@@ -169,6 +173,8 @@ namespace Crypture
                     throw new IOException("The SQL Server database already exists. Choose a new database name.");
             }
             string sQuotedName = "[" + DatabaseName.Replace("]", "]]", StringComparison.Ordinal) + "]";
+            string sQuotedLogin = null;
+            bool bLoginCreated = false;
             oCancellation.ThrowIfCancellationRequested();
 
             // Confirm creation before cancellation can clean up the newly owned database.
@@ -176,18 +182,22 @@ namespace Crypture
                 await oCreate.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
             try
             {
-                // Provision the domain's Users group with the limited Vault role.
-                string sDomainUsers = await Task.Run(GetDomainUsersName, oCancellation).ConfigureAwait(false);
-                string sQuotedLogin = sDomainUsers == null ? null :
-                    "[" + sDomainUsers.Replace("]", "]]", StringComparison.Ordinal) + "]";
+                // Provision the domain's Users group with the limited Vault role when the creator chose to.
+                string sDomainUsers = GrantDomainUsers
+                    ? await Task.Run(GetDomainUsersName, oCancellation).ConfigureAwait(false) : null;
                 if (sDomainUsers != null)
                 {
-                    using SqlCommand oLogin = new SqlCommand(
-                        "IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE [name] = @name) " +
-                        "EXEC(N'CREATE LOGIN " + sQuotedLogin.Replace("'", "''", StringComparison.Ordinal) +
-                        " FROM WINDOWS')", oConnection);
-                    oLogin.Parameters.AddWithValue("@name", sDomainUsers);
-                    await oLogin.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
+                    sQuotedLogin = "[" + sDomainUsers.Replace("]", "]]", StringComparison.Ordinal) + "]";
+                    using SqlCommand oExists = new SqlCommand(
+                        "SELECT 1 FROM sys.server_principals WHERE [name] = @name", oConnection);
+                    oExists.Parameters.AddWithValue("@name", sDomainUsers);
+                    if (await oExists.ExecuteScalarAsync(oCancellation).ConfigureAwait(false) == null)
+                    {
+                        using SqlCommand oLogin = new SqlCommand(
+                            "CREATE LOGIN " + sQuotedLogin + " FROM WINDOWS", oConnection);
+                        await oLogin.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
+                        bLoginCreated = true;
+                    }
                 }
                 using SqlConnection oVault = new SqlConnection(ConnectionString);
                 await oVault.OpenAsync(oCancellation).ConfigureAwait(false);
@@ -197,31 +207,22 @@ namespace Crypture
                     .GetManifestResourceStream("Crypture.SqlServerSchema"));
                 using SqlCommand oSchema = new SqlCommand(oReader.ReadToEnd(), oVault, oTransaction);
                 await oSchema.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
-                await ExecuteBatchesAsync(oVault, oTransaction, "Crypture.SqlServerSecurity", oCancellation)
-                    .ConfigureAwait(false);
-                await ExecuteBatchesAsync(oVault, oTransaction, "Crypture.SqlServerEnrollment", oCancellation)
-                    .ConfigureAwait(false);
-                await ExecuteBatchesAsync(oVault, oTransaction, "Crypture.SqlServerEscrow", oCancellation)
-                    .ConfigureAwait(false);
+                foreach (string sResource in new[] { "Crypture.SqlServerSecurity",
+                    "Crypture.SqlServerEnrollment", "Crypture.SqlServerEscrow" })
+                    await ExecuteBatchesAsync(oVault, oTransaction, sResource, oCancellation).ConfigureAwait(false);
                 if (EscrowChoice.Certificate != null)
                 {
-                    using SqlCommand oEnroll = new SqlCommand("[dbo].[EnrollCertificate]", oVault, oTransaction)
-                        { CommandType = CommandType.StoredProcedure };
-                    oEnroll.Parameters.Add("@certificate", SqlDbType.VarBinary, -1).Value = EscrowChoice.Certificate;
-                    oEnroll.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = EscrowChoice.Sid;
-                    SqlParameter oUserId = oEnroll.Parameters.Add("@userId", SqlDbType.BigInt);
-                    oUserId.Direction = ParameterDirection.Output;
+                    using SqlCommand oEnroll = SqlServerCertificateEnrollment.EnrollCommand(oVault, oTransaction,
+                        EscrowChoice.Certificate, EscrowChoice.Sid);
                     await oEnroll.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
-                    using SqlCommand oEscrow = new SqlCommand("[dbo].[MarkEscrowCertificate]", oVault, oTransaction)
-                        { CommandType = CommandType.StoredProcedure };
-                    oEscrow.Parameters.Add("@userId", SqlDbType.BigInt).Value = oUserId.Value;
-                    oEscrow.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = EscrowChoice.Label;
+                    using SqlCommand oEscrow = SqlServerCertificateEnrollment.EscrowCommand(oVault, oTransaction,
+                        (long)oEnroll.Parameters["@userId"].Value, EscrowChoice.Label);
                     await oEscrow.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
                 }
                 else
                 {
-                    using SqlCommand oEscrow = new SqlCommand("[dbo].[SetVaultEscrowPrincipal]", oVault,
-                        oTransaction) { CommandType = CommandType.StoredProcedure };
+                    using SqlCommand oEscrow = SqlServerItemOperations.Procedure(oVault,
+                        "[dbo].[SetVaultEscrowPrincipal]", oTransaction);
                     oEscrow.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = EscrowChoice.Sid;
                     oEscrow.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = EscrowChoice.Label;
                     await oEscrow.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
@@ -231,22 +232,21 @@ namespace Crypture
                         sQuotedLogin + "; ALTER ROLE [crypture_domain] ADD MEMBER " + sQuotedLogin, oVault,
                         oTransaction)) await oGrant.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
                 await oTransaction.CommitAsync(oCancellation).ConfigureAwait(false);
-                await RefreshEscrowAsync(oCancellation).ConfigureAwait(false);
+                await RefreshEscrowAsync(oCancellation, oVault).ConfigureAwait(false);
             }
             catch
             {
-                using SqlCommand oDrop = new SqlCommand("DROP DATABASE " + sQuotedName, oConnection);
+                // Remove only what this attempt created, leaving a login that already existed in place.
+                using SqlCommand oDrop = new SqlCommand("DROP DATABASE " + sQuotedName +
+                    (bLoginCreated ? "; DROP LOGIN " + sQuotedLogin : ""), oConnection);
                 await oDrop.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
         }
 
-        public void Validate() => ValidateAsync(CancellationToken.None).GetAwaiter().GetResult();
-
         public async Task ValidateAsync(CancellationToken oCancellation)
         {
-            const int VaultMarkerId = 1;
-            const int SupportedSchemaVersion = 8;
+            const int SupportedSchemaVersion = 9;
 
             // The marker prevents opening an arbitrary database with similarly named tables as a Vault.
             using SqlConnection oConnection = new SqlConnection(ConnectionString);
@@ -257,20 +257,23 @@ namespace Crypture
             if (await oCommand.ExecuteScalarAsync(oCancellation).ConfigureAwait(false) is not int nVersion ||
                 nVersion != SupportedSchemaVersion)
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
-            await RefreshEscrowAsync(oCancellation).ConfigureAwait(false);
+            await RefreshEscrowAsync(oCancellation, oConnection).ConfigureAwait(false);
         }
 
         internal SqlServerEscrowPolicy RefreshEscrow() =>
             RefreshEscrowAsync(CancellationToken.None).GetAwaiter().GetResult();
 
-        internal async Task<SqlServerEscrowPolicy> RefreshEscrowAsync(CancellationToken oCancellation)
+        internal async Task<SqlServerEscrowPolicy> RefreshEscrowAsync(CancellationToken oCancellation,
+            SqlConnection oOpenConnection = null)
         {
-            using SqlConnection oConnection = new SqlConnection(ConnectionString);
-            await oConnection.OpenAsync(oCancellation).ConfigureAwait(false);
+            // Reuse the caller's open connection when one is available to avoid another login.
+            using SqlConnection oOwned = oOpenConnection == null ? new SqlConnection(ConnectionString) : null;
+            if (oOwned != null) await oOwned.OpenAsync(oCancellation).ConfigureAwait(false);
             using SqlCommand oCommand = new SqlCommand(
                 "SELECT v.[EscrowCertificateUserId], u.[Certificate], v.[EscrowDescriptor], " +
                 "v.[EscrowLabel] FROM [dbo].[CryptureVault] AS v LEFT JOIN [dbo].[User] AS u " +
-                "ON u.[UserId] = v.[EscrowCertificateUserId] WHERE v.[Id] = 1", oConnection);
+                "ON u.[UserId] = v.[EscrowCertificateUserId] WHERE v.[Id] = @id", oOpenConnection ?? oOwned);
+            oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
             using SqlDataReader oReader = await oCommand.ExecuteReaderAsync(oCancellation).ConfigureAwait(false);
             if (!await oReader.ReadAsync(oCancellation).ConfigureAwait(false))
                 throw new InvalidDataException("This is not a supported Crypture SQL Server Vault.");
@@ -302,13 +305,6 @@ namespace Crypture
             return new SecurityIdentifier(oDomain.Value + "-513").Translate(typeof(NTAccount)).Value;
         }
 
-        public void ReadSnapshot(CryptureEntities oContent, Action oRead)
-        {
-            using var oTransaction = oContent.Database.BeginTransaction(IsolationLevel.Serializable);
-            oRead();
-            oTransaction.Commit();
-        }
-
         public async Task ReadSnapshotAsync(CryptureEntities oContent, Func<Task> oRead,
             CancellationToken oCancellation)
         {
@@ -323,9 +319,6 @@ namespace Crypture
         public DbTransaction BeginHealthSnapshot(DbConnection oConnection) =>
             oConnection.BeginTransaction(IsolationLevel.Serializable);
 
-        public void Backup(string sDestination) =>
-            BackupAsync(sDestination, CancellationToken.None).GetAwaiter().GetResult();
-
         public async Task BackupAsync(string sDestination, CancellationToken oCancellation)
         {
             // SQL Server writes this path on the server, using the server service account.
@@ -337,11 +330,6 @@ namespace Crypture
             oCommand.Parameters.AddWithValue("@destination", sDestination);
             await oCommand.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
         }
-
-        internal bool CanBackup() => ReadPermissionsAsync(CancellationToken.None).GetAwaiter().GetResult().CanBackup;
-
-        internal bool CanEnrollCertificates() =>
-            ReadPermissionsAsync(CancellationToken.None).GetAwaiter().GetResult().CanEnroll;
 
         public async Task<(bool CanEnroll, bool CanBackup)> ReadPermissionsAsync(CancellationToken oCancellation)
         {

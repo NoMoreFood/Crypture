@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -107,7 +106,7 @@ internal static partial class RegressionTests
                 oPlain, null, oFidoKey: oAccess);
             long nId;
             using (CryptureEntities oContext = new CryptureEntities()) nId = oContext.Items.Single().ItemId;
-            Item oStored = DatabaseOperations.LoadItem(nId);
+            Item oStored = LoadItem(nId);
             Check(oStored.ProtectionDisplay == "FIDO2 Security Key" &&
                 ItemCryptography.Decrypt(oStored, oFidoKey: oAccess).SequenceEqual(oPlain),
                 "File Vault stores and reloads FIDO2 metadata and encrypted content");
@@ -121,7 +120,7 @@ internal static partial class RegressionTests
             Check(oHealth.Findings.Any(f => f.Kind == "Emergency Recovery" && f.Severity == HealthStatus.Warning),
                 "Health check reports missing configured recovery for FIDO2 items");
             DatabaseOperations.SaveItem(oStored, oPlain, null, oFidoKey: oAccess);
-            oStored = DatabaseOperations.LoadItem(nId);
+            oStored = LoadItem(nId);
             Check(oStored.Instances.Count == 1 && ItemCryptography.Decrypt(oStored).SequenceEqual(oPlain) &&
                 ItemCryptography.Decrypt(oStored, oStored.Instances.Single(), oCert).SequenceEqual(oPlain),
                 "The save boundary enforces both configured FIDO2 recovery paths");
@@ -135,13 +134,13 @@ internal static partial class RegressionTests
             DatabaseOperations.BackupDatabase(sPath, sBackup);
             SetRecoveryConfig(null, null);
             CryptureEntities.DatabasePath = sBackup;
-            Item oBackup = DatabaseOperations.LoadItem(nId);
+            Item oBackup = LoadItem(nId);
             Check(ItemCryptography.Decrypt(oBackup, oFidoKey: oAccess).SequenceEqual(oPlain) &&
                 ItemCryptography.Decrypt(oBackup).SequenceEqual(oPlain),
                 "Vault backup retains both FIDO2 key protection and saved recovery access");
             CryptureEntities.DatabasePath = sPath;
             DatabaseOperations.RemoveCertificate(oStored.Instances.Single().UserId);
-            oStored = DatabaseOperations.LoadItem(nId);
+            oStored = LoadItem(nId);
             Check(oStored.Instances.Count == 0 &&
                 ItemCryptography.Decrypt(oStored, oFidoKey: oAccess).SequenceEqual(oPlain),
                 "Removing optional certificate recovery preserves primary FIDO2 access");
@@ -149,13 +148,13 @@ internal static partial class RegressionTests
             // Conversion removes obsolete access paths and rejects stale edits across the change.
             Item oBeforeConversion = oStored;
             DatabaseOperations.SaveItem(oStored, oPlain, null, PrincipalProtection.LocalUserDescriptor);
-            oStored = DatabaseOperations.LoadItem(nId);
+            oStored = LoadItem(nId);
             Check(oStored.Cipher.CipherParams == ItemCryptography.PrincipalFormat &&
                 ItemCryptography.Decrypt(oStored).SequenceEqual(oPlain), "FIDO2 item converts to Windows protection");
             Reject(() => DatabaseOperations.SaveItem(oBeforeConversion, oPlain, null, oFidoKey: oAccess),
                 "FIDO2 save rejects stale edits across protection conversion");
             DatabaseOperations.SaveItem(oStored, oPlain, null, oFidoKey: oAccess);
-            oStored = DatabaseOperations.LoadItem(nId);
+            oStored = LoadItem(nId);
             Check(FidoKeyProtection.Read(oStored.Cipher).RecoveryKey == null && oStored.Instances.Count == 0 &&
                 ItemCryptography.Decrypt(oStored, oFidoKey: oAccess).SequenceEqual(oPlain),
                 "Converting Windows protection to FIDO2 removes unconfigured Windows access");
@@ -200,7 +199,7 @@ internal static partial class RegressionTests
                 oPlain, null, oFidoKey: oAccess);
             long nId;
             using (CryptureEntities oContext = new CryptureEntities()) nId = oContext.Items.Single().ItemId;
-            oEditor = CreateEditor(DatabaseOperations.LoadItem(nId));
+            oEditor = CreateEditor(LoadItem(nId));
             oEditor.Left = -20000;
             oEditor.Top = -20000;
             oEditor.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -267,8 +266,7 @@ internal static partial class RegressionTests
             // Saved FIDO2 details and recovery must survive unavailable or disabled encryption support.
             foreach (bool bSupported in new[] { false, true })
             {
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
+                oEditor.bHasChanges = false;
                 oEditor.Close();
                 FidoNative.ReadApiVersion = () => bSupported ? 4 : 0;
                 Crypture.Properties.Settings.Default["EnableFidoProtection"] = !bSupported;
@@ -297,8 +295,7 @@ internal static partial class RegressionTests
         {
             if (oEditor != null)
             {
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
+                oEditor.bHasChanges = false;
                 oEditor.Close();
             }
             File.WriteAllBytes(sConfigPath, oOriginalConfig);
@@ -344,9 +341,7 @@ internal static partial class RegressionTests
             };
             oBrowser.Show();
             PumpUntil(() => oBrowser.IsLoaded);
-            MethodInfo oLoad = typeof(ItemBrowser).GetMethod("LoadVaultAsync",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Task<bool> oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            Task<bool> oLoading = oBrowser.LoadVaultAsync(oFile, false);
             PumpUntil(() => oLoading.IsCompleted);
             Check(oLoading.GetAwaiter().GetResult() &&
                 ((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
@@ -370,8 +365,7 @@ internal static partial class RegressionTests
             oInspect.Start();
             try
             {
-                typeof(ItemBrowser).GetMethod("oAddItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .Invoke(oBrowser, [null, null]);
+                oBrowser.oAddItemButton_Click(null, null);
                 PumpUntil(() => bInspected && !((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible);
             }
             finally { oInspect.Stop(); }
@@ -380,7 +374,7 @@ internal static partial class RegressionTests
             // The Vault loader enrolls mandatory certificates independently of the certificate mode's UI flag.
             oSettings["AutomaticallyAddedCertificatesList"] = new StringCollection
                 { Convert.ToBase64String(oCert.RawData) };
-            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            oLoading = oBrowser.LoadVaultAsync(oFile, false);
             PumpUntil(() => oLoading.IsCompleted);
             Check(oLoading.GetAwaiter().GetResult(), "FIDO-only Vault loads its mandatory certificate policy");
             oEditor = CreateEditor();
@@ -397,7 +391,7 @@ internal static partial class RegressionTests
             DatabaseOperations.SaveItem(oEditor.ThisItem, oPlain, oEditor.UserListSelected, oFidoKey: oAccess);
             long nId;
             using (CryptureEntities oDatabase = new CryptureEntities()) nId = oDatabase.Items.Single().ItemId;
-            Item oSaved = DatabaseOperations.LoadItem(nId);
+            Item oSaved = LoadItem(nId);
             Check(oSaved.Instances.Count == 1 &&
                 ItemCryptography.Decrypt(oSaved, oSaved.Instances.Single(), oCert).SequenceEqual(oPlain) &&
                 ItemCryptography.Decrypt(oSaved, oFidoKey: oAccess).SequenceEqual(oPlain),
@@ -408,7 +402,7 @@ internal static partial class RegressionTests
 
             // Unavailable, disabled, and SQL Server contexts must retain their capability restrictions.
             FidoNative.ReadApiVersion = () => 1;
-            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            oLoading = oBrowser.LoadVaultAsync(oFile, false);
             PumpUntil(() => oLoading.IsCompleted);
             Check(oLoading.GetAwaiter().GetResult() &&
                 !((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
@@ -443,7 +437,7 @@ internal static partial class RegressionTests
             oSettings["EnableDpapiNgProtection"] = false;
             FidoNative.ReadApiVersion = () => 4;
             oSettings["EnableFidoProtection"] = false;
-            oLoading = (Task<bool>)oLoad.Invoke(oBrowser, [oFile, false]);
+            oLoading = oBrowser.LoadVaultAsync(oFile, false);
             PumpUntil(() => oLoading.IsCompleted);
             Check(oLoading.GetAwaiter().GetResult() &&
                 !((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
@@ -457,12 +451,10 @@ internal static partial class RegressionTests
             oSettings["EnableFidoProtection"] = true;
             SqlServerVaultStorage oSql = new SqlServerVaultStorage(
                 "Server=localhost;Database=FidoCapability;Integrated Security=true");
-            Type oViewType = typeof(ItemBrowser).GetNestedType("VaultView", BindingFlags.NonPublic);
-            object oView = Activator.CreateInstance(oViewType,
-                new List<Item>(), new List<User>(), new HashSet<string>(), oSql.DisplayName,
-                "SQL Server capability check", "sqlserver:" + oSql.RecentConnection, false, false);
-            typeof(ItemBrowser).GetMethod("ApplyVault", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oBrowser, [oSql, oView, true]);
+            ItemBrowser.VaultView oView = new ItemBrowser.VaultView(
+                new List<Item>(), new List<User>(), new HashSet<long>(), oSql.DisplayName,
+                "SQL Server capability check", "sqlserver:" + oSql.ConnectionString, false, false);
+            oBrowser.ApplyVault(oSql, oView, true);
             Check(!((RibbonButton)oBrowser.FindName("oAddItemButton")).IsEnabled,
                 "FIDO-only settings cannot enable item creation for a SQL Server Vault");
             oEditor = CreateEditor();
@@ -478,8 +470,7 @@ internal static partial class RegressionTests
         {
             if (oEditor != null)
             {
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
+                oEditor.bHasChanges = false;
                 oEditor.Close();
             }
             if (oBrowser != null)

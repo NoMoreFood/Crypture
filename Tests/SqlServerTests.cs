@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Data;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Ribbon;
@@ -48,11 +47,11 @@ internal static partial class RegressionTests
                 "SQL Server Vaults reject password authentication");
 
             // Exercise the same encrypted item and recipient operations used by the desktop editor.
-            Reject(() => oStorage.Create(), "SQL Server creation requires an escrow identity");
+            Reject(() => CreateVault(oStorage), "SQL Server creation requires an escrow identity");
             oStorage.EscrowChoice = SqlServerEscrowChoice.ForPrincipal(sCurrentSid,
                 "Windows: " + sCurrentSid);
-            oStorage.Create();
-            oStorage.Validate();
+            CreateVault(oStorage);
+            ValidateVault(oStorage);
             using (SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString))
             {
                 oConnection.Open();
@@ -61,7 +60,7 @@ internal static partial class RegressionTests
                 Check(oCommand.ExecuteScalar() is DBNull,
                     "New SQL Server Vaults contain no password generator preferences");
             }
-            Reject(() => oStorage.Create(), "SQL Server refuses to overwrite an existing Vault");
+            Reject(() => CreateVault(oStorage), "SQL Server refuses to overwrite an existing Vault");
             CryptureEntities.Storage = oStorage;
             Check(oStorage.Escrow?.Descriptor == "SID=" + sCurrentSid,
                 "SQL Server creation saves the selected Windows escrow identity");
@@ -81,7 +80,7 @@ internal static partial class RegressionTests
             long nItemId;
             using (CryptureEntities oContext = new CryptureEntities())
                 nItemId = oContext.Items.Single(i => i.Label == "SQL Server item").ItemId;
-            Item oLoaded = DatabaseOperations.LoadItem(nItemId);
+            Item oLoaded = LoadItem(nItemId);
             Check(oLoaded.RowVersion?.Length == 8 && oLoaded.Instances.Count == 2 &&
                 ItemCryptography.Decrypt(oLoaded, oLoaded.Instances.First(i => i.UserId == oUsers[0].UserId),
                     oCert).SequenceEqual(oPlainText), "SQL Server loads and decrypts item with recipients");
@@ -89,11 +88,11 @@ internal static partial class RegressionTests
                 Math.Abs((DateTime.UtcNow - oLoaded.CreatedDate).TotalSeconds) < 60,
                 "SQL Server saves and reloads UTC item timestamps");
             TestSqlServerRecipientSecurity(oStorage, nItemId, sCurrentSid, oUsers[1].UserId);
-            Item oStale = DatabaseOperations.LoadItem(nItemId);
+            Item oStale = LoadItem(nItemId);
             DatabaseOperations.SaveItem(oLoaded, Encoding.UTF8.GetBytes("second revision"), oUsers);
             Reject(() => DatabaseOperations.SaveItem(oStale, oPlainText, oUsers),
                 "SQL Server rejects a stale item edit");
-            Item[] oCompeting = { DatabaseOperations.LoadItem(nItemId), DatabaseOperations.LoadItem(nItemId) };
+            Item[] oCompeting = { LoadItem(nItemId), LoadItem(nItemId) };
             using ManualResetEventSlim oStart = new ManualResetEventSlim();
             Task<Exception>[] oSaves = oCompeting.Select((oItem, nIndex) => Task.Run(() =>
             {
@@ -113,13 +112,13 @@ internal static partial class RegressionTests
             Check(oSaves.Single(t => t.Result != null).Result is InvalidOperationException oConflict &&
                 oConflict.Message.StartsWith("This item changed", StringComparison.Ordinal),
                 "A competing SQL Server edit reports a readable conflict");
-            Item oDeleteSnapshot = DatabaseOperations.LoadItem(nItemId);
+            Item oDeleteSnapshot = LoadItem(nItemId);
             Reject(() => DatabaseOperations.DeleteItem(oStale), "SQL Server rejects a stale item deletion");
-            Check(DatabaseOperations.LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
+            Check(LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
                 "A rejected deletion preserves the newer item");
             Reject(() => SqlServerItemOperations.Delete(oStorage, new Item { ItemId = nItemId }),
                 "SQL Server requires a displayed row version before deleting an item");
-            Check(DatabaseOperations.LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
+            Check(LoadItem(nItemId).RowVersion.SequenceEqual(oDeleteSnapshot.RowVersion),
                 "A deletion without a revision preserves the saved item");
             PasswordOptions.SavePreferences(new PasswordOptions { MinimumLength = 26,
                 MaximumLength = 32 });
@@ -129,17 +128,17 @@ internal static partial class RegressionTests
             Check(oReport.ItemCount == 1, "SQL Server health check reads the Vault");
             Reject(() => DatabaseOperations.RemoveCertificate(oUsers[1].UserId),
                 "SQL Server blocks removal of a certificate still used by an item");
-            DatabaseOperations.SaveItem(DatabaseOperations.LoadItem(nItemId),
+            DatabaseOperations.SaveItem(LoadItem(nItemId),
                 Encoding.UTF8.GetBytes("remaining recipient"), new[] { oUsers[0] });
             DatabaseOperations.RemoveCertificate(oUsers[1].UserId);
-            Check(DatabaseOperations.LoadItem(nItemId).Instances.Count == 1,
+            Check(LoadItem(nItemId).Instances.Count == 1,
                 "SQL Server removes an alternate certificate recipient");
             Reject(() => DatabaseOperations.RemoveCertificate(oUsers[0].UserId),
                 "SQL Server blocks deletion of the last recipient");
-            oStorage.Backup(sBackup);
+            oStorage.BackupAsync(sBackup, CancellationToken.None).GetAwaiter().GetResult();
             Check(File.Exists(sBackup) && new FileInfo(sBackup).Length > 0,
                 "SQL Server creates a server-side backup");
-            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(nItemId));
+            DatabaseOperations.DeleteItem(LoadItem(nItemId));
             using (CryptureEntities oContext = new CryptureEntities())
                 Check(!oContext.Ciphers.Any() && !oContext.Instances.Any(),
                     "SQL Server cascades item deletion to encrypted records");
@@ -182,8 +181,8 @@ internal static partial class RegressionTests
         };
         try
         {
-            oStorage.Create();
-            oStorage.Validate();
+            CreateVault(oStorage);
+            ValidateVault(oStorage);
             CryptureEntities.Storage = oStorage;
             Check(oStorage.Escrow.CertificateUserId.HasValue && oStorage.Escrow.Descriptor == null,
                 "SQL Server creation enrolls and designates the selected escrow certificate");
@@ -194,7 +193,7 @@ internal static partial class RegressionTests
             byte[] oSecret = Encoding.UTF8.GetBytes("Independent certificate escrow");
             Item oItem = new Item { Label = "Independent escrow", ItemType = "text", ModifiedBy = nPrimaryId };
             DatabaseOperations.SaveItem(oItem, oSecret, new[] { oPrimary });
-            Item oStored = DatabaseOperations.LoadItem(oItem.ItemId);
+            Item oStored = LoadItem(oItem.ItemId);
             Check(oStored.Instances.Count == 2 && oStored.ProtectionDisplay.Contains("Independent escrow") &&
                 ItemCryptography.Decrypt(oStored, oStored.Instances.Single(i =>
                     i.UserId == oStorage.Escrow.CertificateUserId), oEscrowCertificate).SequenceEqual(oSecret),
@@ -251,13 +250,12 @@ internal static partial class RegressionTests
             oEditor.UserListSelected.Add(oPrimary);
             Check(((RibbonButton)oEditor.FindName("oSaveItemButton")).IsEnabled,
                 "A new SQL Server item is ready to save with certificate protection");
-            typeof(ItemEditor).GetMethod("oSaveItemButton_Click", BindingFlags.Instance | BindingFlags.NonPublic)
-                .Invoke(oEditor, [null, new RoutedEventArgs()]);
+            oEditor.oSaveItemButton_Click(null, new RoutedEventArgs());
             PumpUntil(() => !oEditor.IsVisible || oSaveError != null);
             if (oSaveError != null) throw new Exception("The SQL Server editor failed after saving.", oSaveError);
             Check(oEditor.ThisItem.ItemId != 0 && ((TextBox)oEditor.FindName("oItemData")).Text.Length == 0,
                 "Saving a new SQL Server item closes the editor and clears plaintext");
-            Item oStored = DatabaseOperations.LoadItem(oEditor.ThisItem.ItemId);
+            Item oStored = LoadItem(oEditor.ThisItem.ItemId);
             oEditor.Close();
             oEditor = CreateEditor(oStored);
             CheckItemDateDisplay(oEditor);
@@ -265,17 +263,15 @@ internal static partial class RegressionTests
                 oStored.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)) ==
                 "Saved through the SQL Server editor",
                 "The item saved through the SQL Server editor reopens and decrypts");
-            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oStored.ItemId));
+            DatabaseOperations.DeleteItem(LoadItem(oStored.ItemId));
         }
         finally
         {
             Dispatcher.CurrentDispatcher.UnhandledException -= oUnhandled;
             if (oEditor != null)
             {
-                typeof(ItemEditor).GetField("bBusy", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
-                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(oEditor, false);
+                oEditor.bBusy = false;
+                oEditor.bHasChanges = false;
                 oEditor.Close();
             }
             SynchronizationContext.SetSynchronizationContext(oPreviousContext);
@@ -384,7 +380,7 @@ internal static partial class RegressionTests
             oTransaction.Rollback();
             Check(bRejected, "SQL Server schema rejects a malformed direct write: " + sName);
         }
-        Item oUnchanged = DatabaseOperations.LoadItem(oStored.ItemId);
+        Item oUnchanged = LoadItem(oStored.ItemId);
         Check(oUnchanged.Cipher.CipherText.SequenceEqual(oStored.Cipher.CipherText) &&
             oUnchanged.Instances.Count == oStored.Instances.Count &&
             oUnchanged.RowVersion.SequenceEqual(oStored.RowVersion),
@@ -546,7 +542,7 @@ internal static partial class RegressionTests
             oSetup.ExecuteNonQuery();
         }
         Check(oAccepted.Count == 0, "SQL Server rejects every malformed save");
-        Item oUnchanged = DatabaseOperations.LoadItem(oStored.ItemId);
+        Item oUnchanged = LoadItem(oStored.ItemId);
         using SqlCommand oCount = new SqlCommand("SELECT COUNT(*) FROM [dbo].[Item]", oConnection);
         Check((int)oCount.ExecuteScalar() == 1 && oUnchanged.RowVersion.SequenceEqual(oStored.RowVersion) &&
             oUnchanged.Cipher.CipherText.SequenceEqual(oStored.Cipher.CipherText) &&
@@ -572,12 +568,12 @@ internal static partial class RegressionTests
                 Item oEncrypted = new Item { Label = oItem.Label, ItemType = sType };
                 ItemCryptography.Encrypt(oEncrypted, oPlainText, oRecipients, nContentSuite: nSuite);
                 SqlServerItemOperations.Save(oStorage, oItem, oEncrypted);
-                Item oLoaded = DatabaseOperations.LoadItem(oItem.ItemId);
+                Item oLoaded = LoadItem(oItem.ItemId);
                 Check(ItemCryptography.Decrypt(oLoaded,
                     oLoaded.Instances.Single(i => i.UserId == oPrimary.UserId), oCertificate)
                     .SequenceEqual(oPlainText),
                     "SQL Server round trips " + nSuite + " " + sType + " content at " + nLength + " bytes");
-                DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oItem.ItemId));
+                DatabaseOperations.DeleteItem(LoadItem(oItem.ItemId));
             }
         }
     }
@@ -644,7 +640,7 @@ internal static partial class RegressionTests
             ModifiedBy = oUser.UserId }, [3], new[] { oUser });
         using CryptureEntities oContext = new CryptureEntities();
         long nItemId = oContext.Items.Single().ItemId;
-        byte[] oCipherText = DatabaseOperations.LoadItem(nItemId).Cipher.CipherText;
+        byte[] oCipherText = LoadItem(nItemId).Cipher.CipherText;
         string sEscrowLabel = oStorage.Escrow.Label;
         using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
         oConnection.Open();
@@ -652,35 +648,35 @@ internal static partial class RegressionTests
         try
         {
             // Unsupported schemas must be rejected without changing stored data or certificate affiliations.
-            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 9 })
+            foreach (int nVersion in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10 })
             {
                 oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = @version WHERE [Id] = 1";
                 oCommand.Parameters.AddWithValue("@version", nVersion);
                 oCommand.ExecuteNonQuery();
                 oCommand.Parameters.Clear();
                 bool bRejected = false;
-                try { oStorage.Validate(); }
+                try { ValidateVault(oStorage); }
                 catch (InvalidDataException) { bRejected = true; }
                 Check(bRejected, "Opening an unsupported SQL Server schema is rejected: " + nVersion);
                 oCommand.CommandText = "SELECT [SchemaVersion] FROM [dbo].[CryptureVault] WHERE [Id] = 1";
                 Check((int)oCommand.ExecuteScalar() == nVersion &&
                     oContext.Users.AsNoTracking().Single().Sid == oUser.Sid &&
-                    DatabaseOperations.LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
+                    LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
                     "Rejected SQL Server opens preserve the schema, affiliations, and encrypted content");
             }
         }
         finally
         {
-            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 8 WHERE [Id] = 1";
+            oCommand.CommandText = "UPDATE [dbo].[CryptureVault] SET [SchemaVersion] = 9 WHERE [Id] = 1";
             oCommand.Parameters.Clear();
             oCommand.ExecuteNonQuery();
         }
 
         // Concurrent opens read the same saved escrow policy without requiring a schema writer.
-        Task.WaitAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() => oStorage.Validate())).ToArray());
+        Task.WaitAll(Enumerable.Range(0, 2).Select(_ => oStorage.ValidateAsync(CancellationToken.None)).ToArray());
         Check(oStorage.Escrow.Label == sEscrowLabel &&
             oContext.Users.AsNoTracking().Single().Sid == oUser.Sid &&
-            DatabaseOperations.LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
+            LoadItem(nItemId).Cipher.CipherText.SequenceEqual(oCipherText),
             "Concurrent SQL Server opens preserve escrow, affiliations, and encrypted content");
     }
 
@@ -720,7 +716,7 @@ internal static partial class RegressionTests
             }
             oEncrypted.Cipher.ProtectedKey = TestRecoveryEnvelope(sEscrowDescriptor);
             SqlServerItemOperations.Save(oStorage, oWindowsEscrowItem, oEncrypted);
-            Item oWindowsStored = DatabaseOperations.LoadItem(oWindowsEscrowItem.ItemId);
+            Item oWindowsStored = LoadItem(oWindowsEscrowItem.ItemId);
             Check(oWindowsStored.ProtectionDisplay.Contains(oStorage.Escrow.Label) &&
                 RecoveryProtection.ReadWindowsKeys(oWindowsStored.Cipher).Any(e =>
                     e.Key == sEscrowDescriptor),
@@ -752,9 +748,9 @@ internal static partial class RegressionTests
                 oCommand.ExecuteNonQuery();
             }
             oStorage.RefreshEscrow();
-            Check(DatabaseOperations.LoadItem(oWindowsStored.ItemId).ProtectionDisplay
+            Check(LoadItem(oWindowsStored.ItemId).ProtectionDisplay
                 .Contains("Windows: "), "Saved item text retains the escrow identity used at its save");
-            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oWindowsStored.ItemId));
+            DatabaseOperations.DeleteItem(LoadItem(oWindowsStored.ItemId));
             Item oMissingCertificate = new Item { Label = "Missing certificate escrow", ItemType = "text" };
             try
             {
@@ -774,13 +770,13 @@ internal static partial class RegressionTests
             DatabaseOperations.SaveItem(new Item { Label = "Verified escrow", ItemType = "text",
                 ModifiedBy = oPrimary.UserId }, [2], new[] { oPrimary });
             using CryptureEntities oContext = new CryptureEntities();
-            Item oCertificateItem = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+            Item oCertificateItem = LoadItem(oContext.Items.Single().ItemId);
             Check(oStorage.Escrow.CertificateUserId == oPrimary.UserId &&
                 oContext.Users.Single(u => u.UserId == oPrimary.UserId).IsEscrow &&
                 oCertificateItem.Instances.Any(i => i.UserId == oPrimary.UserId) &&
                 oCertificateItem.ProtectionDisplay.Contains("Primary escrow"),
                 "Certificate escrow uses its verified SID and is named on the item");
-            DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oCertificateItem.ItemId));
+            DatabaseOperations.DeleteItem(LoadItem(oCertificateItem.ItemId));
         }
         finally { File.WriteAllBytes(sConfigPath, oOriginal); }
     }
@@ -858,7 +854,7 @@ internal static partial class RegressionTests
         oCommand.Parameters.AddWithValue("@itemId", oRecoveryItem.ItemId);
         Check((int)oCommand.ExecuteScalar() == 1, "Recovery group affiliation controls item visibility");
         oCommand.Parameters.Clear();
-        SqlServerItemOperations.Delete(oStorage, DatabaseOperations.LoadItem(oRecoveryItem.ItemId));
+        SqlServerItemOperations.Delete(oStorage, LoadItem(oRecoveryItem.ItemId));
         Item oGroupItem = new Item { Label = "Group affiliation", ItemType = "text" };
         Item oGroupEncrypted = new Item
         {
@@ -876,7 +872,7 @@ internal static partial class RegressionTests
         oCommand.Parameters.AddWithValue("@itemId", oGroupItem.ItemId);
         Check((int)oCommand.ExecuteScalar() == 1, "Windows group SID grants item visibility");
         oCommand.Parameters.Clear();
-        SqlServerItemOperations.Delete(oStorage, DatabaseOperations.LoadItem(oGroupItem.ItemId));
+        SqlServerItemOperations.Delete(oStorage, LoadItem(oGroupItem.ItemId));
         oCommand.CommandText = "UPDATE [dbo].[User] SET [Sid] = N'S-1-5-21-1-2-3-1000' WHERE [UserId] = @otherId";
         oCommand.Parameters.AddWithValue("@otherId", nOtherUserId);
         oCommand.ExecuteNonQuery();

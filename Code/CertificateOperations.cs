@@ -6,11 +6,10 @@ using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
 using System.Security.Principal;
-using System.Threading.Tasks;
 
 namespace Crypture
 {
-    internal class CertificateOperations
+    internal static class CertificateOperations
     {
         internal static string CurrentUserSid
         {
@@ -32,16 +31,9 @@ namespace Crypture
                 return false;
             }
 
-            using (X509Chain oChain = new X509Chain())
+            Properties.Settings oSettings = Properties.Settings.Default;
+            using (X509Chain oChain = CreateChain(oSettings.PerformCertificateRevocationCheck))
             {
-                const int ChainRetrievalTimeoutSeconds = 10;
-                Properties.Settings oSettings = Properties.Settings.Default;
-                oChain.ChainPolicy.TrustMode = X509ChainTrustMode.System;
-                oChain.ChainPolicy.RevocationMode = oSettings.PerformCertificateRevocationCheck
-                    ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
-                oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
-                oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(ChainRetrievalTimeoutSeconds);
-
                 // build the chain based on the specified policy
                 if (oChain.Build(oCert)) return true;
 
@@ -65,6 +57,30 @@ namespace Crypture
                 return oAllowed != X509ChainStatusFlags.NoError && oChain.ChainStatus.All(s =>
                     (s.Status & ~oAllowed) == X509ChainStatusFlags.NoError);
             }
+        }
+
+        internal static void ValidateForVault(X509Certificate2 oCert)
+        {
+            // Every certificate added to a Vault passes the same algorithm, usage, and trust checks.
+            CertificateKeyProtection.ValidateForEncryption(oCert);
+            if (!CertificateUsageFilter.Read().Matches(oCert))
+                throw new InvalidOperationException("This certificate is excluded by the certificate usage filters " +
+                    "in Crypture.exe.config.");
+            if (!CheckCertificateStatus(oCert, true))
+                throw new InvalidOperationException("Select a valid RSA, ECDH, or ML-KEM encryption certificate. " +
+                    "Review the certificate validation settings and selection filters in Crypture.exe.config.");
+        }
+
+        internal static X509Chain CreateChain(bool bCheckRevocation)
+        {
+            // Bound issuer and revocation downloads so an unreachable server cannot stall validation.
+            const int ChainRetrievalTimeoutSeconds = 10;
+            X509Chain oChain = new X509Chain();
+            oChain.ChainPolicy.RevocationMode = bCheckRevocation
+                ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
+            oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
+            oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(ChainRetrievalTimeoutSeconds);
+            return oChain;
         }
 
         internal static bool CanSelectCertificate(byte[] oData, CertificateUsageFilter oUsageFilter)
@@ -130,20 +146,9 @@ namespace Crypture
             }
         }
 
-        internal static List<byte[]> GetAutomaticCertificates()
-        {
-            // return empty list if no property is set
-            List<byte[]> oList = new List<byte[]>();
-            if (Properties.Settings.Default.AutomaticallyAddedCertificatesList == null) return oList;
-
-            // convert the strings to certificate strings to byte arrays
-            foreach (string sCertText in Properties.Settings.Default.AutomaticallyAddedCertificatesList)
-            {
-                oList.Add(Convert.FromBase64String(sCertText));
-            }
-
-            return oList;
-        }
+        internal static List<byte[]> GetAutomaticCertificates() =>
+            (Properties.Settings.Default.AutomaticallyAddedCertificatesList?.Cast<string>() ?? [])
+            .Select(Convert.FromBase64String).ToList();
     }
 
     internal sealed class CertificateUsageFilter
@@ -245,63 +250,5 @@ namespace Crypture
 
         private static string[] SplitList(string sValue) => (sValue ?? "").Split([',', ';'],
             StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-    }
-
-    public partial class User
-    {
-        public string Name
-        {
-            get
-            {
-                try
-                {
-                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
-                        return oCert.GetNameInfo(X509NameType.SimpleName, false);
-                }
-                catch (System.Security.Cryptography.CryptographicException)
-                {
-                    return "Invalid certificate";
-                }
-            }
-        }
-
-        public string AlgorithmDisplay
-        {
-            get
-            {
-                try
-                {
-                    using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
-                        return CertificateKeyProtection.GetAlgorithmDisplay(oCert);
-                }
-                catch (CryptographicException)
-                {
-                    return "Unsupported";
-                }
-            }
-        }
-
-        public bool IsSelfSigned
-        {
-            get
-            {
-                using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(Certificate))
-                {
-                    return CertificateOperations.IsSelfSigned(oCert);
-                }
-            }
-        }
-
-        public bool IsOwnedByCurrentUser
-        {
-            get
-            {
-                return CertificateOperations.CurrentUserSid.Equals(Sid);
-            }
-        }
-
-        public string AffiliationDisplay => Sid == null ? "Needs verification" :
-            IsEscrow ? "Escrow" : "Verified";
-
     }
 }

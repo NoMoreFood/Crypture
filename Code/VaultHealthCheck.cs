@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.DirectoryServices;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -218,7 +219,7 @@ namespace Crypture
                                 ? "Windows profile." : "computer.") +
                             " This check does not verify that the original profile or computer is available.");
                     }
-                    catch (Exception oError) when (oError is ArgumentException || oError is CryptographicException)
+                    catch (CryptographicException oError)
                     {
                         oPolicy.Add(HealthStatus.Error, "The Windows recipient policy is invalid. " + oError.Message);
                     }
@@ -393,8 +394,10 @@ namespace Crypture
                     string sName = oCert.GetNameInfo(X509NameType.SimpleName, false);
                     if (!String.IsNullOrWhiteSpace(sName)) oResult.Recipient = sName;
                     oResult.Identifier += Environment.NewLine + "Thumbprint: " + oCert.Thumbprint;
-                    oResult.Add(HealthStatus.Passed, "Validity: " + oCert.NotBefore.ToString("yyyy-MM-dd HH:mm") +
-                        " through " + oCert.NotAfter.ToString("yyyy-MM-dd HH:mm") + " (local time).");
+                    const string ValidityFormat = "yyyy-MM-dd HH:mm";
+                    oResult.Add(HealthStatus.Passed, "Validity: " +
+                        oCert.NotBefore.ToString(ValidityFormat, CultureInfo.InvariantCulture) + " through " +
+                        oCert.NotAfter.ToString(ValidityFormat, CultureInfo.InvariantCulture) + " (local time).");
                     if (oCert.NotBefore.ToUniversalTime() > oNow)
                         oResult.Add(HealthStatus.Error, "The certificate is not yet valid.");
                     if (oCert.NotAfter.ToUniversalTime() < oNow)
@@ -416,13 +419,8 @@ namespace Crypture
                         oResult.Add(HealthStatus.Error,
                             "The certificate cannot be used for encryption. " + oError.Message);
                     }
-                    using (X509Chain oChain = new X509Chain())
+                    using (X509Chain oChain = CertificateOperations.CreateChain(bCheckRevocation))
                     {
-                        const int ChainRetrievalTimeoutSeconds = 10;
-                        oChain.ChainPolicy.RevocationMode = bCheckRevocation
-                            ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
-                        oChain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
-                        oChain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(ChainRetrievalTimeoutSeconds);
                         oChain.ChainPolicy.VerificationTime = oNow;
                         bool bValid = oChain.Build(oCert);
                         bool bAllowedSelfSigned = bAllowSelfSigned && oChain.ChainElements.Count == 1 &&

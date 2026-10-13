@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.DirectoryServices;
 using System.DirectoryServices.ActiveDirectory;
+using System.Globalization;
 using System.Linq;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
@@ -39,7 +40,8 @@ namespace Crypture
                 SecurityIdentifier oSid = new SecurityIdentifier(sQuery);
                 byte[] oBytes = new byte[oSid.BinaryLength];
                 oSid.GetBinaryForm(oBytes, 0);
-                sMatch = "(objectSid=" + String.Concat(oBytes.Select(b => "\\" + b.ToString("x2"))) + ")";
+                sMatch = "(objectSid=" + String.Concat(oBytes.Select(b =>
+                    "\\" + b.ToString("x2", CultureInfo.InvariantCulture))) + ")";
             }
             else
             {
@@ -94,7 +96,7 @@ namespace Crypture
                 if (oAccounts.Count == MaxResults) { bTruncated = true; break; }
                 if (oMatch.Properties["objectSid"].Count == 0) continue;
                 string Field(string sName) => oMatch.Properties[sName].Count == 0 ? "" :
-                    Convert.ToString(oMatch.Properties[sName][0]);
+                    Convert.ToString(oMatch.Properties[sName][0], CultureInfo.InvariantCulture);
                 string sDn = Field("distinguishedName");
                 string sDns = String.Join(".", Regex.Matches(sDn, @"(?i)(?:^|(?<!\\),)DC=([^,]+)")
                     .Select(m => m.Groups[1].Value));

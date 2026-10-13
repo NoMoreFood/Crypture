@@ -6,6 +6,12 @@ namespace Crypture
 {
     internal static class SqlServerItemOperations
     {
+        internal static SqlCommand Procedure(SqlConnection oConnection, string sName,
+            SqlTransaction oTransaction = null) => new SqlCommand(sName, oConnection, oTransaction)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
         internal static void Save(SqlServerVaultStorage oStorage, Item oItem, Item oEncrypted)
         {
             Cipher oCipher = oEncrypted.Cipher;
@@ -21,10 +27,8 @@ namespace Crypture
             // The procedure checks the original Windows login against saved recipients before its owner writes.
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand("[dbo].[SaveItem]", oConnection)
-            {
-                CommandType = CommandType.StoredProcedure, CommandTimeout = 120
-            };
+            using SqlCommand oCommand = Procedure(oConnection, "[dbo].[SaveItem]");
+            oCommand.CommandTimeout = 120;
             SqlParameter oItemId = oCommand.Parameters.Add("@itemId", SqlDbType.BigInt);
             oItemId.Direction = ParameterDirection.InputOutput;
             oItemId.Value = oItem.ItemId;
@@ -52,8 +56,7 @@ namespace Crypture
             try { oCommand.ExecuteNonQuery(); }
             catch (SqlException oError) when (oError.Number is 50010 or 1205)
             {
-                throw new InvalidOperationException("This item changed or was removed by another user. " +
-                    "Your edits have been kept open. Copy them before reopening the item.", oError);
+                throw new InvalidOperationException(DatabaseOperations.ChangedBeforeSave, oError);
             }
             oItem.ItemId = (long)oItemId.Value;
         }
@@ -62,36 +65,23 @@ namespace Crypture
         {
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand("[dbo].[DeleteItem]", oConnection)
-            {
-                CommandType = CommandType.StoredProcedure
-            };
+            using SqlCommand oCommand = Procedure(oConnection, "[dbo].[DeleteItem]");
             oCommand.Parameters.Add("@itemId", SqlDbType.BigInt).Value = oItem.ItemId;
             oCommand.Parameters.Add("@expectedRowVersion", SqlDbType.Binary, 8).Value =
                 (object)oItem.RowVersion ?? DBNull.Value;
             try { oCommand.ExecuteNonQuery(); }
             catch (SqlException oError) when (oError.Number is 50010 or 1205)
             {
-                throw new InvalidOperationException("This item changed or was removed by another user. " +
-                    "Refresh the list before removing it.", oError);
+                throw new InvalidOperationException(DatabaseOperations.ChangedBeforeRemoval, oError);
             }
         }
 
         internal static void RemoveCertificate(SqlServerVaultStorage oStorage, long nUserId)
         {
-            ExecuteIdProcedure(oStorage, "[dbo].[RemoveCertificate]", "@userId", nUserId);
-        }
-
-        private static void ExecuteIdProcedure(SqlServerVaultStorage oStorage, string sProcedure,
-            string sParameter, long nId)
-        {
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand(sProcedure, oConnection)
-            {
-                CommandType = CommandType.StoredProcedure
-            };
-            oCommand.Parameters.Add(sParameter, SqlDbType.BigInt).Value = nId;
+            using SqlCommand oCommand = Procedure(oConnection, "[dbo].[RemoveCertificate]");
+            oCommand.Parameters.Add("@userId", SqlDbType.BigInt).Value = nUserId;
             oCommand.ExecuteNonQuery();
         }
     }

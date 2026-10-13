@@ -3,9 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="SQL Server Vault" Width="620" MinWidth="560" SizeToContent="Height"
     WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False"
-    FocusManager.FocusedElement="{Binding ElementName=oServer}"
-    Background="{DynamicResource Crypture.WindowBrush}"
-    Foreground="{DynamicResource Crypture.TextBrush}">
+    FocusManager.FocusedElement="{Binding ElementName=oServer}">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -33,6 +31,9 @@
                 ToolTip="Use only when you have verified the SQL Server by another means." />
             <CheckBox x:Name="oCreateDatabase" Margin="0,10,0,0" Content="Create a _new database"
                 ToolTip="Requires CREATE DATABASE permission. Existing databases are never overwritten." />
+            <CheckBox x:Name="oGrantDomainUsers" Margin="24,10,0,0" Content="_Grant Domain Users access"
+                IsChecked="True" Visibility="Collapsed"
+                ToolTip="Adds Domain Users to the restricted Vault role, creating its SQL Server login if needed." />
         </StackPanel>
         <Border x:Name="oEscrowPanel" Grid.Row="4" Grid.ColumnSpan="2" Margin="0,12,0,0"
             Padding="12" BorderBrush="{DynamicResource Crypture.BorderBrush}" BorderThickness="1"

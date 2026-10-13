@@ -6,6 +6,8 @@ param(
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
     [string] $ProductName = 'Crypture',
     [string] $ProductUrl = 'https://github.com/NoMoreFood/Crypture',
+    [string] $WixVersion = '7.0.0',
+    [string] $SpdxLicenseListVersion = 'v3.29.0',
     [ValidateSet('win-x64', 'win-x86', 'win-arm64')][string[]] $RuntimeIdentifier = @('win-x64', 'win-arm64'),
     [switch] $SkipSigning
 )
@@ -23,7 +25,6 @@ function Sign-File([string] $Path)
 {
     if ($SkipSigning) { return }
     Invoke-Tool $signTool ($signOptions + $Path)
-    Invoke-Tool $signTool @('timestamp', '/tr', $TimestampUrl, '/td', 'sha256', $Path)
     Invoke-Tool $signTool @('verify', '/pa', '/tw', $Path)
 }
 
@@ -158,30 +159,30 @@ try
     $dotnet = (Get-Command dotnet.exe -CommandType Application -ErrorAction Stop).Source
     New-Item -ItemType Directory -Path $stage, $OutputDirectory -Force | Out-Null
 
-    # Restore the latest stable WiX and its matching installer extensions.
+    # Restore the pinned WiX release and its matching installer extensions.
     $toolsDirectory = Join-Path $PSScriptRoot '.tools'
     $nugetConfig = Join-Path $stage 'NuGet.Config'
     [IO.File]::WriteAllText($nugetConfig, '<configuration><packageSources><clear />' +
         '<add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>')
-    Invoke-Tool $dotnet @('tool', 'update', 'wix', '--tool-path', $toolsDirectory, '--configfile', $nugetConfig)
+    Invoke-Tool $dotnet @('tool', 'update', 'wix', '--version', $WixVersion, '--allow-downgrade',
+        '--tool-path', $toolsDirectory, '--configfile', $nugetConfig)
     $wix = Join-Path $toolsDirectory 'wix.exe'
-    $wixVersion = (Invoke-Tool $wix @('--version')).Trim().Split('+')[0]
     Push-Location $PSScriptRoot
     try
     {
         foreach ($extension in @('UI', 'Util'))
         {
-            Invoke-Tool $wix @('extension', 'add', "WixToolset.$extension.wixext/$wixVersion")
+            Invoke-Tool $wix @('extension', 'add', "WixToolset.$extension.wixext/$WixVersion")
         }
     }
     finally
     {
         Pop-Location
     }
-    $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.UI.wixext\$wixVersion"
+    $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.UI.wixext\$WixVersion"
     $uiExtension = Get-ChildItem -LiteralPath $extensionDirectory -Recurse -Filter 'WixToolset.UI.wixext.dll' |
         Select-Object -First 1 -ExpandProperty FullName
-    $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.Util.wixext\$wixVersion"
+    $extensionDirectory = Join-Path $PSScriptRoot ".wix\extensions\WixToolset.Util.wixext\$WixVersion"
     $utilExtension = Get-ChildItem -LiteralPath $extensionDirectory -Recurse -Filter 'WixToolset.Util.wixext.dll' |
         Select-Object -First 1 -ExpandProperty FullName
     $licenseRtf = Join-Path $stage 'License.rtf'
@@ -210,7 +211,7 @@ try
             throw 'Install the Windows SDK signing tools, or use -SkipSigning for an unsigned build.'
         }
 
-        $signOptions = @('sign', '/a', '/fd', 'sha256',
+        $signOptions = @('sign', '/a', '/fd', 'sha256', '/tr', $TimestampUrl, '/td', 'sha256',
             '/d', $ProductName, '/du', $ProductUrl)
         $signingStore = $null
         $now = Get-Date
@@ -267,11 +268,15 @@ try
             $metadata = $manifest.package.metadata
             if ($metadata.PSObject.Properties['license'])
             {
+                # Read each license named by an SPDX expression from the pinned license list release.
                 $license = $metadata.license
                 $texts.Add("$($library.Name)`r`n" + $(if ($license.type -eq 'expression') {
-                    [string] (Invoke-WebRequest -UseBasicParsing -Uri (
-                        'https://raw.githubusercontent.com/spdx/license-list-data/main/text/' +
-                        "$($license.'#text').txt")).Content
+                    @($license.'#text' -split '\s+(?:AND|OR|WITH)\s+|[()+]' | Where-Object { $_ } |
+                        Select-Object -Unique | ForEach-Object {
+                            [string] (Invoke-WebRequest -UseBasicParsing -Uri (
+                                'https://raw.githubusercontent.com/spdx/license-list-data/' +
+                                "$SpdxLicenseListVersion/text/$_.txt")).Content
+                        }) -join "`r`n`r`n"
                 } else { Get-Content -LiteralPath (Join-Path $packageDirectory $license.'#text') -Raw }))
             }
         }

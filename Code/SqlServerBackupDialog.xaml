@@ -3,9 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Back Up SQL Server Vault" Width="520" MinWidth="460" SizeToContent="Height"
     WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False"
-    FocusManager.FocusedElement="{Binding ElementName=oBackupPath}"
-    Background="{DynamicResource Crypture.WindowBrush}"
-    Foreground="{DynamicResource Crypture.TextBrush}">
+    FocusManager.FocusedElement="{Binding ElementName=oBackupPath}">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

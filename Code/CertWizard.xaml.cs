@@ -126,7 +126,6 @@ namespace Crypture
             oValidUntilDatePicker.SelectedDate = oValidFromDatePicker.SelectedDate.Value
                 .AddYears(nYears).AddDays(nDays);
             oSubjectTextBox.Text = oDefaults.Text("Subject", "");
-            oIssuerTextBox.Text = oDefaults.Text("Issuer", "");
             oCertificateSelfSignedRadio.IsChecked = bSelfSigned;
             oCertificateRequestRadio.IsChecked = !bSelfSigned;
             oHardwareCheckbox.IsChecked = bHardware;
@@ -139,8 +138,8 @@ namespace Crypture
             foreach (Oid oOid in NativeMethods.GetExtendedKeyUsages())
             {
                 // skip weird looking or known problematic options
-                if (oOid.FriendlyName.StartsWith("sz") ||
-                    oOid.FriendlyName.StartsWith("@")) continue;
+                if (oOid.FriendlyName.StartsWith("sz", StringComparison.Ordinal) ||
+                    oOid.FriendlyName.StartsWith('@')) continue;
 
                 // translate into our display structure
                 EkuOption oKeyUsage = new EkuOption()
@@ -333,7 +332,7 @@ namespace Crypture
             await LoadProvidersAsync(true);
         }
 
-        private async Task LoadProvidersAsync(bool bRefresh)
+        internal async Task LoadProvidersAsync(bool bRefresh)
         {
             if (bLoadingProviders || bClosed) return;
             bLoadingProviders = true;
@@ -473,7 +472,7 @@ namespace Crypture
             if (MinLength == MaxLength && MaxLength != 0)
             {
                 oKeyLengthHintLabel.Content = "Fixed at " + MinLength + " bits";
-                oKeyLengthTextBox.Text = MinLength.ToString();
+                oKeyLengthTextBox.Text = MinLength.ToString(CultureInfo.InvariantCulture);
             }
             else
             {
@@ -496,9 +495,9 @@ namespace Crypture
         {
             if (bInitializing || bClosed) return;
 
-            // Keep issuer and dates inactive for requests without moving the form.
+            // Keep dates inactive for requests without moving the form.
             bool bSelfSigned = oCertificateSelfSignedRadio.IsChecked == true;
-            oValidFromDatePicker.IsEnabled = oValidUntilDatePicker.IsEnabled = oIssuerTextBox.IsEnabled = bSelfSigned;
+            oValidFromDatePicker.IsEnabled = oValidUntilDatePicker.IsEnabled = bSelfSigned;
             oGenerationHelp.Text = bSelfSigned
                 ? "Create installs a certificate in the selected Windows Personal store."
                 : "Create saves a .csr request for a certificate authority. " +
@@ -551,9 +550,6 @@ namespace Crypture
             if (!oValidFromDatePicker.SelectedDate.HasValue || !oValidUntilDatePicker.SelectedDate.HasValue ||
                 oValidUntilDatePicker.SelectedDate <= oValidFromDatePicker.SelectedDate)
                 return "Choose an end date after the start date.";
-            if (!String.IsNullOrWhiteSpace(oIssuerTextBox.Text) &&
-                !String.Equals(oSubjectTextBox.Text.Trim(), oIssuerTextBox.Text.Trim(), StringComparison.Ordinal))
-                return "Leave the issuer blank or match the certificate name on Advanced.";
             return null;
         }
 
@@ -656,8 +652,10 @@ namespace Crypture
                             dynamic oCertificate = CreateEnrollmentObject("X509CertificateRequestCertificate");
                             oCertificate.InitializeFromPrivateKey(oContext, oPrivateKey, "");
                             oCertificate.Issuer = oSubjectDistinguishedName;
-                            oCertificate.NotBefore = oValidFromDatePicker.SelectedDate.Value;
-                            oCertificate.NotAfter = oValidUntilDatePicker.SelectedDate.Value;
+
+                            // CertEnroll reads these dates as UTC; the pickers hold local midnight.
+                            oCertificate.NotBefore = oValidFromDatePicker.SelectedDate.Value.ToUniversalTime();
+                            oCertificate.NotAfter = oValidUntilDatePicker.SelectedDate.Value.ToUniversalTime();
                             oCertRequestInfo = oCertificate;
                         }
                         else

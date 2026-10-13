@@ -3,7 +3,6 @@ using System.IO;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +19,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Crypture;
+using Microsoft.Data.Sqlite;
 using Microsoft.Win32.SafeHandles;
 
 internal static partial class RegressionTests
@@ -252,7 +252,7 @@ internal static partial class RegressionTests
         bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
         bool bRevocation = oSettings.PerformCertificateRevocationCheck;
         string sTheme = oSettings.ThemeMode;
-        Item oStored = DatabaseOperations.LoadItem(oItem.ItemId);
+        Item oStored = LoadItem(oItem.ItemId);
         User oRecipient = oStored.Instances.First().User;
 
         // Reload the real adjacent configuration to exercise deployed defaults and recovery policy.
@@ -325,7 +325,7 @@ internal static partial class RegressionTests
             {
                 Check(CertificateOperations.CheckCertificateStatus(oCert),
                     "Selection filters do not invalidate certificates used for saved access and recovery");
-                Reject(() => oBrowser.AddCertificate(oCert, CertificateOperations.CurrentUserSid),
+                Reject(() => CertificateOperations.ValidateForVault(oCert),
                     "Direct certificate imports honor the configured usage filters");
             }
             Reload("DigitalSignature", bRecovery: true);
@@ -335,7 +335,7 @@ internal static partial class RegressionTests
             DatabaseOperations.SaveItem(oRecoveryItem, oSecret,
                 Array.Empty<User>(), PrincipalProtection.LocalUserDescriptor);
             using (CryptureEntities oContent = new CryptureEntities())
-                oRecoveryItem = DatabaseOperations.LoadItem(oContent.Items.Single(i =>
+                oRecoveryItem = LoadItem(oContent.Items.Single(i =>
                     i.Label == "Filtered Certificate Recovery").ItemId);
             Check(oRecoveryItem.Instances.Any(i => i.User.Certificate.SequenceEqual(oRecipient.Certificate)),
                 "Certificate usage filters do not remove emergency recovery from Windows-protected saves");
@@ -545,7 +545,7 @@ internal static partial class RegressionTests
                                         Encoding.Unicode.GetBytes("Stored Windows content"), null,
                                         PrincipalProtection.LocalUserDescriptor);
                                     using (CryptureEntities oContext = new CryptureEntities())
-                                        oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                                        oStored = LoadItem(oContext.Items.Single().ItemId);
                                 }
                                 var oWatch = Stopwatch.StartNew();
                                 oEditor = oStored == null ? CreateEditor() : CreateEditor(oStored);
@@ -573,9 +573,7 @@ internal static partial class RegressionTests
                                     var oSaveEvent = oEditor.Dispatcher.InvokeAsync(() =>
                                     {
                                         oWatch.Restart();
-                                        typeof(ItemEditor).GetMethod("oSaveItemButton_Click",
-                                            BindingFlags.Instance | BindingFlags.NonPublic)
-                                            .Invoke(oEditor, new object[] { null, null });
+                                        oEditor.oSaveItemButton_Click(null, null);
                                         Check(oWatch.Elapsed < TimeSpan.FromSeconds(3),
                                             "Saving returns control while recipient validation downloads an issuer");
                                     });
@@ -597,15 +595,13 @@ internal static partial class RegressionTests
                                     sScenario + " dispatcher runs while a certificate issuer response is pending");
                                 if (sScenario == "close")
                                 {
-                                    typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance |
-                                        BindingFlags.NonPublic).SetValue(oEditor, false);
+                                    oEditor.bHasChanges = false;
                                     oEditor.Close();
                                 }
                                 oRelease.SetResult(true);
                                 if (sScenario == "save")
                                 {
-                                    PumpUntil(() => !(bool)typeof(ItemEditor).GetField("bBusy",
-                                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oEditor));
+                                    PumpUntil(() => !oEditor.bBusy);
                                     using (CryptureEntities oContext = new CryptureEntities())
                                         Check(sSaveError?.Contains("not valid for encryption") == true &&
                                             !oContext.Items.Any() && oSave.IsEnabled &&
@@ -619,8 +615,7 @@ internal static partial class RegressionTests
                                     sSaveError = null;
                                     oEditor.Dispatcher.InvokeAsync(() =>
                                         oSave.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
-                                    PumpUntil(() => sSaveError != null && !(bool)typeof(ItemEditor).GetField("bBusy",
-                                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oEditor));
+                                    PumpUntil(() => sSaveError != null && !oEditor.bBusy);
                                     using (CryptureEntities oContext = new CryptureEntities())
                                         Check(sSaveError.Contains("not valid for encryption") &&
                                             !oContext.Items.Any() && oSave.IsEnabled &&
@@ -636,11 +631,9 @@ internal static partial class RegressionTests
                                     }
                                     oEditor.Dispatcher.InvokeAsync(() =>
                                         oSave.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
-                                    PumpUntil(() => (bool)typeof(ItemEditor).GetField("bCompleted",
-                                        BindingFlags.Instance | BindingFlags.NonPublic)
-                                        .GetValue(oEditor));
+                                    PumpUntil(() => oEditor.bCompleted);
                                     using (CryptureEntities oContext = new CryptureEntities())
-                                        oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                                        oStored = LoadItem(oContext.Items.Single().ItemId);
                                     Check(Encoding.Unicode.GetString(ItemCryptography.Decrypt(oStored,
                                         oStored.Instances.Single(), oWarm)) == "Saved content",
                                         "A valid replacement recipient saves the preserved draft");
@@ -660,8 +653,7 @@ internal static partial class RegressionTests
                             oDismiss.Stop();
                             if (oEditor != null)
                             {
-                                typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance |
-                                    BindingFlags.NonPublic).SetValue(oEditor, false);
+                                oEditor.bHasChanges = false;
                                 oEditor.Close();
                             }
                             oRelease.TrySetResult(true);
@@ -717,9 +709,7 @@ internal static partial class RegressionTests
     {
         Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = true;
         Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = false;
-        MethodInfo oVerify = typeof(SqlServerCertificateEnrollment).GetMethod("VerifyPrivateKey",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        oVerify.Invoke(null, [oRsaCert, oRsaCert]);
+        SqlServerCertificateEnrollment.VerifyPrivateKey(oRsaCert, oRsaCert);
         Check(true, "SQL enrollment verifies an RSA private key");
         foreach (CngAlgorithm oAlgorithm in new[] { CngAlgorithm.ECDiffieHellmanP256,
             CngAlgorithm.ECDiffieHellmanP384, CngAlgorithm.ECDiffieHellmanP521 })
@@ -734,9 +724,9 @@ internal static partial class RegressionTests
                 Check(CertificateOperations.CheckCertificateStatus(oCert), "Accept " + oAlgorithm + " certificate");
                 Check(CertificateUsageFilter.Read().Matches(oCert), "Default usage filters retain " + oAlgorithm);
                 Check(!CertificateOperations.CheckCertificateStatus(oSigning), "Reject signing-only " + oAlgorithm);
-                oVerify.Invoke(null, [oCert, oCert]);
+                SqlServerCertificateEnrollment.VerifyPrivateKey(oCert, oCert);
                 Check(true, "SQL enrollment verifies an " + oAlgorithm + " private key");
-                Reject(() => oVerify.Invoke(null, [oCert, oRsaCert]),
+                Reject(() => SqlServerCertificateEnrollment.VerifyPrivateKey(oCert, oRsaCert),
                     "SQL enrollment rejects a mismatched " + oAlgorithm + " private key");
                 TestRecipientEnvelope(oCert, oRsaCert, oAlgorithm.Algorithm);
                 TestAlgorithmVault(sDirectory, oCert, oAlgorithm.Algorithm);
@@ -795,7 +785,7 @@ internal static partial class RegressionTests
                     throw new CryptographicException(Marshal.GetLastWin32Error());
                 Check(oCert.HasPrivateKey, "Associate ephemeral ML-KEM-" + sParameters + " private key");
                 CertificateKeyProtection.ValidateForEncryption(oCert);
-                oVerify.Invoke(null, [oCert, oCert]);
+                SqlServerCertificateEnrollment.VerifyPrivateKey(oCert, oCert);
                 Check(true, "SQL enrollment verifies an ML-KEM-" + sParameters + " private key");
                 CertificateRequest oIssuerRequest = new CertificateRequest("CN=Test Issuer", oIssuer,
                     HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -945,10 +935,10 @@ internal static partial class RegressionTests
                     sSuiteName + " rejects malformed envelope of " + oBadEnvelope.Length + " bytes");
             }
             oInstance.CipherKey = oSaved;
-            oInstance.UserId++;
+            oInstance.User = oRecipients[1];
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
-                sSuiteName + " authenticates the recipient identity");
-            oInstance.UserId--;
+                sSuiteName + " authenticates the recipient certificate");
+            oInstance.User = oRecipients[0];
             oItem.Cipher.CipherParams = oInstance.CipherParams = 1;
             RejectCryptography(() => ItemCryptography.Decrypt(oItem, oInstance, oCert),
                 sSuiteName + " rejects a format downgrade");
@@ -975,13 +965,76 @@ internal static partial class RegressionTests
         DatabaseOperations.SaveItem(new Item { Label = sName, ItemType = "text" }, oPlain, new[] { oUser });
         long nId;
         using (CryptureEntities oContent = new CryptureEntities()) nId = oContent.Items.Single().ItemId;
-        Item oStored = DatabaseOperations.LoadItem(nId);
+        Item oStored = LoadItem(nId);
         Check(oStored.Cipher.CipherParams == ItemCryptography.CertificateFormat &&
             ItemCryptography.Decrypt(oStored, oStored.Instances.Single(), oCert).SequenceEqual(oPlain),
             sName + " Vault save and reload");
         DatabaseOperations.SaveItem(oStored, oPlain, null, PrincipalProtection.LocalUserDescriptor);
-        Check(ItemCryptography.Decrypt(DatabaseOperations.LoadItem(nId)).SequenceEqual(oPlain),
+        Check(ItemCryptography.Decrypt(LoadItem(nId)).SequenceEqual(oPlain),
             sName + " conversion to Windows protection");
+    }
+
+    private static void TestRecipientTampering(string sDirectory, X509Certificate2 oCert,
+        X509Certificate2 oOtherCert)
+    {
+        // Someone who can write the Vault file but cannot decrypt an item must not gain access to it
+        // when a real recipient next saves that item.
+        IVaultStorage oPrevious = CryptureEntities.Storage;
+        SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "tampered.cryptdb"));
+        oStorage.Create();
+        CryptureEntities.Storage = oStorage;
+        try
+        {
+            using RSA oIntruderKey = RSA.Create(2048);
+            using X509Certificate2 oIntruderCert = Certificate(oIntruderKey, "Other",
+                DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+            User oUser = new User { Certificate = oCert.RawData };
+            User oOtherUser = new User { Certificate = oOtherCert.RawData };
+            User oIntruder = new User { Certificate = oIntruderCert.RawData };
+            using (CryptureEntities oContent = new CryptureEntities())
+            {
+                oContent.Users.AddRange(oUser, oOtherUser, oIntruder);
+                oContent.SaveChanges();
+            }
+            byte[] oSecret = Encoding.Unicode.GetBytes("Shared only with its saved recipients");
+            DatabaseOperations.SaveItem(new Item { Label = "Shared", ItemType = "text" }, oSecret,
+                new[] { oUser, oOtherUser });
+            long nItemId;
+            using (CryptureEntities oContent = new CryptureEntities()) nItemId = oContent.Items.Single().ItemId;
+
+            void Tamper(string sSql, params (string Name, object Value)[] oParameters)
+            {
+                using SqliteConnection oConnection = new SqliteConnection(oStorage.ConnectionString);
+                oConnection.Open();
+                using SqliteCommand oCommand = new SqliteCommand(sSql, oConnection);
+                foreach (var (sName, oValue) in oParameters) oCommand.Parameters.AddWithValue(sName, oValue);
+                oCommand.ExecuteNonQuery();
+            }
+            byte[] Decrypt()
+            {
+                Item oItem = LoadItem(nItemId);
+                return ItemCryptography.Decrypt(oItem, oItem.Instances.Single(i => i.UserId == oUser.UserId), oCert);
+            }
+            Check(Decrypt().SequenceEqual(oSecret), "A shared item decrypts when every saved recipient verifies");
+
+            // A recipient row added without the item's keys cannot carry a valid signature.
+            Tamper("INSERT INTO [Instance] ([ItemId], [UserId], [CipherKey], [CipherParams], [Signature]) " +
+                "VALUES (@item, @user, zeroblob(264), 3, zeroblob(32))",
+                ("@item", nItemId), ("@user", oIntruder.UserId));
+            Reject(() => Decrypt(), "Reject an item whose recipient list gained an unsigned certificate");
+            Tamper("DELETE FROM [Instance] WHERE [UserId] = @user", ("@user", oIntruder.UserId));
+            Check(Decrypt().SequenceEqual(oSecret), "Removing the unsigned recipient restores access");
+
+            // A signed recipient row cannot be pointed at a different certificate, even one with the same name.
+            Tamper("DELETE FROM [User] WHERE [UserId] = @user", ("@user", oIntruder.UserId));
+            Tamper("UPDATE [User] SET [Certificate] = @certificate WHERE [UserId] = @user",
+                ("@certificate", oIntruderCert.RawData), ("@user", oOtherUser.UserId));
+            Reject(() => Decrypt(), "Reject an item whose recipient certificate was substituted");
+        }
+        finally
+        {
+            CryptureEntities.Storage = oPrevious;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

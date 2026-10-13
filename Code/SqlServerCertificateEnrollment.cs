@@ -30,7 +30,7 @@ namespace Crypture
             }
         }
 
-        private static void VerifyPrivateKey(X509Certificate2 oCertificate, X509Certificate2 oPrivate)
+        internal static void VerifyPrivateKey(X509Certificate2 oCertificate, X509Certificate2 oPrivate)
         {
             byte[] oChallenge = RandomNumberGenerator.GetBytes(ItemCryptography.ContentKeyBytes);
             try
@@ -60,15 +60,20 @@ namespace Crypture
             VerifyDirectoryBinding(oUser.Certificate, oUser.Sid);
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand("[dbo].[MarkEscrowCertificate]", oConnection)
-            {
-                CommandType = CommandType.StoredProcedure
-            };
-            oCommand.Parameters.Add("@userId", SqlDbType.BigInt).Value = oUser.UserId;
-            oCommand.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value =
-                "Certificate: " + oUser.Name + " (" + oUser.Sid + ")";
+            using SqlCommand oCommand = EscrowCommand(oConnection, null, oUser.UserId,
+                "Certificate: " + oUser.Name + " (" + oUser.Sid + ")");
             oCommand.ExecuteNonQuery();
             oStorage.RefreshEscrow();
+        }
+
+        internal static SqlCommand EscrowCommand(SqlConnection oConnection, SqlTransaction oTransaction,
+            long nUserId, string sLabel)
+        {
+            SqlCommand oCommand = SqlServerItemOperations.Procedure(oConnection,
+                "[dbo].[MarkEscrowCertificate]", oTransaction);
+            oCommand.Parameters.Add("@userId", SqlDbType.BigInt).Value = nUserId;
+            oCommand.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = sLabel;
+            return oCommand;
         }
 
         internal static void VerifyDirectoryBinding(byte[] oCertificate, string sSid)
@@ -100,15 +105,19 @@ namespace Crypture
         {
             using SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString);
             oConnection.Open();
-            using SqlCommand oCommand = new SqlCommand("[dbo].[EnrollCertificate]", oConnection)
-            {
-                CommandType = CommandType.StoredProcedure
-            };
+            using SqlCommand oCommand = EnrollCommand(oConnection, null, oCertificate, sSid);
+            oCommand.ExecuteNonQuery();
+        }
+
+        internal static SqlCommand EnrollCommand(SqlConnection oConnection, SqlTransaction oTransaction,
+            byte[] oCertificate, string sSid)
+        {
+            SqlCommand oCommand = SqlServerItemOperations.Procedure(oConnection,
+                "[dbo].[EnrollCertificate]", oTransaction);
             oCommand.Parameters.Add("@certificate", SqlDbType.VarBinary, -1).Value = oCertificate;
             oCommand.Parameters.Add("@sid", SqlDbType.NVarChar, 450).Value = sSid;
-            SqlParameter oUserId = oCommand.Parameters.Add("@userId", SqlDbType.BigInt);
-            oUserId.Direction = ParameterDirection.Output;
-            oCommand.ExecuteNonQuery();
+            oCommand.Parameters.Add("@userId", SqlDbType.BigInt).Direction = ParameterDirection.Output;
+            return oCommand;
         }
     }
 }

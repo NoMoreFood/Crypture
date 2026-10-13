@@ -1,8 +1,10 @@
 using System;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using Microsoft.Data.SqlClient;
 
@@ -14,7 +16,7 @@ namespace Crypture
         internal bool CreateDatabase { get; private set; }
         private SqlServerEscrowChoice oEscrowChoice;
 
-        public SqlServerVaultDialog(string sRecentConnection = null)
+        public SqlServerVaultDialog()
         {
             InitializeComponent();
             ConfigurationDefaults oDefaults = new ConfigurationDefaults();
@@ -23,16 +25,11 @@ namespace Crypture
             oTrustCertificate.IsChecked = oDefaults.Flag("SqlServerTrustServerCertificate", false);
             oCreateDatabase.Checked += oCreateDatabase_Changed;
             oCreateDatabase.Unchecked += oCreateDatabase_Changed;
-            if (sRecentConnection == null) return;
-            SqlConnectionStringBuilder oRecent = new SqlConnectionStringBuilder(sRecentConnection);
-            oServer.Text = oRecent.DataSource;
-            oDatabase.Text = oRecent.InitialCatalog;
-            oTrustCertificate.IsChecked = oRecent.TrustServerCertificate;
         }
 
         private void oCreateDatabase_Changed(object sender, RoutedEventArgs e)
         {
-            oEscrowPanel.Visibility = oCreateDatabase.IsChecked == true
+            oEscrowPanel.Visibility = oGrantDomainUsers.Visibility = oCreateDatabase.IsChecked == true
                 ? Visibility.Visible : Visibility.Collapsed;
             oConnect.Content = oCreateDatabase.IsChecked == true ? "_Create" : "_Connect";
         }
@@ -44,9 +41,9 @@ namespace Crypture
             oEscrowSelection.Text = "Choose an escrow identity.";
         }
 
-        private void oChooseEscrow_Click(object sender, RoutedEventArgs e)
+        private async void oChooseEscrow_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            await Utilities.TryOperationAsync(this, async () =>
             {
                 if (!PrincipalProtection.IsDomainJoined)
                     throw new InvalidOperationException("Escrow selection requires an Active Directory domain.");
@@ -58,8 +55,9 @@ namespace Crypture
                 {
                     if (oAccount.Type is not ("User" or "Security Group"))
                         throw new InvalidOperationException("Choose an Active Directory user or security group.");
-                    DirectorySearchResult oVerified = ForestDirectory.Search(oAccount.Sid, false,
-                        CancellationToken.None, true);
+                    DirectorySearchResult oVerified = null;
+                    await RunBusyAsync(() => oVerified = ForestDirectory.Search(oAccount.Sid, false,
+                        CancellationToken.None, true));
                     if (oVerified.Truncated || oVerified.Accounts.Count != 1 ||
                         oVerified.Accounts[0].Sid != oAccount.Sid)
                         throw new InvalidOperationException("The selected Windows identity could not be verified.");
@@ -72,12 +70,12 @@ namespace Crypture
                     X509Certificate2Collection oEligible = new X509Certificate2Collection();
                     try
                     {
-                        foreach (byte[] oData in oAccount.Certificates)
+                        await RunBusyAsync(() =>
                         {
-                            using X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oData);
-                            if (oFilter.Matches(oCert) && CertificateOperations.CheckCertificateStatus(oCert, true))
-                                oEligible.Add(new X509Certificate2(oCert));
-                        }
+                            foreach (byte[] oData in oAccount.Certificates)
+                                if (CertificateOperations.CanSelectCertificate(oData, oFilter))
+                                    oEligible.Add(X509CertificateLoader.LoadCertificate(oData));
+                        });
                         if (oEligible.Count == 0)
                             throw new InvalidOperationException("This user has no eligible encryption certificate.");
                         X509Certificate2Collection oSelected = oEligible.Count == 1 ? oEligible :
@@ -86,7 +84,8 @@ namespace Crypture
                                 new WindowInteropHelper(this).Handle);
                         if (oSelected.Count == 0) return;
                         X509Certificate2 oCertificate = oSelected[0];
-                        SqlServerCertificateEnrollment.VerifyDirectoryBinding(oCertificate.RawData, oAccount.Sid);
+                        await RunBusyAsync(() => SqlServerCertificateEnrollment.VerifyDirectoryBinding(
+                            oCertificate.RawData, oAccount.Sid));
                         string sLabel = "Certificate: " + oCertificate.GetNameInfo(X509NameType.SimpleName, false) +
                             " (" + oAccount.Account + ", " + oAccount.Sid + ")";
                         oEscrowChoice = SqlServerEscrowChoice.ForCertificate(oCertificate.RawData,
@@ -99,6 +98,22 @@ namespace Crypture
                 }
                 oEscrowSelection.Text = oEscrowChoice.Label;
             });
+        }
+
+        private async Task RunBusyAsync(Action oWork)
+        {
+            // Directory lookups and certificate chain checks run off the dispatcher behind a busy state.
+            IsEnabled = false;
+            Cursor = Cursors.Wait;
+            try
+            {
+                await Task.Run(oWork);
+            }
+            finally
+            {
+                IsEnabled = true;
+                Cursor = null;
+            }
         }
 
         private void oConnect_Click(object sender, RoutedEventArgs e)
@@ -122,6 +137,7 @@ namespace Crypture
                 Storage = new SqlServerVaultStorage(oBuilder.ConnectionString);
                 CreateDatabase = oCreateDatabase.IsChecked == true;
                 Storage.EscrowChoice = CreateDatabase ? oEscrowChoice : null;
+                Storage.GrantDomainUsers = oGrantDomainUsers.IsChecked == true;
                 DialogResult = true;
             });
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Windows;
 
 namespace Crypture
@@ -10,7 +11,8 @@ namespace Crypture
         internal SqlServerBackupDialog(string sDatabase)
         {
             InitializeComponent();
-            oBackupPath.Text = sDatabase + "-backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".bak";
+            oBackupPath.Text = sDatabase + "-backup-" +
+                DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".bak";
         }
 
         private void oBackup_Click(object sender, RoutedEventArgs e)

@@ -49,9 +49,9 @@ namespace Crypture
         public ObservableCollection<User> UserListSelected { get; } = new ObservableCollection<User>();
         public byte[] BinaryItemData { get; set; }
         private bool bLoading = true;
-        private bool bHasChanges;
-        private bool bCompleted;
-        private bool bBusy;
+        internal bool bHasChanges;
+        internal bool bCompleted;
+        internal bool bBusy;
         private bool bEditing;
         private bool bLoadingCertificates;
         private bool bClosed;
@@ -64,15 +64,19 @@ namespace Crypture
         private readonly bool bDomainJoined = PrincipalProtection.IsDomainJoined;
         private readonly ObservableCollection<ProtectionPrincipal> PrincipalList =
             new ObservableCollection<ProtectionPrincipal>();
-        private string sStoredLabel;
-        private string sStoredItemType;
-        private long? nStoredModifiedBy;
+        private readonly string sStoredLabel;
+        private readonly string sStoredItemType;
+        private readonly long? nStoredModifiedBy;
         private readonly bool bIncludeOwnCertificates = true;
+        private readonly List<byte[]> oRequiredCertificates = CertificateOperations.GetAutomaticCertificates();
+        private readonly List<ProtectionPrincipal> oStoredPrincipals;
+        private readonly bool bStoredRequireAll;
 
         internal static async Task<ItemEditor> CreateAsync(Item oItem = null,
             CancellationToken oCancellation = default)
         {
-            // Read the saved item and its recipient choices before creating the window on the dispatcher.
+            // Read the saved item, its recipient choices, and its principal names before creating the window
+            // on the dispatcher; each name can require a directory lookup.
             IVaultStorage oStorage = CryptureEntities.Storage;
             bool bLoadUsers = oItem != null || Properties.Settings.Default.EnableCertificateProtection ||
                 CertificateOperations.GetAutomaticCertificates().Count != 0;
@@ -84,19 +88,26 @@ namespace Crypture
                     .SingleOrDefaultAsync(i => i.ItemId == oItem.ItemId, oCancellation);
                 if (oItem != null && oStored == null)
                     throw new InvalidOperationException("This item has been removed. Refresh the list.");
+                bool bRequireAll = false;
+                List<ProtectionPrincipal> oPrincipals = ItemCryptography.UsesWindowsProtection(oStored?.Cipher)
+                    ? PrincipalProtection.ParseDescriptor(oStored.Cipher.ProtectionDescriptor, out bRequireAll) : [];
                 return (Item: oStored, Users: bLoadUsers
-                    ? await oContent.Users.ToListAsync(oCancellation) : new List<User>());
+                    ? await oContent.Users.ToListAsync(oCancellation) : new List<User>(),
+                    Principals: oPrincipals, RequireAll: bRequireAll);
             }, oCancellation);
             oCancellation.ThrowIfCancellationRequested();
-            return new ItemEditor(oData.Item, oData.Users);
+            return new ItemEditor(oData.Item, oData.Users, oData.Principals, oData.RequireAll);
         }
 
-        private ItemEditor(Item oItem, List<User> oUsers)
+        private ItemEditor(Item oItem, List<User> oUsers, List<ProtectionPrincipal> oSavedPrincipals,
+            bool bSavedRequireAll)
         {
             // Apply configured choices only to new items; saved items supply their own settings.
             bool bNewItem = oItem == null;
             ThisItem = oItem ?? new Item();
             UserList = new ObservableCollection<User>(oUsers);
+            oStoredPrincipals = oSavedPrincipals;
+            bStoredRequireAll = bSavedRequireAll;
             ConfigurationDefaults oDefaults = bNewItem ? new ConfigurationDefaults("NewItem") : null;
             if (bNewItem)
             {
@@ -143,8 +154,7 @@ namespace Crypture
                 new SortDescription(nameof(User.Name), ListSortDirection.Ascending));
 
             // Load required certificate recipients even when certificate-based encryption is disabled.
-            if (!bNewItem || bCertificatesEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
-                LoadUsers(bNewItem);
+            if (!bNewItem || bCertificatesEnabled || oRequiredCertificates.Count != 0) LoadUsers(bNewItem);
             bool bSqlWindowsProtection = !CryptureEntities.Storage.IsSqlServer || bDomainJoined;
             oDpapiNgProtection.IsEnabled = bDpapiNgEnabled && bSqlWindowsProtection;
             oDpapiNgProtection.Visibility = oDpapiNgProtection.IsEnabled
@@ -167,13 +177,12 @@ namespace Crypture
                 if (bIncludeCurrentUser)
                     PrincipalList.Add(new ProtectionPrincipal(CertificateOperations.CurrentUserSid));
                 oProtectionMode.SelectedIndex = bCertificatesEnabled &&
-                    (!bDpapiNgEnabled || CertificateOperations.GetAutomaticCertificates().Count != 0)
+                    (!bDpapiNgEnabled || oRequiredCertificates.Count != 0)
                     ? CertificateProtectionIndex : bDpapiNgEnabled ? UserProtectionIndex :
                     bFidoEnabled ? FidoProtectionIndex : -1;
                 if (sProtection == "CertificateBased" && bCertificatesEnabled)
                     oProtectionMode.SelectedIndex = CertificateProtectionIndex;
-                else if (sProtection == "UserBased" && bDpapiNgEnabled &&
-                    CertificateOperations.GetAutomaticCertificates().Count == 0)
+                else if (sProtection == "UserBased" && bDpapiNgEnabled && oRequiredCertificates.Count == 0)
                     oProtectionMode.SelectedIndex = UserProtectionIndex;
                 else if (sProtection == "Fido2" && bFidoEnabled)
                     oProtectionMode.SelectedIndex = FidoProtectionIndex;
@@ -199,26 +208,25 @@ namespace Crypture
             bLoading = false;
         }
 
+        private bool IsRequired(User oUser) =>
+            oRequiredCertificates.Any(c => c.SequenceEqual(oUser.Certificate));
+
         private void LoadUsers(bool bNewItem)
         {
-            List<byte[]> oAutomatic = CertificateOperations.GetAutomaticCertificates();
-
             // Filter new choices while retaining saved and administrator-required recipients.
             UserListSelected.Clear();
             foreach (User oUser in UserList.Where(u => bNewItem
-                ? oAutomatic.Any(c => c.SequenceEqual(u.Certificate))
-                : ThisItem.Instances.Any(i => i.UserId == u.UserId))) UserListSelected.Add(oUser);
+                ? IsRequired(u) : ThisItem.Instances.Any(i => i.UserId == u.UserId))) UserListSelected.Add(oUser);
             oItemSharedWith.ItemsSource = UserListSelected;
             oAddCertDropDown.ItemsSource = UserListSelected.ToList();
             if (!bCertificatesEnabled) return;
             bLoadingCertificates = true;
             oCertificateUsageNotice.Text = "Checking recipient certificates...";
             oCertificateUsageNotice.Visibility = Visibility.Visible;
-            CertificateLoading = Dispatcher.InvokeAsync(() => LoadCertificateChoices(bNewItem, oAutomatic))
-                .Task.Unwrap();
+            CertificateLoading = Dispatcher.InvokeAsync(() => LoadCertificateChoices(bNewItem)).Task.Unwrap();
         }
 
-        private async Task LoadCertificateChoices(bool bNewItem, List<byte[]> oAutomatic)
+        private async Task LoadCertificateChoices(bool bNewItem)
         {
             if (bClosed) return;
             CancellationToken oToken = oCertificateCancellation.Token;
@@ -244,7 +252,7 @@ namespace Crypture
                     foreach (User oUser in oUsers)
                     {
                         oToken.ThrowIfCancellationRequested();
-                        if (oAutomatic.Any(c => c.SequenceEqual(oUser.Certificate)) ||
+                        if (IsRequired(oUser) ||
                             CertificateOperations.CanSelectCertificate(oUser.Certificate, oUsageFilter))
                             oChoices.Add(oUser.UserId);
                     }
@@ -337,7 +345,7 @@ namespace Crypture
             UpdateProtectionControls();
         }
 
-        private async void oSaveItemButton_Click(object sender, RoutedEventArgs e)
+        internal async void oSaveItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (bBusy || !oSaveItemButton.IsEnabled) return;
             bool bSaved = false;
@@ -363,7 +371,7 @@ namespace Crypture
                     bool bFido = oProtectionMode.SelectedIndex == FidoProtectionIndex;
                     if (oProtectionMode.SelectedIndex == UserProtectionIndex)
                     {
-                        if (CertificateOperations.GetAutomaticCertificates().Count != 0)
+                        if (oRequiredCertificates.Count != 0)
                             throw new InvalidOperationException(
                                 "Required recipient certificates are configured. Use Certificate Based" +
                                 (bFidoEnabled ? " or FIDO2" : "") + " encryption or ask the administrator " +
@@ -381,7 +389,7 @@ namespace Crypture
                     }
                     else
                     {
-                        foreach (byte[] oRequired in CertificateOperations.GetAutomaticCertificates())
+                        foreach (byte[] oRequired in oRequiredCertificates)
                         {
                             User oUser = UserList.FirstOrDefault(u => u.Certificate.SequenceEqual(oRequired));
                             if (oUser == null)
@@ -396,9 +404,7 @@ namespace Crypture
                             throw new InvalidOperationException(
                                 "Select at least one recipient using Choose Recipients.");
                     }
-                    List<byte[]> oRequiredCertificates = CertificateOperations.GetAutomaticCertificates();
-                    List<User> oRecipients = UserListSelected.Where(u => !bFido ||
-                        oRequiredCertificates.Any(c => c.SequenceEqual(u.Certificate))).ToList();
+                    List<User> oRecipients = UserListSelected.Where(u => !bFido || IsRequired(u)).ToList();
                     IntPtr hOwner = bFido ? new WindowInteropHelper(this).EnsureHandle() : IntPtr.Zero;
                     if (bFido) oItemStatus.Text = "Complete the security key PIN and touch prompts...";
                     byte[] oPlainText = ThisItem.ItemType switch
@@ -457,7 +463,7 @@ namespace Crypture
             Close();
         }
 
-        private byte[] SaveRichText()
+        internal byte[] SaveRichText()
         {
             using (MemoryStream oStream = new MemoryStream())
             {
@@ -498,7 +504,7 @@ namespace Crypture
             }
         }
 
-        private async void oLoadItemButton_Click(object sender, RoutedEventArgs e)
+        internal async void oLoadItemButton_Click(object sender, RoutedEventArgs e)
         {
             await LoadItem(false);
         }
@@ -516,6 +522,8 @@ namespace Crypture
             {
                 await Utilities.TryOperationAsync(this, async () =>
                 {
+                    if (ThisItem.Cipher == null)
+                        throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
                     byte[] oPlainText = null;
                     long? nModifier = null;
                     bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
@@ -639,13 +647,11 @@ namespace Crypture
                 PrincipalList.Clear();
                 if (!bPrincipals) return;
                 string sDescriptor = ThisItem.Cipher.ProtectionDescriptor;
-                bool bRequireAll;
-                foreach (ProtectionPrincipal oPrincipal in PrincipalProtection.ParseDescriptor(
-                    sDescriptor, out bRequireAll)) PrincipalList.Add(oPrincipal);
+                foreach (ProtectionPrincipal oPrincipal in oStoredPrincipals) PrincipalList.Add(oPrincipal);
                 oPrincipalScope.SelectedIndex = sDescriptor == PrincipalProtection.LocalUserDescriptor
                     ? LocalUserScopeIndex : sDescriptor == PrincipalProtection.LocalMachineDescriptor
                     ? LocalMachineScopeIndex : DomainScopeIndex;
-                oPrincipalMatch.SelectedIndex = bRequireAll ? AllPrincipalsIndex : AnyPrincipalIndex;
+                oPrincipalMatch.SelectedIndex = bStoredRequireAll ? AllPrincipalsIndex : AnyPrincipalIndex;
             }
             finally
             {
@@ -676,8 +682,8 @@ namespace Crypture
                 : "This encryption method is disabled in Crypture.exe.config. " +
                     "Decrypt the item, then select an enabled encryption method before saving.";
             bool bLocal = oPrincipalScope.SelectedIndex != DomainScopeIndex;
-            bool bRequiredCertificates = CertificateOperations.GetAutomaticCertificates().Count != 0;
-            oRequiredCertificateNotice.Visibility = bRequiredCertificates ? Visibility.Visible : Visibility.Collapsed;
+            oRequiredCertificateNotice.Visibility = oRequiredCertificates.Count != 0
+                ? Visibility.Visible : Visibility.Collapsed;
             oRequiredCertificateNotice.Text = bPrincipals
                 ? "Required recipient certificates are configured. Use Certificate Based" +
                     (bFidoEnabled ? " or FIDO2" : "") + " encryption."
@@ -824,7 +830,7 @@ namespace Crypture
         {
             RibbonMenuItem oMenu = (RibbonMenuItem)sender;
             User oUser = (User)oMenu.DataContext;
-            if (CertificateOperations.GetAutomaticCertificates().Any(c => c.SequenceEqual(oUser.Certificate)))
+            if (IsRequired(oUser))
             {
                 if (!UserListSelected.Contains(oUser))
                 {
@@ -841,17 +847,26 @@ namespace Crypture
             bHasChanges = true;
         }
 
-        private void oRemoveItemButton_Click(object sender, RoutedEventArgs e)
+        private async void oRemoveItemButton_Click(object sender, RoutedEventArgs e)
         {
             // confirm removal
-            if (ThisItem.ItemId == 0 || Popup.Show(this,
+            if (bBusy || ThisItem.ItemId == 0 || Popup.Show(this,
                 "Are you sure you want to remove this item?", "Removal Confirmation", MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-
-            if (!Utilities.TryOperation(this, () =>
+            bool bRemoved = false;
+            SetBusy(true, "Removing item...");
+            try
             {
-                DatabaseOperations.DeleteItem(ThisItem);
-            })) return;
+                bRemoved = await Utilities.TryOperationAsync(this,
+                    () => Task.Run(() => DatabaseOperations.DeleteItem(ThisItem)));
+            }
+            finally
+            {
+                // A successful removal closes the editor without refreshing its draft model.
+                if (bRemoved) bBusy = false;
+                else SetBusy(false);
+            }
+            if (!bRemoved) return;
             bCompleted = true;
             Close();
         }
@@ -884,7 +899,7 @@ namespace Crypture
             ClearPlainText();
         }
 
-        private void oLockItemButton_Click(object sender, RoutedEventArgs e)
+        internal void oLockItemButton_Click(object sender, RoutedEventArgs e)
         {
             if (!ConfirmDiscard()) return;
             LockItem();
@@ -1036,62 +1051,83 @@ namespace Crypture
             });
         }
 
-        private void oUploadAFile_Click(object sender, RoutedEventArgs e)
+        private async void oUploadAFile_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog oOpenDialog = new OpenFileDialog { Filter = "All Files (*.*)|*.*", CheckFileExists = true };
-            if (oOpenDialog.ShowDialog(this) != true || !ConfirmDiscard()) return;
-            Utilities.TryOperation(this, () =>
+            if (bBusy || oOpenDialog.ShowDialog(this) != true || !ConfirmDiscard()) return;
+            SetBusy(true, "Reading file...");
+            try
             {
-                byte[] oFileData = Utilities.ReadFile(oOpenDialog.FileName);
-                byte[] oCompressed;
-                try
+                await Utilities.TryOperationAsync(this, async () =>
                 {
-                    oCompressed = Utilities.Compress(oFileData);
-                }
-                finally
-                {
-                    Array.Clear(oFileData, 0, oFileData.Length);
-                }
-                ClearPlainText();
-                BinaryItemData = oCompressed;
-                ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
-                SetEditingControls(true);
-                bHasChanges = true;
-            });
+                    // Reading and compressing a large attachment stays off the dispatcher.
+                    byte[] oCompressed = await Task.Run(() =>
+                    {
+                        byte[] oFileData = Utilities.ReadFile(oOpenDialog.FileName);
+                        try
+                        {
+                            return Utilities.Compress(oFileData);
+                        }
+                        finally
+                        {
+                            Array.Clear(oFileData, 0, oFileData.Length);
+                        }
+                    });
+                    ClearPlainText();
+                    BinaryItemData = oCompressed;
+                    ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
+                    bHasChanges = true;
+                });
+            }
+            finally
+            {
+                SetBusy(false);
+            }
         }
 
-        private void oDownloadPanel_Click(object sender, RoutedEventArgs e)
+        private async void oDownloadPanel_Click(object sender, RoutedEventArgs e)
         {
             if (ThisItem.ItemId == 0 && BinaryItemData == null)
             {
                 oUploadAFile_Click(sender, e);
                 return;
             }
-            Utilities.TryOperation(this, () =>
+            if (bBusy) return;
+
+            // generate the filter field to use based on the stored item type
+            string sFilter = "All Files (*.*)|*.*";
+            if (Regex.IsMatch(ThisItem.ItemType, @"^\.[a-zA-Z0-9]{1,16}$"))
+                sFilter = ThisItem.ItemType + " Files (*" + ThisItem.ItemType + ")|*" + ThisItem.ItemType + "|" +
+                    sFilter;
+
+            // ask the user where to store the file
+            SaveFileDialog oSaveDialog = new SaveFileDialog
             {
-                // generate the filter field to use based on the stored item type
-                string sFilter = "All Files (*.*)|*.*";
-                if (Regex.IsMatch(ThisItem.ItemType, @"^\.[a-zA-Z0-9]{1,16}$"))
-                    sFilter = String.Format("{0} Files (*{0})|*{0}|", ThisItem.ItemType) + sFilter;
-
-                // ask the user where to store the file
-                SaveFileDialog oSaveDialog = new SaveFileDialog
+                Filter = sFilter, AddExtension = true, ValidateNames = true
+            };
+            if (oSaveDialog.ShowDialog(this) != true) return;
+            byte[] oCompressed = BinaryItemData;
+            SetBusy(true, "Saving decrypted file...");
+            try
+            {
+                // Expanding and writing a large attachment stays off the dispatcher.
+                await Utilities.TryOperationAsync(this, () => Task.Run(() =>
                 {
-                    Filter = sFilter, AddExtension = true, ValidateNames = true
-                };
-                if (oSaveDialog.ShowDialog(this) != true) return;
-
-                // write data to file
-                byte[] oFileData = Utilities.Decompress(BinaryItemData);
-                try
-                {
-                    File.WriteAllBytes(oSaveDialog.FileName, oFileData);
-                }
-                finally
-                {
-                    Array.Clear(oFileData, 0, oFileData.Length);
-                }
-            });
+                    byte[] oFileData = Utilities.Decompress(oCompressed);
+                    try
+                    {
+                        File.WriteAllBytes(oSaveDialog.FileName, oFileData);
+                    }
+                    finally
+                    {
+                        Array.Clear(oFileData, 0, oFileData.Length);
+                    }
+                }));
+            }
+            finally
+            {
+                SetBusy(false);
+            }
         }
     }
 }

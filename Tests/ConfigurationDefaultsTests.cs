@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -47,8 +46,7 @@ internal static partial class RegressionTests
                     ItemBrowser.RecentVaultLimit == nExpectedLimit &&
                     ClipboardExpiration.Timeout == TimeSpan.FromSeconds(2) &&
                     App.PrivacyIdleTimeout == TimeSpan.FromMinutes(1) &&
-                    ((System.Windows.Threading.DispatcherTimer)typeof(App).GetField("oPrivacyTimer",
-                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(oApp)).IsEnabled,
+                    oApp.oPrivacyTimer.IsEnabled,
                     "Fresh application startup uses configured browser, clipboard, and idle defaults");
                 if (sExpectedVault != null)
                 {
@@ -163,7 +161,7 @@ internal static partial class RegressionTests
                 Encoding.Unicode.GetBytes("Saved contents"), [], PrincipalProtection.LocalUserDescriptor);
             Item oStored;
             using (CryptureEntities oContext = new CryptureEntities())
-                oStored = DatabaseOperations.LoadItem(oContext.Items.Single().ItemId);
+                oStored = LoadItem(oContext.Items.Single().ItemId);
             Configure(("NewItemType", "Invalid"), ("TotpAlgorithm", "Invalid"));
             ItemEditor oSaved = Keep(CreateEditor(oStored));
             Check(oSaved.ThisItem.Label == "Saved text" && oSaved.ThisItem.ItemType == "text" &&
@@ -289,8 +287,7 @@ internal static partial class RegressionTests
             {
                 var oLoaded = new TaskCompletionSource<Dictionary<string, CertWizard.ProviderDetails>>();
                 CertWizard oWizard = Keep(new CertWizard(_ => Task.FromResult(oSoftware), _ => oLoaded.Task));
-                Task oLoad = (Task)typeof(CertWizard).GetMethod("LoadProvidersAsync",
-                    BindingFlags.Instance | BindingFlags.NonPublic).Invoke(oWizard, [false]);
+                Task oLoad = oWizard.LoadProvidersAsync(false);
                 oLoaded.SetResult(new() { [sSoftware] = oSoftware, [sHardware] = oHardware });
                 PumpUntil(() => oLoad.IsCompleted);
                 oLoad.GetAwaiter().GetResult();
@@ -299,7 +296,7 @@ internal static partial class RegressionTests
 
             Configure(("CertificateGeneratorProvider", sHardware), ("CertificateGeneratorKeyAlgorithm", "RSA"),
                 ("CertificateGeneratorKeyLength", "4096"), ("CertificateGeneratorHashAlgorithm", "SHA384"),
-                ("CertificateGeneratorSubject", "Team Certificate"), ("CertificateGeneratorIssuer", "Team Issuer"),
+                ("CertificateGeneratorSubject", "Team Certificate"),
                 ("CertificateGeneratorStartOffsetDays", "-2"), ("CertificateGeneratorValidityYears", "0"),
                 ("CertificateGeneratorValidityDays", "90"), ("CertificateGeneratorSelfSigned", "False"),
                 ("CertificateGeneratorStore", "LocalMachine"), ("CertificateGeneratorShowHardwareProviders", "True"),
@@ -314,7 +311,6 @@ internal static partial class RegressionTests
                 (string)((ComboBox)oWizard.FindName("oHashComboBox")).SelectedItem == "SHA384",
                 "Asynchronous provider loading honors configured provider, algorithms, and key length");
             Check(((TextBox)oWizard.FindName("oSubjectTextBox")).Text == "Team Certificate" &&
-                ((TextBox)oWizard.FindName("oIssuerTextBox")).Text == "Team Issuer" &&
                 ((DatePicker)oWizard.FindName("oValidFromDatePicker")).SelectedDate == DateTime.Today.AddDays(-2) &&
                 ((DatePicker)oWizard.FindName("oValidUntilDatePicker")).SelectedDate == DateTime.Today.AddDays(88) &&
                 ((RadioButton)oWizard.FindName("oCertificateRequestRadio")).IsChecked == true,
@@ -513,8 +509,7 @@ internal static partial class RegressionTests
             foreach (Window oWindow in oWindows)
             {
                 if (oWindow is ItemEditor)
-                    typeof(ItemEditor).GetField("bHasChanges", BindingFlags.Instance | BindingFlags.NonPublic)
-                        .SetValue(oWindow, false);
+                    ((ItemEditor)oWindow).bHasChanges = false;
                 oWindow.Close();
             }
             oSettings.Save();

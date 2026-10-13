@@ -112,27 +112,18 @@ namespace Crypture
                 }
 
                 // Authenticate the protected keys and access policy independently for each access path.
+                // Recovery wraps the same keys independently for normal access and emergency recovery.
                 oItem.Instances.Clear();
                 if (bFido)
-                {
-                    byte[] oRecoveryKey = sRecoveryDescriptor == null ? null :
-                        RecoveryProtection.WrapWindowsKeys(oKeys, null, sRecoveryDescriptor);
-                    oItem.Cipher.ProtectedKey = FidoKeyProtection.Wrap(oKeys, oFidoKey, oRecoveryKey);
-                    oItem.Cipher.Signature = ComputeSignature(oItem, oAuthenticationKey);
-                }
-                else if (bPrincipals && !bRecovery)
-                {
-                    oItem.Cipher.ProtectedKey = PrincipalProtection.Protect(oKeys, sProtectionDescriptor);
-                    oItem.Cipher.Signature = ComputeSignature(oItem, oAuthenticationKey);
-                    return;
-                }
+                    oItem.Cipher.ProtectedKey = FidoKeyProtection.Wrap(oKeys, oFidoKey, sRecoveryDescriptor == null
+                        ? null : RecoveryProtection.WrapWindowsKeys(oKeys, null, sRecoveryDescriptor));
                 else if (bRecovery)
-                {
-                    // Wrap the same keys independently for normal access and emergency recovery.
                     oItem.Cipher.ProtectedKey = RecoveryProtection.WrapWindowsKeys(
                         oKeys, sProtectionDescriptor, sRecoveryDescriptor);
+                else if (bPrincipals)
+                    oItem.Cipher.ProtectedKey = PrincipalProtection.Protect(oKeys, sProtectionDescriptor);
+                if (oItem.Cipher.ProtectedKey != null)
                     oItem.Cipher.Signature = ComputeSignature(oItem, oAuthenticationKey);
-                }
                 foreach (User oUser in oUsers)
                 {
                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oUser.Certificate))
@@ -140,6 +131,7 @@ namespace Crypture
                         Instance oInstance = new Instance
                         {
                             UserId = oUser.UserId,
+                            User = oUser,
                             CipherParams = nFormat,
                             CipherKey = CertificateKeyProtection.Wrap(oCert, oKeys)
                         };
@@ -195,18 +187,21 @@ namespace Crypture
                 else
                     oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey);
 
-                byte[] oSignature = bPrincipals || (bRecovery || bFido) && !bCertificate
-                    ? oCipher.Signature : oInstance.Signature;
-                if (oKeys.Length != ContentKeyBytes || oSignature?.Length != AuthenticationKeyBytes)
-                    throw new CryptographicException("The encrypted item is damaged.");
-
+                if (oKeys.Length != ContentKeyBytes) throw new CryptographicException("The encrypted item is damaged.");
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);
                 Buffer.BlockCopy(oKeys, AesKeyBytes, oAuthenticationKey, 0, AuthenticationKeyBytes);
-                byte[] oExpected = ComputeSignature(oItem, oAuthenticationKey,
-                    (bRecovery || bFido) && !bCertificate ? null : oInstance);
-                if (!CryptographicOperations.FixedTimeEquals(oExpected, oSignature))
-                    throw new CryptographicException(
-                        "The item failed its integrity check. It may have been altered.");
+
+                // Verify the access path first, then every other saved recipient, so a later save never
+                // shares the keys with a certificate that an existing recipient did not authorize.
+                Instance oUsed = bPrincipals || (bRecovery || bFido) && !bCertificate ? null : oInstance;
+                foreach (Instance oSigner in oItem.Instances.Where(i => i != oUsed).Prepend(oUsed))
+                {
+                    byte[] oSignature = oSigner == null ? oCipher.Signature : oSigner.Signature;
+                    if (oSignature?.Length != AuthenticationKeyBytes || !CryptographicOperations.FixedTimeEquals(
+                        ComputeSignature(oItem, oAuthenticationKey, oSigner), oSignature))
+                        throw new CryptographicException(
+                            "The item failed its integrity check. It may have been altered.");
+                }
 
                 // Release plaintext only after authenticating the metadata, recipient envelope, and content.
                 if (bGcm)
@@ -281,10 +276,12 @@ namespace Crypture
                     oWriter.Write(oItem.Cipher.ProtectedKey);
                     oWriter.Write(oInstance != null);
                 }
-                if (oItem.Cipher.CipherParams == CertificateFormat ||
-                    oItem.Cipher.CipherParams is RecoveryFormat or FidoFormat && oInstance != null)
+                if (oInstance != null)
                 {
-                    oWriter.Write(oInstance.UserId);
+                    // Bind the recipient's certificate rather than its row so a substituted certificate fails.
+                    if (oInstance.User?.Certificate == null || oInstance.CipherKey == null)
+                        throw new CryptographicException("The item's recipient certificate is unavailable.");
+                    oWriter.Write(SHA256.HashData(oInstance.User.Certificate));
                     oWriter.Write(oInstance.CipherKey.Length);
                     oWriter.Write(oInstance.CipherKey);
                 }

@@ -96,7 +96,7 @@ internal static partial class RegressionTests
         bool bCreated = false;
         try
         {
-            oStorage.Create();
+            CreateVault(oStorage);
             bCreated = true;
             long nOwner = oStorage.Escrow.CertificateUserId.Value;
             long nRecipient = EnrollTestCertificate(oStorage, oRecipientCert.RawData, sRecipient);
@@ -126,7 +126,7 @@ internal static partial class RegressionTests
 
             // Revoke an existing recipient while its real Windows SQL session stays connected.
             CryptureEntities.Storage = oStorage;
-            Item oRevoked = DatabaseOperations.LoadItem(oFixture.RevocableItemId);
+            Item oRevoked = LoadItem(oFixture.RevocableItemId);
             Item oOwnerOnly = new Item();
             ItemCryptography.Encrypt(oOwnerOnly, Encoding.Unicode.GetBytes("Recipient access revoked"),
                 new[] { oOwner });
@@ -221,18 +221,18 @@ internal static partial class RegressionTests
         }
 
         // Use ordinary mutation procedures from a separately authenticated, non-owner Windows account.
-        Item oDirect = DatabaseOperations.LoadItem(oFixture.DirectItemId);
+        Item oDirect = LoadItem(oFixture.DirectItemId);
         oDirect.Label = "Updated by the real recipient";
         oDirect.ModifiedBy = null;
         SqlServerItemOperations.Save(oStorage, oDirect, oDirect);
-        Check(DatabaseOperations.LoadItem(oDirect.ItemId).Label == oDirect.Label,
+        Check(LoadItem(oDirect.ItemId).Label == oDirect.Label,
             "A separately authenticated recipient can modify its associated row");
         Item oTransient = new Item { Label = "Created by the real recipient", ItemType = "text" };
         SqlServerItemOperations.Save(oStorage, oTransient, oDirect);
-        DatabaseOperations.DeleteItem(DatabaseOperations.LoadItem(oTransient.ItemId));
+        DatabaseOperations.DeleteItem(LoadItem(oTransient.ItemId));
         Check(CountIdentityRows(oConnection, "Item", oTransient.ItemId) == 0,
             "A separately authenticated recipient can add and delete its associated row");
-        Item oBeforeRevocation = DatabaseOperations.LoadItem(oFixture.RevocableItemId);
+        Item oBeforeRevocation = LoadItem(oFixture.RevocableItemId);
         File.WriteAllText(sFixturePath + ".recipient.ready", "Recipient SQL session remains connected.");
         WaitForIdentitySignal(sFixturePath, "revoked");
         AssertIdentityDenied(oConnection, oStorage, oFixture, oFixture.RevocableItemId, oBeforeRevocation);

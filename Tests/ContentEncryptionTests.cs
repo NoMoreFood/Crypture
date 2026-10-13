@@ -68,7 +68,7 @@ internal static partial class RegressionTests
                     using (CryptureEntities oContext = new CryptureEntities())
                         nId = oContext.Items.Single(i => i.Label == sLabel).ItemId;
                     oIds.Add(nId);
-                    Item oStored = DatabaseOperations.LoadItem(nId);
+                    Item oStored = LoadItem(nId);
                     Check(oStored.Cipher.ContentSuite == (long)nSuite &&
                         oStored.Cipher.CipherVector.Length == (nSuite == ContentEncryptionSuite.Aes256Gcm ? 12 : 16) &&
                         (nSuite == ContentEncryptionSuite.Aes256Gcm ? oStored.Cipher.AuthenticationTag?.Length == 16
@@ -117,7 +117,7 @@ internal static partial class RegressionTests
             }
 
             // Invalid configuration must not change an existing item or insert a new one.
-            Item oExisting = DatabaseOperations.LoadItem(oIds[0]);
+            Item oExisting = LoadItem(oIds[0]);
             byte[] oBefore = File.ReadAllBytes(sPath);
             foreach (string sBadSuite in new[] { "", "UnknownSuite", "1", "-1", "Aes256Gcm,Aes256CbcHmacSha256" })
             {
@@ -133,20 +133,20 @@ internal static partial class RegressionTests
             SetRecoveryConfig(null, null);
             SetContentEncryptionConfig(null);
             DatabaseOperations.SaveItem(oExisting, oPlain, oUsers);
-            oExisting = DatabaseOperations.LoadItem(oExisting.ItemId);
+            oExisting = LoadItem(oExisting.ItemId);
             Check(oExisting.Cipher.ContentSuite == (long)ContentEncryptionSuite.Aes256Gcm &&
                 ItemCryptography.Decrypt(oExisting, oExisting.Instances.First(), oCert).SequenceEqual(oPlain),
                 "Missing suite setting saves with AES-256-GCM");
             SetContentEncryptionConfig(nameof(ContentEncryptionSuite.Aes256CbcHmacSha256));
             DatabaseOperations.SaveItem(oExisting, oPlain, oUsers);
-            oExisting = DatabaseOperations.LoadItem(oExisting.ItemId);
+            oExisting = LoadItem(oExisting.ItemId);
             Check(oExisting.Cipher.ContentSuite == (long)ContentEncryptionSuite.Aes256CbcHmacSha256 &&
                 oExisting.Cipher.AuthenticationTag == null &&
                 ItemCryptography.Decrypt(oExisting, oExisting.Instances.First(), oCert).SequenceEqual(oPlain),
                 "Changing the configured suite rewrites the selected item on save");
             SetContentEncryptionConfig(nameof(ContentEncryptionSuite.Aes256Gcm));
             DatabaseOperations.SaveItem(oExisting, oPlain, oUsers);
-            oExisting = DatabaseOperations.LoadItem(oExisting.ItemId);
+            oExisting = LoadItem(oExisting.ItemId);
 
             // Configuration removal also leaves a mixed-suite backup independently readable.
             string sBackupPath = Path.Combine(sDirectory, "content-suites-backup.cryptdb");
@@ -155,7 +155,7 @@ internal static partial class RegressionTests
             CryptureEntities.DatabasePath = sBackupPath;
             foreach (long nId in oIds)
             {
-                Item oStored = DatabaseOperations.LoadItem(nId);
+                Item oStored = LoadItem(nId);
                 byte[] oResult = ItemCryptography.UsesWindowsProtection(oStored.Cipher)
                     ? ItemCryptography.Decrypt(oStored)
                     : ItemCryptography.Decrypt(oStored, oStored.Instances.First(i => i.UserId == oUser.UserId), oCert);
@@ -172,7 +172,7 @@ internal static partial class RegressionTests
                 oContext.Database.ExecuteSqlRaw("UPDATE Cipher SET ContentSuite = 99 WHERE ItemId = {0}",
                     oExisting.ItemId);
             Reject(() => DatabaseOperations.SaveItem(oExisting, oPlain, oUsers), "Reject concurrent suite changes");
-            Item oUnsupported = DatabaseOperations.LoadItem(oExisting.ItemId);
+            Item oUnsupported = LoadItem(oExisting.ItemId);
             Check(oUnsupported.Cipher.ContentSuite == 99, "Rejected stale save preserves the competing suite change");
             RejectCryptography(() => ItemCryptography.Decrypt(oUnsupported, oUnsupported.Instances.First(), oCert),
                 "Reject unsupported suites loaded from the Vault");

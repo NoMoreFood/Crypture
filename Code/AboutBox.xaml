@@ -7,8 +7,7 @@
         Title="About Crypture" Width="500" Height="400" MinWidth="420" MinHeight="320"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Icon="pack://application:,,,/Crypture;component/Safe.ico"
-        RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"
-    Background="{DynamicResource Crypture.WindowBrush}" Foreground="{DynamicResource Crypture.TextBrush}">
+        RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True">
     <Grid x:Name="margin" Margin="0,15,0,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

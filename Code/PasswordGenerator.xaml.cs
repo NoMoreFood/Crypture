@@ -67,7 +67,7 @@ namespace Crypture
             }
         }
 
-        private void oGenerateButton_Click(object sender, RoutedEventArgs e)
+        internal void oGenerateButton_Click(object sender, RoutedEventArgs e)
         {
             oGeneratedPassword.Clear();
             oCopyButton.IsEnabled = false;
