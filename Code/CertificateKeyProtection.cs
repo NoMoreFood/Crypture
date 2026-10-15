@@ -101,7 +101,7 @@ namespace Crypture
             }
         }
 
-        internal static void ValidateForEncryption(X509Certificate2 oCert)
+        internal static RecipientAlgorithm ValidateForEncryption(X509Certificate2 oCert)
         {
             RecipientAlgorithm oAlgorithm = GetAlgorithm(oCert);
             bool bEcdh = IsEcdh(oAlgorithm);
@@ -117,6 +117,7 @@ namespace Crypture
             {
                 using (MLKem oPublic = GetMlKemPublicKey(oCert, oAlgorithm)) { }
             }
+            return oAlgorithm;
         }
 
         internal static bool IsEcdh(RecipientAlgorithm oAlgorithm) =>
@@ -239,8 +240,7 @@ namespace Crypture
 
         internal static byte[] Wrap(X509Certificate2 oCert, byte[] oKeys)
         {
-            ValidateForEncryption(oCert);
-            RecipientAlgorithm oAlgorithm = GetAlgorithm(oCert);
+            RecipientAlgorithm oAlgorithm = ValidateForEncryption(oCert);
             byte[] oSecret = null;
             byte[] oWrappingKey = null;
             try

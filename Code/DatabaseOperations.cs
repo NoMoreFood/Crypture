@@ -39,61 +39,64 @@ namespace Crypture
         internal static void SaveItem(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null, FidoKeyAccess oFidoKey = null)
         {
-            if (oFidoKey != null && CryptureEntities.Storage.IsSqlServer)
+            IVaultStorage oStorage = CryptureEntities.Storage;
+            if (oFidoKey != null && oStorage.IsSqlServer)
                 throw new InvalidOperationException("FIDO2 encryption is available for file Vaults. " +
                     "SQL Server Vaults require Windows or certificate recipients.");
             ContentEncryptionSuite nContentSuite = ItemCryptography.ReadContentEncryptionSuite();
-            RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(CryptureEntities.Storage, true);
+            RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(oStorage, true);
             List<User> oUsers = sProtectionDescriptor == null
                 ? (oRecipients ?? Enumerable.Empty<User>()).ToList() : new List<User>();
+            User oRecoveryUser = null;
+
+            // Prepare all recipient and recovery envelopes before taking the Vault's write lock.
             if (oRecovery.Certificate != null)
             {
                 using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(oRecovery.Certificate))
                     if (!CertificateOperations.CheckCertificateStatus(oCert))
                         throw new InvalidOperationException("The emergency recovery certificate is not valid for " +
                             "encryption. Check its expiry, trust, and certificate validation settings.");
+                using CryptureEntities oDirectory = new CryptureEntities(oStorage);
+                IQueryable<User> oDirectoryUsers = oStorage.IsSqlServer
+                    ? oDirectory.Users.Where(u => u.IsEscrow) : oDirectory.Users;
+                oRecoveryUser = oDirectoryUsers.FirstOrDefault(u => u.Certificate == oRecovery.Certificate);
+                if (oRecoveryUser == null && oStorage.IsSqlServer)
+                    throw new InvalidOperationException("The SQL Server recovery certificate must be " +
+                        "enrolled by the Vault owner and designated as escrow for its verified " +
+                        "Active Directory identity before saving.");
+                oRecoveryUser ??= new User { Certificate = oRecovery.Certificate };
+                oUsers.RemoveAll(u => u.Certificate.SequenceEqual(oRecovery.Certificate));
+                oUsers.Add(oRecoveryUser);
             }
             Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
-            if (CryptureEntities.Storage is SqlServerVaultStorage oSqlServer)
+            ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
+                sProtectionDescriptor, oRecovery.Descriptor, nContentSuite, oFidoKey);
+            if (oStorage is SqlServerVaultStorage oSqlServer)
             {
                 // SQL Server saves encrypted rows through a recipient-checked procedure.
-                if (oRecovery.Certificate != null)
-                {
-                    using CryptureEntities oDirectory = new CryptureEntities();
-                    User oRecoveryUser = oDirectory.Users.FirstOrDefault(u =>
-                        u.IsEscrow && u.Certificate == oRecovery.Certificate);
-                    if (oRecoveryUser == null)
-                        throw new InvalidOperationException("The SQL Server recovery certificate must be " +
-                            "enrolled by the Vault owner and designated as escrow for its verified " +
-                            "Active Directory identity before saving.");
-                    if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
-                }
-                ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
-                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite);
                 SqlServerItemOperations.Save(oSqlServer, oItem, oEncrypted);
                 return;
             }
-            using (CryptureEntities oContent = new CryptureEntities())
+            using (CryptureEntities oContent = new CryptureEntities(oStorage))
             using (var oTransaction = oContent.Database.BeginTransaction())
             {
-                // Enforce recovery at the save boundary, including callers outside the editor.
-                if (oRecovery.Certificate != null)
+                // Resolve the recovery row atomically; its signature binds the certificate, not the row ID.
+                if (oRecoveryUser != null)
                 {
-                    User oRecoveryUser = oContent.Users.FirstOrDefault(u => u.Certificate == oRecovery.Certificate);
-                    if (oRecoveryUser == null)
+                    User oStoredRecovery = oContent.Users.FirstOrDefault(u => u.Certificate == oRecovery.Certificate);
+                    if (oStoredRecovery == null)
                     {
-                        oRecoveryUser = new User { Certificate = oRecovery.Certificate };
-                        oContent.Users.Add(oRecoveryUser);
+                        oStoredRecovery = new User { Certificate = oRecovery.Certificate };
+                        oContent.Users.Add(oStoredRecovery);
                         oContent.SaveChanges();
                     }
-                    if (!oUsers.Any(u => u.UserId == oRecoveryUser.UserId)) oUsers.Add(oRecoveryUser);
+                    foreach (Instance oInstance in oEncrypted.Instances.Where(i => i.User == oRecoveryUser))
+                        oInstance.UserId = oStoredRecovery.UserId;
                 }
-                ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
-                    sProtectionDescriptor, oRecovery.Descriptor, nContentSuite, oFidoKey);
                 Item oStored = null;
                 if (oItem.ItemId != 0)
                 {
-                    oStored = oContent.Items.Include(i => i.Cipher).Include(i => i.Instances)
+                    oStored = oContent.Items.Include(i => i.Cipher).Include(i => i.Instances).AsSplitQuery()
                         .SingleOrDefault(i => i.ItemId == oItem.ItemId);
                     if (oStored == null || oStored.ModifiedDate != oItem.ModifiedDate ||
                         oStored.Cipher == null || oItem.Cipher == null ||

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -27,6 +28,7 @@ internal static partial class RegressionTests
     private static void TestContentEncryptionSuites(string sDirectory, X509Certificate2 oCert,
         X509Certificate2 oOtherCert)
     {
+        TestAuthenticationFormat();
         string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
         byte[] oOriginalConfig = File.ReadAllBytes(sConfigPath);
         string sPreviousConnection = CryptureEntities.ConnectionString;
@@ -197,6 +199,58 @@ internal static partial class RegressionTests
             CryptureEntities.ConnectionString = sPreviousConnection;
             Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = bSelfSigned;
             Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = bRevocation;
+        }
+    }
+
+    private static void TestAuthenticationFormat()
+    {
+        // Fixed vectors cover the serialized authentication format, including long UTF-8 labels and every access path.
+        string[] sExpected =
+        [
+            "5053F5B65CBAD3932F254499789C5FB47AC5E046E7F7781335DC5659A5E82405",
+            "D12D231794838F80E74F096A761B74E0C59C31FF6F279A10928A55749EA01C39",
+            "E8D3B1975F56462CCCDEBE92708CE0AA95A94F8ADBDC29D57547B1864E752890",
+            "4788D1E24C33E826442F8A5035C4A487747345A0AA9420D4FC9B1A372BF00E6D",
+            "DBF56CFF0548AF9FE5C0728B5CAAC48541A94084D13317360524ACF62D0CDE58",
+            "7EFAE6B92CFDFD690C47E39F411B36F7671ABCD6948A6FDA3EDD941E135081A3",
+            "7D9A979467C6ED4A2F1BD50E833A144EF6D0BC1E7FC9A4B1A53FD31C3A71D573",
+            "E8A8881F806580E3F8BDD28F56502E99D66362723190B420EA323E438174666C",
+            "554CFE75494E722D9C132631DD369F6E0361E685628CE5AF45C77D6A0F18855E",
+            "74025E8D05315ED83D449765DB285D6894D0E19B1475349B8A09C536B6D8F7A1",
+            "3914626E6FF4DCE34A3F57EA0AB8A17D175360AF1CDC692806A48E48E377D257",
+            "5B1BFCB9C86A6FA6B9C3AF1F3B406076777D5EF0C9E719396DC4884A3AAF731B"
+        ];
+        byte[] oKey = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
+        MethodInfo oSign = typeof(ItemCryptography).GetMethod("ComputeSignature",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        int nVector = 0;
+        foreach (long nSuite in new long[] { 1, 2 })
+        foreach (long nFormat in new long[] { 2, 3, 4, 5 })
+        foreach (bool bRecipient in new[] { false, true })
+        {
+            if (nFormat == 2 && bRecipient || nFormat == 3 && !bRecipient) continue;
+            Item oItem = new Item
+            {
+                Label = new string('x', 128) + "\u2603", ItemType = ".bin",
+                Cipher = new Cipher
+                {
+                    CipherParams = nFormat, ContentSuite = nSuite,
+                    CipherText = Enumerable.Range(0, 257).Select(i => (byte)i).ToArray(),
+                    CipherVector = Enumerable.Range(1, nSuite == 1 ? 12 : 16).Select(i => (byte)i).ToArray(),
+                    AuthenticationTag = nSuite == 1 ? new byte[16] : null,
+                    ProtectionDescriptor = nFormat == 2 ? "LOCAL=user" : null,
+                    ProtectedKey = Enumerable.Range(16, 47).Select(i => (byte)i).ToArray()
+                }
+            };
+            Instance oRecipient = bRecipient ? new Instance
+            {
+                User = new User { Certificate = [1, 2, 3, 4, 5] },
+                CipherKey = Enumerable.Range(64, 33).Select(i => (byte)i).ToArray()
+            } : null;
+            byte[] oSignature = (byte[])oSign.Invoke(null, [oItem, oKey, oRecipient]);
+            Check(Convert.ToHexString(oSignature) == sExpected[nVector++],
+                "Authentication bytes match the stored format: suite=" + nSuite + ", format=" + nFormat +
+                    ", recipient=" + bRecipient);
         }
     }
 

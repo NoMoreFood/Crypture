@@ -85,16 +85,22 @@ namespace Crypture
             var oData = await Task.Run(async () =>
             {
                 using CryptureEntities oContent = new CryptureEntities(oStorage);
-                Item oStored = oItem == null ? null : await oContent.Items.Include(i => i.User)
-                    .Include(i => i.Cipher).Include(i => i.Instances).ThenInclude(j => j.User)
-                    .SingleOrDefaultAsync(i => i.ItemId == oItem.ItemId, oCancellation);
+                Item oStored = null;
+                List<User> oUsers = [];
+                if (oItem != null || bLoadUsers)
+                    await oStorage.ReadSnapshotAsync(oContent, async () =>
+                    {
+                        oStored = oItem == null ? null : await oContent.Items.Include(i => i.User)
+                            .Include(i => i.Cipher).Include(i => i.Instances).ThenInclude(j => j.User).AsSplitQuery()
+                            .SingleOrDefaultAsync(i => i.ItemId == oItem.ItemId, oCancellation);
+                        if (bLoadUsers) oUsers = await oContent.Users.ToListAsync(oCancellation);
+                    }, oCancellation);
                 if (oItem != null && oStored == null)
                     throw new InvalidOperationException("This item has been removed. Refresh the list.");
                 bool bRequireAll = false;
                 List<ProtectionPrincipal> oPrincipals = ItemCryptography.UsesWindowsProtection(oStored?.Cipher)
                     ? PrincipalProtection.ParseDescriptor(oStored.Cipher.ProtectionDescriptor, out bRequireAll) : [];
-                return (Item: oStored, Users: bLoadUsers
-                    ? await oContent.Users.ToListAsync(oCancellation) : new List<User>(),
+                return (Item: oStored, Users: oUsers,
                     Principals: oPrincipals, RequireAll: bRequireAll);
             }, oCancellation);
             oCancellation.ThrowIfCancellationRequested();
@@ -428,7 +434,6 @@ namespace Crypture
                                     using (X509Certificate2 oCert = X509CertificateLoader.LoadCertificate(
                                         oUser.Certificate))
                                     {
-                                        CertificateKeyProtection.ValidateForEncryption(oCert);
                                         if (!CertificateOperations.CheckCertificateStatus(oCert))
                                             throw new InvalidOperationException("The certificate for '" + oUser.Name +
                                                 "' is not valid for encryption. Review the sharing list " +
@@ -1109,18 +1114,7 @@ namespace Crypture
                 await Utilities.TryOperationAsync(this, async () =>
                 {
                     // Reading and compressing a large attachment stays off the dispatcher.
-                    byte[] oCompressed = await Task.Run(() =>
-                    {
-                        byte[] oFileData = Utilities.ReadFile(oOpenDialog.FileName);
-                        try
-                        {
-                            return Utilities.Compress(oFileData);
-                        }
-                        finally
-                        {
-                            Array.Clear(oFileData, 0, oFileData.Length);
-                        }
-                    });
+                    byte[] oCompressed = await Task.Run(() => Utilities.CompressFile(oOpenDialog.FileName));
                     ClearPlainText();
                     BinaryItemData = oCompressed;
                     ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
@@ -1160,17 +1154,7 @@ namespace Crypture
             {
                 // Expanding and writing a large attachment stays off the dispatcher.
                 await Utilities.TryOperationAsync(this, () => Task.Run(() =>
-                {
-                    byte[] oFileData = Utilities.Decompress(oCompressed);
-                    try
-                    {
-                        File.WriteAllBytes(oSaveDialog.FileName, oFileData);
-                    }
-                    finally
-                    {
-                        Array.Clear(oFileData, 0, oFileData.Length);
-                    }
-                }));
+                    Utilities.DecompressToFile(oCompressed, oSaveDialog.FileName)));
             }
             finally
             {

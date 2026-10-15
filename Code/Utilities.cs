@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Buffers;
 using System.IO.Compression;
 using System.Linq;
 using System.Collections;
@@ -141,49 +142,82 @@ namespace Crypture
             "The operation could not be completed." + Environment.NewLine + Environment.NewLine +
             oError.GetBaseException().Message, "Crypture", MessageBoxButton.OK, MessageBoxImage.Error);
 
-        internal static byte[] ReadFile(string sPath)
+        internal static byte[] CompressFile(string sPath)
         {
             using (FileStream oFile = File.OpenRead(sPath))
-            {
-                if (oFile.Length > MaxItemSize) throw new InvalidDataException("Files must be no larger than 64 MB.");
-                using (BinaryReader oReader = new BinaryReader(oFile)) return oReader.ReadBytes((int)oFile.Length);
-            }
+                return Compress(oFile);
         }
 
         internal static byte[] Compress(byte[] oInputArray)
         {
-            if (oInputArray.Length > MaxItemSize) throw new InvalidDataException("Files must be no larger than 64 MB.");
+            using (MemoryStream oInputStream = new MemoryStream(oInputArray)) return Compress(oInputStream);
+        }
+
+        private static byte[] Compress(Stream oInputStream)
+        {
+            const string SizeError = "Files must be no larger than 64 MB.";
+            if (oInputStream.Length > MaxItemSize) throw new InvalidDataException(SizeError);
             using (MemoryStream oOutputStream = new MemoryStream())
             {
                 using (GZipStream oZipStream = new GZipStream(oOutputStream, CompressionMode.Compress))
-                    oZipStream.Write(oInputArray, 0, oInputArray.Length);
+                    CopyFileContent(oInputStream, oZipStream, SizeError);
                 return oOutputStream.ToArray();
             }
         }
 
         internal static byte[] Decompress(byte[] oInputArray)
         {
-            const int CopyBufferBytes = 81920;
-            using (MemoryStream oInputStream = new MemoryStream(oInputArray))
-            using (GZipStream oZipStream = new GZipStream(oInputStream, CompressionMode.Decompress))
             using (MemoryStream oOutputStream = new MemoryStream())
             {
-                byte[] oBuffer = new byte[CopyBufferBytes];
-                try
-                {
-                    int nRead;
-                    while ((nRead = oZipStream.Read(oBuffer, 0, oBuffer.Length)) != 0)
-                    {
-                        if (oOutputStream.Length + nRead > MaxItemSize)
-                            throw new InvalidDataException("The expanded file exceeds the 64 MB limit.");
-                        oOutputStream.Write(oBuffer, 0, nRead);
-                    }
-                }
-                finally
-                {
-                    Array.Clear(oBuffer, 0, oBuffer.Length);
-                }
+                Decompress(oInputArray, oOutputStream);
                 return oOutputStream.ToArray();
+            }
+        }
+
+        internal static void DecompressToFile(byte[] oInputArray, string sDestination)
+        {
+            // Publish only a complete, size-checked file and preserve an existing destination's permissions.
+            string sPath = Path.GetFullPath(sDestination);
+            string sTemporary = Path.Combine(Path.GetDirectoryName(sPath), ".crypture-" + Guid.NewGuid() + ".tmp");
+            try
+            {
+                using (FileStream oFile = new FileStream(sTemporary,
+                    FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    Decompress(oInputArray, oFile);
+                if (File.Exists(sPath)) File.Replace(sTemporary, sPath, null);
+                else File.Move(sTemporary, sPath);
+            }
+            finally
+            {
+                File.Delete(sTemporary);
+            }
+        }
+
+        private static void Decompress(byte[] oInputArray, Stream oOutputStream)
+        {
+            using (MemoryStream oInputStream = new MemoryStream(oInputArray))
+            using (GZipStream oZipStream = new GZipStream(oInputStream, CompressionMode.Decompress))
+                CopyFileContent(oZipStream, oOutputStream, "The expanded file exceeds the 64 MB limit.");
+        }
+
+        private static void CopyFileContent(Stream oInputStream, Stream oOutputStream, string sSizeError)
+        {
+            // Bound expanded content while keeping plaintext transfer buffers short-lived.
+            byte[] oBuffer = ArrayPool<byte>.Shared.Rent(81920);
+            try
+            {
+                int nTotal = 0;
+                int nRead;
+                while ((nRead = oInputStream.Read(oBuffer, 0, oBuffer.Length)) != 0)
+                {
+                    nTotal += nRead;
+                    if (nTotal > MaxItemSize) throw new InvalidDataException(sSizeError);
+                    oOutputStream.Write(oBuffer, 0, nRead);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(oBuffer, true);
             }
         }
     }

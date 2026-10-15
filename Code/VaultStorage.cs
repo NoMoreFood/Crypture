@@ -131,7 +131,7 @@ namespace Crypture
 
         internal SqlServerVaultStorage(string sConnection)
         {
-            oBuilder = new SqlConnectionStringBuilder(sConnection) { PersistSecurityInfo = false, Pooling = false };
+            oBuilder = new SqlConnectionStringBuilder(sConnection) { PersistSecurityInfo = false };
             if (String.IsNullOrWhiteSpace(oBuilder.DataSource) || String.IsNullOrWhiteSpace(oBuilder.InitialCatalog))
                 throw new ArgumentException("Enter a SQL Server name and database name.");
             if (!oBuilder.IntegratedSecurity || oBuilder.UserID.Length != 0 || oBuilder.Password.Length != 0)
@@ -162,7 +162,7 @@ namespace Crypture
             // Create only a new database; never initialize an unrelated existing database.
             SqlConnectionStringBuilder oMaster = new SqlConnectionStringBuilder(ConnectionString)
             {
-                InitialCatalog = "master"
+                InitialCatalog = "master", Pooling = false
             };
             using SqlConnection oConnection = new SqlConnection(oMaster.ConnectionString);
             await oConnection.OpenAsync(oCancellation).ConfigureAwait(false);
@@ -199,7 +199,9 @@ namespace Crypture
                         bLoginCreated = true;
                     }
                 }
-                using SqlConnection oVault = new SqlConnection(ConnectionString);
+                // Provision without pooling so failed creation can drop the newly owned database.
+                using SqlConnection oVault = new SqlConnection(new SqlConnectionStringBuilder(ConnectionString)
+                    { Pooling = false }.ConnectionString);
                 await oVault.OpenAsync(oCancellation).ConfigureAwait(false);
                 using SqlTransaction oTransaction = (SqlTransaction)await oVault.BeginTransactionAsync(oCancellation)
                     .ConfigureAwait(false);

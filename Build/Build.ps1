@@ -245,6 +245,7 @@ try
     }
 
 
+    $licenseTexts = @{}
     foreach ($runtimeId in $runtimes)
     {
         $architecture = $runtimeId.Substring($runtimePrefix.Length)
@@ -273,9 +274,13 @@ try
                 $texts.Add("$($library.Name)`r`n" + $(if ($license.type -eq 'expression') {
                     @($license.'#text' -split '\s+(?:AND|OR|WITH)\s+|[()+]' | Where-Object { $_ } |
                         Select-Object -Unique | ForEach-Object {
-                            [string] (Invoke-WebRequest -UseBasicParsing -Uri (
-                                'https://raw.githubusercontent.com/spdx/license-list-data/' +
-                                "$SpdxLicenseListVersion/text/$_.txt")).Content
+                            if (!$licenseTexts.ContainsKey($_))
+                            {
+                                $licenseTexts[$_] = [string] (Invoke-WebRequest -UseBasicParsing -Uri (
+                                    'https://raw.githubusercontent.com/spdx/license-list-data/' +
+                                    "$SpdxLicenseListVersion/text/$_.txt")).Content
+                            }
+                            $licenseTexts[$_]
                         }) -join "`r`n`r`n"
                 } else { Get-Content -LiteralPath (Join-Path $packageDirectory $license.'#text') -Raw }))
             }

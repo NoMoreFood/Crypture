@@ -132,7 +132,7 @@ namespace Crypture
                     IntegratedSecurity = true,
                     Encrypt = SqlConnectionEncryptOption.Mandatory,
                     TrustServerCertificate = oTrustCertificate.IsChecked == true,
-                    ConnectTimeout = ConnectionTimeoutSeconds, ApplicationName = "Crypture", Pooling = false
+                    ConnectTimeout = ConnectionTimeoutSeconds, ApplicationName = "Crypture"
                 };
                 Storage = new SqlServerVaultStorage(oBuilder.ConnectionString);
                 CreateDatabase = oCreateDatabase.IsChecked == true;

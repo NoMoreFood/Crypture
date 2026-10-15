@@ -129,12 +129,17 @@ internal static partial class RegressionTests
 
             // Create an isolated real Windows certificate and dismiss only this creator's result popup.
             string sResultTitle = null;
+            int nResponsiveTicks = 0;
             DispatcherTimer oDismiss = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
             oDismiss.Tick += (s, e) =>
             {
                 Popup oResult = Application.Current.Windows.OfType<Popup>()
                     .FirstOrDefault(w => ReferenceEquals(w.Owner, oWizard));
-                if (oResult == null) return;
+                if (oResult == null)
+                {
+                    if (!oTabs.IsEnabled) nResponsiveTicks++;
+                    return;
+                }
                 sResultTitle = oResult.Title;
                 oResult.DialogResult = true;
             };
@@ -144,7 +149,10 @@ internal static partial class RegressionTests
                 oCreate.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Check(!oCreate.IsEnabled && !oTabs.IsEnabled && oNotice.Text.Contains("Creating"),
                     "Certificate creation paints a busy state and prevents repeated submissions");
+                oWizard.Close();
+                Check(oWizard.IsVisible, "Certificate creation keeps its prompt owner open until the key is saved");
                 PumpUntil(() => oTabs.IsEnabled);
+                Check(nResponsiveTicks > 0, "Certificate creation keeps processing dispatcher timers");
             }
             finally { oDismiss.Stop(); }
             using X509Store oStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);

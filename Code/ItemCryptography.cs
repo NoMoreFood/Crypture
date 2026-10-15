@@ -254,8 +254,8 @@ namespace Crypture
 
         private static byte[] ComputeSignature(Item oItem, byte[] oKey, Instance oInstance = null)
         {
-            using (HMACSHA256 oHmac = new HMACSHA256(oKey))
-            using (CryptoStream oStream = new CryptoStream(Stream.Null, oHmac, CryptoStreamMode.Write))
+            using (IncrementalHash oHmac = IncrementalHash.CreateHMAC(HashAlgorithmName.SHA256, oKey))
+            using (MemoryStream oStream = new MemoryStream())
             using (BinaryWriter oWriter = new BinaryWriter(oStream, Encoding.UTF8, true))
             {
                 // Length-prefixed metadata and ciphertext prevent ambiguous authenticated messages.
@@ -286,10 +286,12 @@ namespace Crypture
                     oWriter.Write(oInstance.CipherKey);
                 }
                 oWriter.Write(oItem.Cipher.CipherText.Length);
-                oWriter.Write(oItem.Cipher.CipherText);
                 oWriter.Flush();
-                oStream.FlushFinalBlock();
-                return oHmac.Hash;
+
+                // Hash content directly without copying it through a stream transformation buffer.
+                oHmac.AppendData(oStream.GetBuffer().AsSpan(0, (int)oStream.Length));
+                oHmac.AppendData(oItem.Cipher.CipherText);
+                return oHmac.GetHashAndReset();
             }
         }
     }

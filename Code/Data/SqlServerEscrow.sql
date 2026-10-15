@@ -103,8 +103,9 @@ BEGIN
         IF @protectionDescriptor IS NOT NULL AND LEFT(@protectionDescriptor, 4) <> N'SID='
             THROW 50013, 'SQL Server items require domain users or groups for Windows protection.', 1;
         DECLARE @escrowUserId bigint, @escrowDescriptor nvarchar(450);
+        -- Hold a shared policy lock so unrelated items can save while escrow changes wait.
         SELECT @escrowUserId = [EscrowCertificateUserId], @escrowDescriptor = [EscrowDescriptor]
-        FROM [dbo].[CryptureVault] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = 1;
+        FROM [dbo].[CryptureVault] WITH (HOLDLOCK) WHERE [Id] = 1;
         IF @escrowUserId IS NOT NULL AND (@cipherParams NOT IN (3, 4) OR NOT EXISTS (
             SELECT 1 FROM @recipients WHERE [UserId] = @escrowUserId))
             THROW 50023, 'Include the Vault escrow certificate in the saved recipients.', 1;

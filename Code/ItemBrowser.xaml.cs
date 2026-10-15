@@ -398,15 +398,22 @@ namespace Crypture
                 // Keep item rows, recipients, and protection metadata in one read snapshot during concurrent saves.
                 await oStorage.ReadSnapshotAsync(oContent, async () =>
                 {
-                    oItems = await oContent.Items.Include(i => i.User).Include(i => i.Instances)
-                        .ThenInclude(j => j.User).ToListAsync(oCancellation).ConfigureAwait(false);
-                    oUsers = await oContent.Users.ToListAsync(oCancellation).ConfigureAwait(false);
+                    oItems = await oContent.Items.AsNoTracking().ToListAsync(oCancellation).ConfigureAwait(false);
+                    oUsers = await oContent.Users.AsNoTracking().ToListAsync(oCancellation).ConfigureAwait(false);
+                    var oUsersById = oUsers.ToDictionary(u => u.UserId);
+                    var oRecipients = (await oContent.Instances.Select(r => new { r.ItemId, r.UserId })
+                        .ToListAsync(oCancellation).ConfigureAwait(false)).ToLookup(r => r.ItemId);
                     var oProtection = await oContent.Ciphers.Select(c => new
                     {
                         c.ItemId, c.CipherParams, c.ProtectionDescriptor, c.EscrowLabel
                     }).ToDictionaryAsync(c => c.ItemId, oCancellation).ConfigureAwait(false);
                     foreach (Item oItem in oItems)
                     {
+                        oItem.User = oUsersById.GetValueOrDefault(oItem.ModifiedBy ?? 0);
+                        oItem.Instances = oRecipients[oItem.ItemId].Select(r => new Instance
+                        {
+                            ItemId = r.ItemId, UserId = r.UserId, User = oUsersById.GetValueOrDefault(r.UserId)
+                        }).ToList();
                         if (!oProtection.TryGetValue(oItem.ItemId, out var oPolicy)) continue;
                         oItem.Cipher = new Cipher
                         {
@@ -517,11 +524,13 @@ namespace Crypture
         {
             // SQL Server certificates require explicit owner enrollment and cannot be inserted from local settings.
             if (oStorage.IsSqlServer) return;
+            List<byte[]> oCertificates = CertificateOperations.GetAutomaticCertificates();
+            if (oCertificates.Count == 0) return;
             using (CryptureEntities oContent = new CryptureEntities(oStorage))
             {
                 List<User> oUsers = oContent.Users.ToList();
                 // cycle through mandatory certificates to add
-                foreach (byte[] bCertData in CertificateOperations.GetAutomaticCertificates())
+                foreach (byte[] bCertData in oCertificates)
                 {
                     // skip certificates already in database
                     if (oUsers.Any(u => u.Certificate.SequenceEqual(bCertData))) continue;

@@ -281,11 +281,15 @@ namespace Crypture
                 oInvalid.Add(HealthStatus.Error, oError.Message);
                 oReport.Findings.Add(oInvalid);
             }
+
+            // Associate certificates with affected items once, including damaged duplicate recipient rows.
             int nCertificate = 0;
+            var oItemsByUser = oItems.SelectMany(i => i.Instances, (i, r) => (Item: i, r.UserId))
+                .ToLookup(r => r.UserId, r => r.Item);
             foreach (User oUser in oUsers)
             {
                 oCancellation.ThrowIfCancellationRequested();
-                List<Item> oAffected = oItems.Where(i => i.Instances.Any(j => j.UserId == oUser.UserId)).ToList();
+                List<Item> oAffected = oItemsByUser[oUser.UserId].Distinct().ToList();
                 if (!String.IsNullOrWhiteSpace(oUser.Sid)) AddPrincipal(oPrincipals, oUser.Sid, oAffected);
                 oProgress?.Report("Checking certificate " + (++nCertificate) + " of " + oUsers.Count + "...");
                 oReport.Findings.Add(CheckCertificate(oUser, oAffected, bAllowSelfSigned,

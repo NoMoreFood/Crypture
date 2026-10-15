@@ -491,6 +491,17 @@ internal static partial class RegressionTests
         Check(Utilities.Decompress(Utilities.Compress(oInput)).SequenceEqual(oInput), "File compression round trip");
         Check(Utilities.Decompress(Utilities.Compress(new byte[0])).Length == 0, "Empty file compression round trip");
         Reject(() => Utilities.Decompress(new byte[] { 1, 2, 3, 4 }), "Reject damaged compressed file");
+
+        // Failed or oversized downloads must preserve the chosen file and remove staged plaintext.
+        string sExistingFile = Path.Combine(sDirectory, "existing-download.bin");
+        File.WriteAllBytes(sExistingFile, oInput);
+        Reject(() => Utilities.DecompressToFile(new byte[] { 1, 2, 3, 4 }, sExistingFile),
+            "Reject a damaged download before replacing the destination");
+        Check(File.ReadAllBytes(sExistingFile).SequenceEqual(oInput), "A damaged download preserves the destination");
+        byte[] oReplacement = RandomNumberGenerator.GetBytes(257 * 1024);
+        Utilities.DecompressToFile(Utilities.Compress(oReplacement), sExistingFile);
+        Check(File.ReadAllBytes(sExistingFile).SequenceEqual(oReplacement),
+            "A complete download replaces the destination");
         byte[] oOversized = new byte[Utilities.MaxItemSize + 1];
         Reject(() => Utilities.Compress(oOversized), "Reject oversized upload");
         using (MemoryStream oMemory = new MemoryStream())
@@ -498,6 +509,11 @@ internal static partial class RegressionTests
             using (System.IO.Compression.GZipStream oZip = new System.IO.Compression.GZipStream(oMemory,
                 System.IO.Compression.CompressionMode.Compress, true)) oZip.Write(oOversized, 0, oOversized.Length);
             Reject(() => Utilities.Decompress(oMemory.ToArray()), "Bound expanded file size");
+            Reject(() => Utilities.DecompressToFile(oMemory.ToArray(), sExistingFile),
+                "Bound expanded downloads before publishing them");
+            Check(File.ReadAllBytes(sExistingFile).SequenceEqual(oReplacement) &&
+                !Directory.EnumerateFiles(sDirectory, ".crypture-*.tmp").Any(),
+                "Rejected downloads preserve existing content and remove staged plaintext");
         }
         foreach (string sType in new[] { "text", "totp" })
             Reject(() => ItemCryptography.Encrypt(new Item { ItemType = sType }, oOversized, null,
@@ -513,7 +529,7 @@ internal static partial class RegressionTests
         try
         {
             File.WriteAllBytes(Path.Combine(sDirectory, "maximum-upload.bin"), oFile);
-            byte[] oCompressed = Utilities.Compress(Utilities.ReadFile(Path.Combine(sDirectory, "maximum-upload.bin")));
+            byte[] oCompressed = Utilities.CompressFile(Path.Combine(sDirectory, "maximum-upload.bin"));
             Check(oCompressed.Length > Utilities.MaxItemSize, "An incompressible 64 MiB upload expands during gzip");
             DatabaseOperations.CreateDatabase(sPath,
                 File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "SQLite.sql")));
@@ -522,8 +538,10 @@ internal static partial class RegressionTests
                 oCompressed, null, PrincipalProtection.LocalUserDescriptor);
             long nItemId;
             using (CryptureEntities oContext = new CryptureEntities()) nItemId = oContext.Items.Single().ItemId;
-            byte[] oDownloaded = Utilities.Decompress(ItemCryptography.Decrypt(LoadItem(nItemId)));
-            Check(oDownloaded.SequenceEqual(oFile), "A 64 MiB incompressible attachment survives a Vault round trip");
+            string sDownload = Path.Combine(sDirectory, "maximum-download.bin");
+            Utilities.DecompressToFile(ItemCryptography.Decrypt(LoadItem(nItemId)), sDownload);
+            Check(File.ReadAllBytes(sDownload).SequenceEqual(oFile),
+                "A 64 MiB incompressible attachment survives a Vault round trip");
         }
         finally
         {

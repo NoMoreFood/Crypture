@@ -62,7 +62,6 @@ namespace Crypture
         internal static void ValidateForVault(X509Certificate2 oCert)
         {
             // Every certificate added to a Vault passes the same algorithm, usage, and trust checks.
-            CertificateKeyProtection.ValidateForEncryption(oCert);
             if (!CertificateUsageFilter.Read().Matches(oCert))
                 throw new InvalidOperationException("This certificate is excluded by the certificate usage filters " +
                     "in Crypture.exe.config.");

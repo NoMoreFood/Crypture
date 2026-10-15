@@ -7,6 +7,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -139,6 +140,7 @@ internal static partial class RegressionTests
 
             // A public recovery certificate is enforced even when the caller supplies no certificate recipients.
             SetRecoveryConfig(null, sCertificate);
+            TestConcurrentRecoveryEnrollment(sDirectory, oRecoveryCert);
             DatabaseOperations.SaveItem(oWindowsItem, oPlain, null, PrincipalProtection.LocalMachineDescriptor);
             oWindowsItem = LoadItem(oWindowsItem.ItemId);
             Check(oWindowsItem.Instances.Count == 1 && ItemCryptography.Decrypt(oWindowsItem,
@@ -317,6 +319,42 @@ internal static partial class RegressionTests
             CryptureEntities.ConnectionString = sPreviousConnection;
             Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = bSelfSigned;
             Crypture.Properties.Settings.Default.PerformCertificateRevocationCheck = bRevocation;
+        }
+    }
+
+    private static void TestConcurrentRecoveryEnrollment(string sDirectory, X509Certificate2 oRecoveryCert)
+    {
+        IVaultStorage oPrevious = CryptureEntities.Storage;
+        SqliteVaultStorage oStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "recovery-enrollment.cryptdb"));
+        byte[] oPlain = Encoding.UTF8.GetBytes("Concurrent recovery enrollment");
+        try
+        {
+            // Independent saves can prepare the same missing recovery certificate before either transaction commits.
+            oStorage.Create();
+            CryptureEntities.Storage = oStorage;
+            using ManualResetEventSlim oStart = new ManualResetEventSlim();
+            Task[] oSaves = Enumerable.Range(0, 4).Select(n => Task.Run(() =>
+            {
+                oStart.Wait();
+                DatabaseOperations.SaveItem(new Item { Label = "Recovery " + n, ItemType = "text" },
+                    oPlain, null, PrincipalProtection.LocalUserDescriptor);
+            })).ToArray();
+            oStart.Set();
+            Task.WaitAll(oSaves);
+            using CryptureEntities oContent = new CryptureEntities();
+            Check(oContent.Users.Count() == 1 && oContent.Items.Count() == oSaves.Length,
+                "Concurrent saves enroll a missing recovery certificate once");
+            foreach (long nId in oContent.Items.Select(i => i.ItemId).ToArray())
+            {
+                Item oSaved = LoadItem(nId);
+                Check(ItemCryptography.Decrypt(oSaved, oSaved.Instances.Single(), oRecoveryCert)
+                    .SequenceEqual(oPlain) && ItemCryptography.Decrypt(oSaved).SequenceEqual(oPlain),
+                    "Concurrent recovery enrollment preserves certificate signatures and Windows access");
+            }
+        }
+        finally
+        {
+            CryptureEntities.Storage = oPrevious;
         }
     }
 
