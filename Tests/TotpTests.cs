@@ -189,6 +189,42 @@ internal static partial class RegressionTests
             oEditor.SetEditingControls(true);
             TotpPanel oPanel = (TotpPanel)oEditor.FindName("oTotpPanel");
             oPanel.LoadUri(Encoding.UTF8.GetString(oPlain));
+
+            // Saving must wait for the pending setup instead of storing the previously displayed authenticator.
+            var oSave = (System.Windows.Controls.Ribbon.RibbonButton)oEditor.FindName("oSaveItemButton");
+            foreach (bool bFail in new[] { true, false })
+            {
+                string sBefore = oPanel.ReadUri();
+                using ManualResetEventSlim oStarted = new();
+                using ManualResetEventSlim oRelease = new();
+                Task oImport = oPanel.Dispatcher.InvokeAsync(() => oPanel.ImportQrCodeAsync(() =>
+                {
+                    oStarted.Set();
+                    if (!oRelease.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+                    if (bFail) throw new InvalidDataException("Unreadable QR image.");
+                    return TotpSecret.Parse(sUri.Replace("totp-seed", "updated-seed"));
+                })).Task.Unwrap();
+                try
+                {
+                    PumpUntil(() => oStarted.IsSet);
+                    Check(!oSave.IsEnabled && !oEditor.bBusy,
+                        "A pending QR import disables saving while keeping the editor responsive");
+                    oEditor.oSaveItemButton_Click(null, null);
+                    Check(!oEditor.bBusy && !oEditor.bCompleted,
+                        "The save action cannot commit the previous setup during QR import");
+                }
+                finally
+                {
+                    oRelease.Set();
+                    PumpUntil(() => oImport.IsCompleted);
+                }
+                if (bFail) Reject(() => oImport.GetAwaiter().GetResult(), "The QR reader reports its failure");
+                else oImport.GetAwaiter().GetResult();
+                Check(oSave.IsEnabled && (bFail ? oPanel.ReadUri() == sBefore :
+                    oPanel.ReadUri().Contains("updated-seed")),
+                    "QR completion restores saving with the completed setup or the unchanged setup on failure");
+            }
+
             TotpSecret oCached = oPanel.oSecret;
             Check(oCached.GetBase32() == RfcTotpSecret, "Unlock loads the active TOTP key before cleanup");
             oEditor.bHasChanges = false;

@@ -117,6 +117,7 @@ internal static partial class RegressionTests
                         TestRecoveryNotice(sDirectory);
                         TestCertificateCreator();
                         TestTotpLayout();
+                        TestTotpVault(sDirectory);
                         TestVaultOperations(sDirectory);
                     }
                     else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1") TestPopups();

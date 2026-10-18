@@ -25,6 +25,8 @@ namespace Crypture
         private int nQrImport;
         internal Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
         internal event EventHandler SettingsChanged;
+        internal bool IsImporting { get; private set; }
+        internal event EventHandler ImportStateChanged;
 
         public TotpPanel()
         {
@@ -46,8 +48,7 @@ namespace Crypture
         internal void SetActive(bool bEnabled)
         {
             nQrImport++;
-            oSetupFields.IsEnabled = true;
-            oQrImportStatus.Text = "";
+            SetImporting(false);
             bActive = bEnabled;
             RefreshSecret();
             UpdateTimer();
@@ -280,10 +281,9 @@ namespace Crypture
 
         internal async Task ImportQrCodeAsync(Func<TotpSecret> oReadCode)
         {
-            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            if (!bActive || !IsEnabled || IsImporting) return;
             int nImport = ++nQrImport;
-            oSetupFields.IsEnabled = false;
-            oQrImportStatus.Text = "Reading QR code...";
+            SetImporting(true);
             try
             {
                 // Decode off the dispatcher; locking or changing item type invalidates the pending result.
@@ -293,12 +293,16 @@ namespace Crypture
             catch (Exception) when (nImport != nQrImport || !bActive || !IsEnabled) { }
             finally
             {
-                if (nImport == nQrImport)
-                {
-                    oSetupFields.IsEnabled = true;
-                    oQrImportStatus.Text = "";
-                }
+                if (nImport == nQrImport) SetImporting(false);
             }
+        }
+
+        private void SetImporting(bool bImporting)
+        {
+            IsImporting = bImporting;
+            oSetupFields.IsEnabled = !bImporting;
+            oQrImportStatus.Text = bImporting ? "Reading QR code..." : "";
+            ImportStateChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private async void oImportQrImage_Click(object sender, RoutedEventArgs e)
@@ -340,8 +344,7 @@ namespace Crypture
         internal void Clear()
         {
             nQrImport++;
-            oSetupFields.IsEnabled = true;
-            oQrImportStatus.Text = "";
+            SetImporting(false);
             bActive = false;
             oTimer.Stop();
             oSecret?.Dispose();

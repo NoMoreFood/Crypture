@@ -80,15 +80,16 @@ namespace Crypture
             // File Vaults record the owner only when the current user holds the key and confirms it.
             bool bAmOwner = bPrivateKey && Popup.Show(this, "Are you the owner of the selected certificate?",
                 "Ownership Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
-            using (CryptureEntities oContent = new CryptureEntities(oStorage))
+            await RunCertificateWorkAsync("Adding certificate...", oCancellation =>
             {
+                using CryptureEntities oContent = new CryptureEntities(oStorage);
                 oContent.Users.Add(new User
                 {
                     Certificate = oData,
                     Sid = bAmOwner || sIdentifier != CertificateOperations.CurrentUserSid ? sIdentifier : null
                 });
                 oContent.SaveChanges();
-            }
+            });
             return true;
         }
 
@@ -529,6 +530,11 @@ namespace Crypture
             using (CryptureEntities oContent = new CryptureEntities(oStorage))
             {
                 List<User> oUsers = oContent.Users.ToList();
+                if (oCertificates.All(c => oUsers.Any(u => u.Certificate.SequenceEqual(c)))) return;
+
+                // Acquire the writer lock only for missing recipients, then check again for concurrent enrollment.
+                using var oTransaction = oContent.Database.BeginTransaction();
+                oUsers = oContent.Users.ToList();
                 // cycle through mandatory certificates to add
                 foreach (byte[] bCertData in oCertificates)
                 {
@@ -542,6 +548,7 @@ namespace Crypture
                     oUsers.Add(oUser);
                 }
                 oContent.SaveChanges();
+                oTransaction.Commit();
             }
         }
 
@@ -811,17 +818,21 @@ namespace Crypture
             SaveRecentVaults();
         }
 
-        private void oClaimCertButton_Click(object sender, RoutedEventArgs e)
+        private async void oClaimCertButton_Click(object sender, RoutedEventArgs e)
         {
             // sanity check
             User oUser = oCertDataGrid.SelectedItem as User;
             if (oUser == null) return;
-            Utilities.TryOperation(this, () =>
+            IVaultStorage oStorage = CryptureEntities.Storage;
+            await Utilities.TryOperationAsync(this, async () =>
             {
-                if (!CertificateOperations.GetPrivateCertificateData()
-                    .Contains(Convert.ToBase64String(oUser.Certificate)))
-                    throw new InvalidOperationException("Import the matching private key " +
-                        "into your personal store before claiming it.");
+                await RunCertificateWorkAsync("Checking private key...", oCancellation =>
+                {
+                    if (!CertificateOperations.GetPrivateCertificateData()
+                        .Contains(Convert.ToBase64String(oUser.Certificate)))
+                        throw new InvalidOperationException("Import the matching private key " +
+                            "into your personal store before claiming it.");
+                });
 
                 // ask for concurrence concur
                 if (Popup.Show(this, "Associate the selected certificate with your Windows account?",
@@ -829,14 +840,15 @@ namespace Crypture
                     MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
                 // update the ownership on the selected certificate
-                using (CryptureEntities oContent = new CryptureEntities())
+                await RunCertificateWorkAsync("Updating certificate...", oCancellation =>
                 {
+                    using CryptureEntities oContent = new CryptureEntities(oStorage);
                     User oStored = oContent.Users.Find(oUser.UserId);
                     if (oStored == null)
                         throw new InvalidOperationException("This certificate has been removed. Refresh the list.");
                     oStored.Sid = CertificateOperations.CurrentUserSid;
                     oContent.SaveChanges();
-                }
+                });
                 oRefreshItemButton_Click();
             });
         }

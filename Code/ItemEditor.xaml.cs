@@ -151,6 +151,7 @@ namespace Crypture
             {
                 if (!bLoading && bEditing) bHasChanges = true;
             };
+            oTotpPanel.ImportStateChanged += (s, e) => UpdateProtectionControls();
 
             // Sort recipient displays by the certificate name, including the templated list.
             oItemSharedWith.Items.IsLiveSorting = true;
@@ -679,6 +680,7 @@ namespace Crypture
                 bCertificates && bCertificatesEnabled || bFido && bFidoEnabled;
             oSaveItemButton.IsEnabled = bEditing && bProtectionEnabled &&
                 (!bCertificates || !bLoadingCertificates) &&
+                (ThisItem.ItemType != "totp" || !oTotpPanel.IsImporting) &&
                 (!ThisItem.IsFile || BinaryItemData != null);
             oProtectionDisabledNotice.Visibility = bProtectionEnabled ? Visibility.Collapsed : Visibility.Visible;
             oProtectionDisabledNotice.Text = bFido && !FidoNative.IsAvailable

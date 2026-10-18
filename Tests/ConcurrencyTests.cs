@@ -47,6 +47,44 @@ internal static partial class RegressionTests
             using (CryptureEntities oContext = new())
                 nIds = oContext.Items.OrderBy(i => i.ItemId).Select(i => i.ItemId).ToArray();
             File.WriteAllLines(Path.Combine(sRoot, "items.txt"), nIds.Select(i => i.ToString()));
+
+            // Opening a Vault must tolerate another process enrolling the same required certificate.
+            string sAutomaticVault = Path.Combine(sRoot, "automatic.cryptdb");
+            new SqliteVaultStorage(sAutomaticVault).Create();
+            using (SqliteConnection oConnection = new(new SqliteConnectionStringBuilder
+                { DataSource = sAutomaticVault, Pooling = false }.ConnectionString))
+            {
+                oConnection.Open();
+                using SqliteTransaction oTransaction = oConnection.BeginTransaction();
+                string[] sOpeners = Enumerable.Range(0, 4).Select(i => "automatic-open-" + i).ToArray();
+                var oOpened = RunConcurrentClients(sRoot, "automatic", sOpeners, oProcesses =>
+                {
+                    WaitForConcurrentCondition(() => oProcesses.Any(p => p.HasExited) || sOpeners.All(s =>
+                        File.Exists(Path.Combine(sRoot, "automatic", s + ".attempt"))));
+                    if (oProcesses.Any(p => p.HasExited))
+                    {
+                        oTransaction.Commit();
+                        return;
+                    }
+                    Thread.Sleep(750);
+                    Check(oProcesses.All(p => !p.HasExited),
+                        "Required certificate enrollment waits for the active Vault writer");
+                    using SqliteCommand oInsert = new("INSERT INTO User (Certificate) VALUES ($certificate)",
+                        oConnection, oTransaction);
+                    oInsert.Parameters.AddWithValue("$certificate", oCert.RawData);
+                    oInsert.ExecuteNonQuery();
+                    oTransaction.Commit();
+                });
+                Check(oOpened["validations"] == sOpeners.Length,
+                    "Concurrent Vault opens reuse a required certificate enrolled by another process");
+                using (SqliteTransaction oWriter = oConnection.BeginTransaction())
+                {
+                    oOpened = RunConcurrentClients(sRoot, "automatic-existing", sOpeners);
+                    Check(oOpened["validations"] == sOpeners.Length,
+                        "Already-enrolled required certificates do not make Vault opens wait for a writer");
+                }
+            }
+
             string[] sWriters = Enumerable.Range(0, ConcurrentWriterCount).Select(i => "writer-" + i).ToArray();
             string[] sReaders = Enumerable.Range(0, 4).Select(i => "reader-" + i).ToArray();
             Dictionary<string, long> oCounts = RunConcurrentClients(sRoot, "workload",
@@ -335,7 +373,19 @@ internal static partial class RegressionTests
                 !File.Exists(Path.Combine(sSignals, "writer-" + i + ".done")));
             Stopwatch oWatch = Stopwatch.StartNew();
 
-            if (sRole.StartsWith("writer-"))
+            if (sRole.StartsWith("automatic-open-"))
+            {
+                Crypture.Properties.Settings.Default["AutomaticallyAddedCertificatesList"] =
+                    new System.Collections.Specialized.StringCollection { Convert.ToBase64String(oCert.RawData) };
+                File.WriteAllText(Path.Combine(sSignals, sRole + ".attempt"), "");
+                var oView = ItemBrowser.PrepareVaultAsync(new SqliteVaultStorage(
+                    Path.Combine(sRoot, "automatic.cryptdb")), false, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                if (oView.Users.Count != 1 || !oView.Users[0].Certificate.SequenceEqual(oCert.RawData))
+                    throw new Exception("The required certificate was duplicated or omitted during Vault loading.");
+                oCounts["validations"]++;
+            }
+            else if (sRole.StartsWith("writer-"))
             {
                 int nWriter = Int32.Parse(sRole[7..]);
                 new SqliteVaultStorage(sDatabase).Validate();

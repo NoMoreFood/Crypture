@@ -202,6 +202,7 @@ internal static partial class RegressionTests
                 finally { oDismiss.Stop(); }
             }
             TestBlockedSqlCancellation(oBrowser, oCert);
+            TestCertificateWriteResponsiveness(oBrowser, oStorageA);
 
             // Slow file creation must leave progress visible and the dispatcher responsive.
             using (ManualResetEventSlim oCreateGate = new ManualResetEventSlim())
@@ -276,6 +277,65 @@ internal static partial class RegressionTests
             oSettings.LastVault = sLastVault;
             oSettings.RecentVaults = oRecent;
             oSettings.Save();
+        }
+    }
+
+    private static void TestCertificateWriteResponsiveness(ItemBrowser oBrowser, IVaultStorage oStorage)
+    {
+        var oSettings = Crypture.Properties.Settings.Default;
+        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
+        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
+        using RSA oKey = RSA.Create(2048);
+        using X509Certificate2 oCert = Certificate(oKey, "Certificate writer", DateTimeOffset.Now.AddDays(-1),
+            DateTimeOffset.Now.AddDays(1));
+        try
+        {
+            oSettings.AllowSelfSignedCertificates = true;
+            oSettings.PerformCertificateRevocationCheck = false;
+            using SqliteConnection oBlocker = new(oStorage.ConnectionString);
+            oBlocker.Open();
+            using SqliteTransaction oTransaction = oBlocker.BeginTransaction();
+            using ManualResetEventSlim oRelease = new();
+
+            // A fallback release also lets a blocked dispatcher fail the test without hanging the test process.
+            Task oUnlock = Task.Run(() =>
+            {
+                oRelease.Wait(TimeSpan.FromSeconds(10));
+                oTransaction.Commit();
+            });
+            var oAdd = (Func<X509Certificate2, string, bool, Task<bool>>)Delegate.CreateDelegate(
+                typeof(Func<X509Certificate2, string, bool, Task<bool>>), oBrowser, "AddCertificateAsync");
+            Task<bool> oAdding = oBrowser.Dispatcher.InvokeAsync(() =>
+                oAdd(oCert, CertificateOperations.CurrentUserSid, false)).Task.Unwrap();
+            try
+            {
+                TextBlock oStatus = (TextBlock)oBrowser.FindName("oDatabaseStatus");
+                PumpUntil(() => oAdding.IsCompleted || oStatus.Text == "Adding certificate...");
+                Stopwatch oWatch = Stopwatch.StartNew();
+                PumpUntil(() => oWatch.ElapsedMilliseconds >= 250);
+                Check(!oAdding.IsCompleted && !oUnlock.IsCompleted &&
+                    ((ProgressBar)oBrowser.FindName("oVaultProgress")).IsVisible &&
+                    !((DataGrid)oBrowser.FindName("oItemDataGrid")).IsEnabled,
+                    "Certificate enrollment keeps the dispatcher responsive while waiting for a SQLite writer");
+            }
+            finally
+            {
+                oRelease.Set();
+                oUnlock.GetAwaiter().GetResult();
+                PumpUntil(() => oAdding.IsCompleted);
+            }
+            Check(oAdding.GetAwaiter().GetResult(), "Certificate enrollment completes after the writer releases");
+            using CryptureEntities oContent = new(oStorage);
+            User oEnrolled = oContent.Users.Single(u => u.Certificate == oCert.RawData);
+            Check(oEnrolled.Sid == null && ((DataGrid)oBrowser.FindName("oItemDataGrid")).IsEnabled,
+                "Background enrollment preserves certificate ownership rules and restores Vault controls");
+            oContent.Users.Remove(oEnrolled);
+            oContent.SaveChanges();
+        }
+        finally
+        {
+            oSettings.AllowSelfSignedCertificates = bSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bRevocation;
         }
     }
 
