@@ -523,10 +523,9 @@ namespace Crypture
 
         private static void AddAutomaticCertificates(IVaultStorage oStorage)
         {
-            // SQL Server certificates require explicit owner enrollment and cannot be inserted from local settings.
-            if (oStorage.IsSqlServer) return;
+            // Reject a malformed list for every Vault; SQL Server certificates require explicit owner enrollment.
             List<byte[]> oCertificates = CertificateOperations.GetAutomaticCertificates();
-            if (oCertificates.Count == 0) return;
+            if (oStorage.IsSqlServer || oCertificates.Count == 0) return;
             using (CryptureEntities oContent = new CryptureEntities(oStorage))
             {
                 List<User> oUsers = oContent.Users.ToList();

@@ -168,9 +168,9 @@ namespace Crypture
                 ValidateCustomDescriptor(sResolved);
                 return sResolved;
             }
-            catch (Exception oError) when (oError is ArgumentException || oError is IdentityNotMappedException ||
-                oError is InvalidOperationException)
+            catch (Exception oError) when (oError is not CryptographicException)
             {
+                // Name, SID, and unreachable-directory failures all leave the configured principal unresolved.
                 throw new CryptographicException("The emergency recovery Windows principal could not be resolved.",
                     oError);
             }

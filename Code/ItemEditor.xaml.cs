@@ -806,7 +806,7 @@ namespace Crypture
                     }
                     return String.Join(Environment.NewLine, oLines);
                 });
-                if (oDialog.IsVisible) ((TextBox)oDialog.FindName("oMessage")).Text = sMessage;
+                if (oDialog.IsVisible) oDialog.oMessage.Text = sMessage;
             };
             oDialog.ShowDialog();
         }
