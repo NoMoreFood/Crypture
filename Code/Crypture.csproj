@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <StartupObject>Crypture.PortableStartup</StartupObject>
@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>Crypture</RootNamespace>
     <AssemblyName>Crypture</AssemblyName>
-    <Version>2.3.0</Version>
+    <Version>2.3.1</Version>
     <Company>Bryan Berns</Company>
     <Copyright>Copyright © Bryan Berns</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
