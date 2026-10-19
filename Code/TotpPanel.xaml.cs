@@ -299,6 +299,8 @@ namespace Crypture
 
         private void SetImporting(bool bImporting)
         {
+            // Notify the editor only on transitions; locking and reactivation reset an idle panel repeatedly.
+            if (IsImporting == bImporting) return;
             IsImporting = bImporting;
             oSetupFields.IsEnabled = !bImporting;
             oQrImportStatus.Text = bImporting ? "Reading QR code..." : "";
@@ -307,7 +309,7 @@ namespace Crypture
 
         private async void oImportQrImage_Click(object sender, RoutedEventArgs e)
         {
-            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            if (!bActive || !IsEnabled || IsImporting) return;
             OpenFileDialog oDialog = new OpenFileDialog
             {
                 Title = "Import Authenticator QR Code",
@@ -321,7 +323,7 @@ namespace Crypture
 
         private async void oPasteQrImage_Click(object sender, RoutedEventArgs e)
         {
-            if (!bActive || !IsEnabled || !oSetupFields.IsEnabled) return;
+            if (!bActive || !IsEnabled || IsImporting) return;
             await Utilities.TryOperationAsync(Window.GetWindow(this), () =>
             {
                 // Clipboard access stays on the UI thread; freeze the snapshot before background decoding.
