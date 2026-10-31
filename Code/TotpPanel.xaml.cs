@@ -10,8 +10,6 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using ZXing;
-using ZXing.Common;
 
 namespace Crypture
 {
@@ -253,19 +251,10 @@ namespace Crypture
             try
             {
                 oBitmap.CopyPixels(oPixels, nStride, 0);
-                RGBLuminanceSource oSource = new RGBLuminanceSource(oPixels, oBitmap.PixelWidth,
-                    oBitmap.PixelHeight, RGBLuminanceSource.BitmapFormat.BGRA32);
-                BarcodeReaderGeneric oReader = new BarcodeReaderGeneric
-                {
-                    AutoRotate = true,
-                    Options = new DecodingOptions { PossibleFormats = [BarcodeFormat.QR_CODE], TryHarder = true }
-                };
-
                 // Scan both polarities and reject ambiguous setups instead of choosing an account silently.
-                string[] oLinks = new[] { oSource, oSource.invert() }
-                    .SelectMany(s => oReader.DecodeMultiple(s) ?? [])
-                    .Select(r => r.Text?.Trim())
-                    .Where(s => s != null && s.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase))
+                string[] oLinks = TotpQrDecoder.Decode(oPixels, oBitmap.PixelWidth, oBitmap.PixelHeight)
+                    .Select(s => s.Trim())
+                    .Where(s => s.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase))
                     .Distinct(StringComparer.Ordinal).ToArray();
                 if (oLinks.Length != 1)
                     throw new InvalidOperationException(oLinks.Length == 0

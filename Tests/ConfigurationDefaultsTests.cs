@@ -15,6 +15,8 @@ using Crypture;
 
 internal static partial class RegressionTests
 {
+    private const string RfcTotpSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
     private static int RunConfiguredStartup()
     {
         // Exercise the actual Application startup in a process with no cached configuration or WPF state.

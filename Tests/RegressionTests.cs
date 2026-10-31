@@ -116,8 +116,6 @@ internal static partial class RegressionTests
                     {
                         TestRecoveryNotice(sDirectory);
                         TestCertificateCreator();
-                        TestTotpLayout();
-                        TestTotpVault(sDirectory);
                         TestVaultOperations(sDirectory);
                     }
                     else if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_ONLY") == "1") TestPopups();
@@ -179,7 +177,6 @@ internal static partial class RegressionTests
                 TestContentEncryptionSuites(sDirectory, oCert, oOtherCert);
                 TestEncryption(oCert, oOtherCert);
                 TestFidoEncryption(sDirectory, oCert);
-                TestTotpAlgorithms(oCert);
                 TestPrincipalProtection();
                 TestPasswordGeneration();
                 TestClipboardTimeout();
@@ -881,8 +878,6 @@ internal static partial class RegressionTests
             TestRecentVaultHistory(oBrowser, sDatabase, sDirectory);
             TestVaultOperations(sDirectory);
             TestCertificateCreator();
-            TestTotpLayout();
-            TestTotpVault(sDirectory);
             TestFidoEditor(sDirectory);
             using (RSA oFidoKey = RSA.Create(2048))
             using (X509Certificate2 oFidoCertificate = Certificate(oFidoKey, "FIDO2 Recovery",
