@@ -23,8 +23,8 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
@@ -37,17 +37,11 @@
     <EmbeddedResource Include="Data\SqlServerEnrollment.sql" LogicalName="Crypture.SqlServerEnrollment" />
     <EmbeddedResource Include="Data\SqlServerEscrow.sql" LogicalName="Crypture.SqlServerEscrow" />
     <EmbeddedResource Include="Data\License - DotNet Libraries.txt" LogicalName="Crypture.RuntimeNotices" />
-    <EmbeddedResource Include="$(RuntimeNoticesFile)" LogicalName="Crypture.RuntimeThirdPartyNotices"
-        Condition="'$(RuntimeNoticesFile)' != ''" />
+    <EmbeddedResource Include="$(RuntimeNoticesFile)" LogicalName="Crypture.RuntimeThirdPartyNotices" Condition="'$(RuntimeNoticesFile)' != ''" />
   </ItemGroup>
-  <Target Name="FilterPortablePayload" BeforeTargets="_ComputeFilesToBundle"
-      Condition="'$(PublishSingleFile)' == 'true'">
+  <Target Name="FilterPortablePayload" BeforeTargets="_ComputeFilesToBundle" Condition="'$(PublishSingleFile)' == 'true'">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-          Condition="'%(ResolvedFileToPublish.Extension)' == '.config' Or
-              '%(ResolvedFileToPublish.Extension)' == '.pdb' Or '%(ResolvedFileToPublish.Extension)' == '.xml' Or
-              '%(ResolvedFileToPublish.Filename)' == 'System.Design' Or
-              '%(ResolvedFileToPublish.Filename)' == 'System.Drawing.Design'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.config' Or&#xD;&#xA;              '%(ResolvedFileToPublish.Extension)' == '.pdb' Or '%(ResolvedFileToPublish.Extension)' == '.xml' Or&#xD;&#xA;              '%(ResolvedFileToPublish.Filename)' == 'System.Design' Or&#xD;&#xA;              '%(ResolvedFileToPublish.Filename)' == 'System.Drawing.Design'" />
     </ItemGroup>
   </Target>
 </Project>
