@@ -6,7 +6,7 @@ param(
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
     [string] $ProductName = 'Crypture',
     [string] $ProductUrl = 'https://github.com/NoMoreFood/Crypture',
-    [string] $WixVersion = '7.0.0',
+    [string] $WixVersion = '7.0.1',
     [string] $SpdxLicenseListVersion = 'v3.29.0',
     [ValidateSet('win-x64', 'win-x86', 'win-arm64')][string[]] $RuntimeIdentifier = @('win-x64', 'win-arm64'),
     [switch] $SkipSigning
