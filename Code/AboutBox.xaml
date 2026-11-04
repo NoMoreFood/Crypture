@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Crypture.Data"
         Title="About Crypture" Width="500" Height="400" MinWidth="420" MinHeight="320"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Icon="pack://application:,,,/Crypture;component/Safe.ico"
@@ -30,9 +29,8 @@
         </Grid>
         <TabControl Grid.Row="1" Margin="5,0,5,5" Padding="2">
             <TabItem Header="Crypture License">
-                <TextBox IsReadOnly="True" ScrollViewer.CanContentScroll="True"
-                    ScrollViewer.VerticalScrollBarVisibility="Visible" TextWrapping="Wrap"
-                    Text="{x:Static local:Licenses.Crypture}" />
+                <TextBox x:Name="oLicense" IsReadOnly="True" ScrollViewer.CanContentScroll="True"
+                    ScrollViewer.VerticalScrollBarVisibility="Visible" TextWrapping="Wrap" />
             </TabItem>
             <TabItem Header="Dependency Licenses">
                 <TextBox x:Name="oRuntimeNotices" IsReadOnly="True" TextWrapping="Wrap"

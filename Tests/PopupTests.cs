@@ -72,6 +72,18 @@ internal static partial class RegressionTests
             oBackup.Close();
             oBackup = null;
 
+            // The About dialog includes the application license and dependency notices without sidecar files.
+            AboutBox oAbout = new AboutBox();
+            try
+            {
+                Check(((TextBox)oAbout.FindName("oLicense")).Text.Contains("Copyright (c) Bryan Berns") &&
+                    ((TextBox)oAbout.FindName("oLicense")).Text.Contains("Permission is hereby granted"),
+                    "About displays the embedded Crypture license");
+                Check(((TextBox)oAbout.FindName("oRuntimeNotices")).Text.Contains("Microsoft .NET Libraries"),
+                    "About displays the embedded dependency notices");
+            }
+            finally { oAbout.Close(); }
+
             // Exercise modal result handling through the shared API and real WPF button/default-key routing.
             oOwner.Show();
             PumpUntil(() => oOwner.IsLoaded);

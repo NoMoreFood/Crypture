@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>Crypture</RootNamespace>
     <AssemblyName>Crypture</AssemblyName>
-    <Version>2.3.2</Version>
+    <Version>2.3.3</Version>
     <Company>Bryan Berns</Company>
     <Copyright>Copyright © Bryan Berns</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
@@ -36,6 +36,7 @@
     <EmbeddedResource Include="Data\SqlServerSecurity.sql" LogicalName="Crypture.SqlServerSecurity" />
     <EmbeddedResource Include="Data\SqlServerEnrollment.sql" LogicalName="Crypture.SqlServerEnrollment" />
     <EmbeddedResource Include="Data\SqlServerEscrow.sql" LogicalName="Crypture.SqlServerEscrow" />
+    <EmbeddedResource Include="Data\License - Crypture.txt" LogicalName="Crypture.License" />
     <EmbeddedResource Include="Data\License - DotNet Libraries.txt" LogicalName="Crypture.RuntimeNotices" />
     <EmbeddedResource Include="$(RuntimeNoticesFile)" LogicalName="Crypture.RuntimeThirdPartyNotices" Condition="'$(RuntimeNoticesFile)' != ''" />
   </ItemGroup>

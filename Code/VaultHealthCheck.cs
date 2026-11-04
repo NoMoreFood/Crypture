@@ -319,7 +319,7 @@ namespace Crypture
         private static HealthCheckFinding Finding(string sKind, string sRecipient, string sIdentifier,
             IEnumerable<Item> oItems)
         {
-            List<Item> oAffected = oItems.GroupBy(i => i.ItemId).Select(g => g.First()).OrderBy(i => i.Label).ToList();
+            List<Item> oAffected = oItems.DistinctBy(i => i.ItemId).OrderBy(i => i.Label).ToList();
             return new HealthCheckFinding
             {
                 Kind = sKind, Recipient = sRecipient, Identifier = sIdentifier, ItemCount = oAffected.Count,

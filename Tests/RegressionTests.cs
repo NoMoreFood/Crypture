@@ -33,7 +33,7 @@ internal static partial class RegressionTests
     {
         using CryptureEntities oContent = new CryptureEntities();
         return oContent.Items.Include(i => i.User).Include(i => i.Cipher)
-            .Include(i => i.Instances).ThenInclude(j => j.User).Single(i => i.ItemId == nItemId);
+            .Include(i => i.Instances).ThenInclude(j => j.User).AsSplitQuery().Single(i => i.ItemId == nItemId);
     }
 
     private static void CreateVault(IVaultStorage oStorage) =>
@@ -75,6 +75,10 @@ internal static partial class RegressionTests
     [STAThread]
     private static int Main()
     {
+        // Off-screen image captures must not depend on hardware rendering.
+        if (!String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CRYPTURE_TEST_RENDER_DIR")) ||
+            !String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CRYPTURE_TEST_POPUP_IMAGES")))
+            RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_FIDO_HARDWARE") == "1")
             return RunFidoHardware();
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_AD_ROLE") is string sIdentityRole)
@@ -485,6 +489,22 @@ internal static partial class RegressionTests
 
     private static void TestCompression(string sDirectory)
     {
+        // A failed export must leave the previous request intact even after writing part of its replacement.
+        string sRequest = Path.Combine(sDirectory, "existing.csr");
+        File.WriteAllText(sRequest, "Existing certificate request");
+        Reject(() => Utilities.WriteFileAtomically(sRequest, oFile =>
+        {
+            oFile.Write(Encoding.ASCII.GetBytes("Partial replacement"));
+            throw new IOException("The destination ran out of space.");
+        }), "Report a failed certificate request export");
+        Check(File.ReadAllText(sRequest) == "Existing certificate request" &&
+            !Directory.EnumerateFiles(sDirectory, ".crypture-*.tmp").Any(),
+            "A failed request export preserves the existing file and removes partial output");
+        Utilities.WriteFileAtomically(sRequest, oFile =>
+            oFile.Write(Encoding.ASCII.GetBytes("Complete certificate request")));
+        Check(File.ReadAllText(sRequest) == "Complete certificate request",
+            "A completed request export replaces the existing file");
+
         byte[] oInput = Encoding.UTF8.GetBytes("File content with unicode \u2603");
         Check(Utilities.Decompress(Utilities.Compress(oInput)).SequenceEqual(oInput), "File compression round trip");
         Check(Utilities.Decompress(Utilities.Compress(new byte[0])).Length == 0, "Empty file compression round trip");

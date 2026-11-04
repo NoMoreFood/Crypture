@@ -15,6 +15,7 @@ namespace Crypture
         internal SqlServerVaultStorage Storage { get; private set; }
         internal bool CreateDatabase { get; private set; }
         private SqlServerEscrowChoice oEscrowChoice;
+        private bool bClosed;
 
         public SqlServerVaultDialog()
         {
@@ -25,6 +26,7 @@ namespace Crypture
             oTrustCertificate.IsChecked = oDefaults.Flag("SqlServerTrustServerCertificate", false);
             oCreateDatabase.Checked += oCreateDatabase_Changed;
             oCreateDatabase.Unchecked += oCreateDatabase_Changed;
+            Closed += (s, e) => bClosed = true;
         }
 
         private void oCreateDatabase_Changed(object sender, RoutedEventArgs e)
@@ -109,11 +111,21 @@ namespace Crypture
             {
                 await Task.Run(oWork);
             }
+            catch (Exception) when (bClosed)
+            {
+                throw new OperationCanceledException();
+            }
             finally
             {
-                IsEnabled = true;
-                Cursor = null;
+                if (!bClosed)
+                {
+                    IsEnabled = true;
+                    Cursor = null;
+                }
             }
+
+            // Discard completed lookups before they can open another dialog for a closed owner.
+            if (bClosed) throw new OperationCanceledException();
         }
 
         private void oConnect_Click(object sender, RoutedEventArgs e)
