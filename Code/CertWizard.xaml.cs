@@ -741,7 +741,8 @@ namespace Crypture
                                     const int Base64RequestHeaderEncoding = 3;
                                     string sCertRequestString = oEnrollRequest.CreateRequest(
                                         Base64RequestHeaderEncoding);
-                                    System.IO.File.WriteAllText(sRequestPath, sCertRequestString, Encoding.ASCII);
+                                    Utilities.WriteFileAtomically(sRequestPath,
+                                        oFile => oFile.Write(Encoding.ASCII.GetBytes(sCertRequestString)));
                                 }
                                 bSaved = true;
                             }

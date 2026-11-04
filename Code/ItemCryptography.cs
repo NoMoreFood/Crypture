@@ -67,8 +67,7 @@ namespace Crypture
             if (bFido && bPrincipals)
                 throw new InvalidOperationException("Select one primary encryption method.");
             if (bPrincipals) PrincipalProtection.ParseDescriptor(sProtectionDescriptor, out _, false);
-            List<User> oUsers = (oRecipients ?? Enumerable.Empty<User>()).GroupBy(u => u.UserId)
-                .Select(g => g.First()).ToList();
+            List<User> oUsers = (oRecipients ?? Enumerable.Empty<User>()).DistinctBy(u => u.UserId).ToList();
             bool bRecovery = sRecoveryDescriptor != null || bPrincipals && oUsers.Count != 0;
             long nFormat = bFido ? FidoFormat : bRecovery ? RecoveryFormat :
                 bPrincipals ? PrincipalFormat : CertificateFormat;

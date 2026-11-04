@@ -9,13 +9,17 @@ namespace Crypture
         {
             InitializeComponent();
             oVersion.Text = "Version " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-            foreach (string sName in new[] { "Crypture.RuntimeNotices", "Crypture.RuntimeThirdPartyNotices" })
+            foreach (var (sName, oTextBox) in new[]
+            {
+                ("Crypture.License", oLicense), ("Crypture.RuntimeNotices", oRuntimeNotices),
+                ("Crypture.RuntimeThirdPartyNotices", oRuntimeNotices)
+            })
             {
                 using (Stream oStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(sName))
                 {
                     if (oStream == null) continue;
                     using (StreamReader oReader = new StreamReader(oStream))
-                        oRuntimeNotices.AppendText(oReader.ReadToEnd() + "\r\n");
+                        oTextBox.AppendText(oReader.ReadToEnd() + "\r\n");
                 }
             }
         }

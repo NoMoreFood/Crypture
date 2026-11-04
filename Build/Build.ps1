@@ -144,16 +144,7 @@ try
     $unpackedDestination = Join-Path $OutputDirectory $unpackedPackageName
     $runtimePrefix = 'win-'
     $runtimes = @($RuntimeIdentifier | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
-    $installerNames = @($runtimes | ForEach-Object {
-        "Crypture-$($_.Substring($runtimePrefix.Length))-$version-installer.msi"
-    })
-    foreach ($name in @($packageName, $unpackedPackageName) + $installerNames)
-    {
-        $output = Join-Path $OutputDirectory $name
-        if (Test-Path -LiteralPath $output) { throw "Package already exists: $output" }
-    }
-
-    # Use a fresh staging folder so existing artifacts and signed outputs remain intact.
+    # Build in a fresh staging folder before replacing published outputs.
     $stage = Join-Path $StageDirectory ([Guid]::NewGuid().ToString('N'))
     $portableDirectory = Join-Path $stage 'Package'
     $dotnet = (Get-Command dotnet.exe -CommandType Application -ErrorAction Stop).Source
@@ -340,7 +331,8 @@ try
             '-d', "LicenseRtf=$licenseRtf",
             '-d', "DialogBitmap=$PSScriptRoot\Artwork\InstallerDialog.png",
             '-d', "BannerBitmap=$PSScriptRoot\Artwork\InstallerBanner.png")
-        Invoke-Tool $wix @('msi', 'validate', $installer,
+        # Same-version upgrades intentionally include the installed version in the removal range.
+        Invoke-Tool $wix @('msi', 'validate', $installer, '-sice', 'ICE61',
             '-intermediateFolder', (Join-Path $installerDirectory 'Validation'))
         Sign-File $installer
         Write-Host "MSI ready: $installer"
@@ -355,14 +347,18 @@ try
     # Package only the portable executables in their architecture folders.
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory($portableDirectory, $destination,
+    $stagedArchive = Join-Path $stage $packageName
+    [IO.Compression.ZipFile]::CreateFromDirectory($portableDirectory, $stagedArchive,
         [IO.Compression.CompressionLevel]::Optimal, $false)
+    Move-Item -LiteralPath $stagedArchive -Destination $destination -Force
     Write-Host "Portable ZIP ready: $destination"
 
     # Package the unpacked application and its dependencies in architecture folders.
     $unpackedDirectory = Join-Path $stage 'Installed'
-    [IO.Compression.ZipFile]::CreateFromDirectory($unpackedDirectory, $unpackedDestination,
+    $stagedArchive = Join-Path $stage $unpackedPackageName
+    [IO.Compression.ZipFile]::CreateFromDirectory($unpackedDirectory, $stagedArchive,
         [IO.Compression.CompressionLevel]::Optimal, $false)
+    Move-Item -LiteralPath $stagedArchive -Destination $unpackedDestination -Force
     Write-Host "Unpacked ZIP ready: $unpackedDestination"
 }
 catch

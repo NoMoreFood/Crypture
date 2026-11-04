@@ -174,16 +174,19 @@ namespace Crypture
             }
         }
 
-        internal static void DecompressToFile(byte[] oInputArray, string sDestination)
+        internal static void DecompressToFile(byte[] oInputArray, string sDestination) =>
+            WriteFileAtomically(sDestination, oFile => Decompress(oInputArray, oFile));
+
+        internal static void WriteFileAtomically(string sDestination, Action<Stream> oWrite)
         {
-            // Publish only a complete, size-checked file and preserve an existing destination's permissions.
+            // Publish only a complete file and preserve an existing destination's permissions.
             string sPath = Path.GetFullPath(sDestination);
             string sTemporary = Path.Combine(Path.GetDirectoryName(sPath), ".crypture-" + Guid.NewGuid() + ".tmp");
             try
             {
                 using (FileStream oFile = new FileStream(sTemporary,
                     FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    Decompress(oInputArray, oFile);
+                    oWrite(oFile);
                 if (File.Exists(sPath)) File.Replace(sTemporary, sPath, null);
                 else File.Move(sTemporary, sPath);
             }

@@ -1,5 +1,6 @@
 @ECHO OFF
 SETLOCAL
+SET COPYCMD=/Y
 :: cert info to use for signing
 SET TSAURL=http://timestamp.digicert.com
 SET LIBNAME=Crypture
@@ -11,7 +12,7 @@ SET OUTDIR=%~dp0..\Binaries
 SET STAGEDIR=%~dp0PackageStage
 :: use the default module paths for Windows PowerShell
 SET PSMODULEPATH=
-POWERSHELL -NoProfile -File "%BASEDIR%\Build.ps1" -BinaryDirectory "%BINDIR%" ^
+POWERSHELL -NoProfile -NonInteractive -File "%BASEDIR%\Build.ps1" -BinaryDirectory "%BINDIR%" ^
  -OutputDirectory "%OUTDIR%" -StageDirectory "%STAGEDIR%" ^
  -TimestampUrl "%TSAURL%" -ProductName "%LIBNAME%" -ProductUrl "%LIBURL%" %*
 EXIT /B %ERRORLEVEL%

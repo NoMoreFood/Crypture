@@ -16,7 +16,7 @@ Vaults can be copied or shared, but recipients still need the required Windows i
 
 Choose **Home → SQL Server...**, enter the server and database, then choose **Connect**. Connections use your signed-in Windows account and require encryption. Leave **Trust the server certificate** unchecked unless you have verified the server by another means.
 
-To create a Vault, select **Create a new database**, set the emergency recovery identity to **Certificate** or **Windows user or group**, use **Choose...** to pick it from Active Directory, then choose **Create**. The database name must be unused, and your SQL Server account needs permission to create the database and provision access. Crypture grants the domain's Domain Users group its restricted Vault role. SQL Server limits access to encrypted item content using saved Windows recipients and certificate affiliations; decryption still requires the corresponding Windows identity or private key.
+To create a Vault, select **Create a new database**, set the emergency recovery identity to **Certificate** or **Windows user or group**, use **Choose...** to pick it from Active Directory, then choose **Create**. The database name must be unused, and your SQL Server account needs permission to create the database and provision access. **Grant Domain Users access** is selected by default; clear it to manage access yourself through SQL Server's `crypture_domain` database role. SQL Server limits access to encrypted item content using saved Windows recipients and certificate affiliations; decryption still requires the corresponding Windows identity or private key.
 
 Use domain Windows recipients or certificates to protect items. Local Windows scopes and FIDO2 protection are unavailable. The Vault owner enrolls certificates on the **Certificates** tab; other users do not see the **Add a Certificate From...** commands. **Store** and **File** enroll the owner's own certificate after proving use of its private key, and **Active Directory** enrolls another user's certificate that is published on their directory account. The **Affiliation** column shows each certificate as **Verified** or **Escrow**. The Vault owner can select an AD-published certificate and choose **Designate Escrow** to change emergency recovery. Recovery changes apply when items are saved; existing items retain their saved recovery until then.
 
@@ -82,7 +82,7 @@ Crypture follows the Windows app color setting by default. **View → Appearance
 
 Copying or cutting protected text or a generated password starts a clipboard timeout configured by `ClipboardTimeoutSeconds` (five minutes by default). Crypture marks these copies to exclude them from Windows clipboard history and cloud sync. It leaves newer clipboard contents alone, keeps the timer active if the editor or generator closes, and attempts to clear its unchanged copy when Crypture exits. Other clipboard managers and already pasted copies may retain the text.
 
-Windows session lock or disconnect conceals open secrets. Crypture also conceals them after `AutoConcealIdleMinutes` of inactivity in the app (ten minutes by default; set it to `0` to disable idle concealment). Saved items with no unsaved changes are locked and cleared. Unsaved edits and generated passwords stay in memory behind a disabled, opaque view until you choose **Reveal**; closing an editor still prompts before discarding unsaved edits.
+Windows session lock or disconnect conceals open secrets. Crypture also conceals them after `AutoConcealIdleMinutes` of inactivity in the app (ten minutes by default; set it to `0` to disable idle concealment). Saved items with no unsaved changes are locked and cleared once any active operation finishes. Unsaved edits and generated passwords stay in memory behind a disabled, opaque view until you choose **Reveal**; closing an editor still prompts before discarding unsaved edits.
 
 ## Vault Health Check
 
@@ -121,9 +121,11 @@ Shortcuts apply to the active view and enabled actions. FIDO2 key prompts are ha
 
 ## Encryption and Privacy
 
-New saves use **AES-256-GCM** by default. Set `ContentEncryptionSuite` to `Aes256CbcHmacSha256` to use **AES-256-CBC with HMAC-SHA256** for new saves instead. Both suites authenticate the item's metadata and encrypted content before revealing plaintext. Each saved item records its suite, so changing the default does not change existing items until they are saved again. Windows protection wraps content keys with DPAPI-NG and authenticates the descriptor and protected key blob. Certificate items use authenticated recipient envelopes: RSA-OAEP-SHA1 for provider compatibility, or ECDH/ML-KEM with SP800-108 HMAC-SHA256 key derivation and AES-256-GCM key wrapping. Cryptographic operations use Windows/.NET primitives.
+New saves use **AES-256-GCM** by default. Set `ContentEncryptionSuite` to `Aes256CbcHmacSha256` to use **AES-256-CBC with HMAC-SHA256** for new saves instead. Both suites authenticate the item label, type, encryption settings, recipient envelopes, and encrypted content before revealing plaintext. Each saved item records its suite, so changing the default does not change existing items until they are saved again. Windows protection wraps content keys with DPAPI-NG and authenticates the descriptor and protected key blob. Certificate items use authenticated recipient envelopes: RSA-OAEP-SHA1 for provider compatibility, or ECDH/ML-KEM with SP800-108 HMAC-SHA256 key derivation and AES-256-GCM key wrapping. Cryptographic operations use Windows/.NET primitives.
 
-Labels, timestamps, modifier identities, recipient certificates, and Windows protection descriptors remain visible. Certificate access depends on the private key, not its account label. Only authenticated item formats are supported; legacy unauthenticated items cannot be decrypted. Authentication does not prevent deleting or replaying an entire Vault snapshot, so retain filesystem permissions and backups.
+Labels, timestamps, modifier identities, recipient certificates, and Windows protection descriptors remain visible. Timestamps and modifier identities are informational and are not authenticated by the encrypted item. Certificate access depends on the private key, not its account label. Only authenticated item formats can be decrypted. Authentication does not prevent deleting or replaying an entire Vault snapshot, so retain filesystem permissions and backups.
+
+For file Vault recovery, set `RecoveryProtectionDescriptor` in `Crypture.exe.config` to a Windows protection rule, such as `DOMAIN\RecoveryGroup` or `SID=S-1-5-21-...`, and/or set `RecoveryCertificateBase64` to the Base64 encoding of a public X.509 certificate. Domain recovery needs Active Directory key distribution. Each configured recovery method can independently decrypt items saved with it; preserve its Windows identity infrastructure or certificate private key separately. Policy changes apply when items are saved again. SQL Server Vaults use their saved escrow policy instead of these file Vault defaults.
 
 ## Building and Packaging
 
@@ -139,10 +141,11 @@ The portable executable uses built-in configuration defaults. To customize appli
 
 ### Validation
 
-From the repository root, run `dotnet run --project Tests\Crypture.Tests.csproj`. The suite covers encryption, tampering, protection conversion, Vault recovery, concurrent Vault access, password policies, clipboard expiration, and WPF controls using temporary Vaults and keys. Computer-store private-key round trips require an elevated test process.
+From the repository root, run `dotnet run --project Tests\Crypture.Tests.csproj` in an interactive Windows desktop session. The suite runs unattended and covers encryption, tampering, protection conversion, Vault recovery, concurrent Vault access, password policies, clipboard expiration, and WPF controls using temporary Vaults and keys. UI focus checks require an interactive desktop; a headless remote session cannot run the complete suite. Computer-store private-key round trips require an already elevated test process.
 
-* Set `CRYPTURE_TEST_DOMAIN_SIDS` to semicolon-separated SIDs or account names granting the test account access to enable domain authorization tests. These require a domain-connected machine with AD key distribution; otherwise they are skipped.
-* Set `CRYPTURE_TEST_SQLSERVER` to a Windows-authenticated connection string to enable SQL Server integration checks. The test account must be able to create and remove temporary databases.
-* Set `CRYPTURE_TEST_FIDO_HARDWARE=1` to run interactive checks with a compatible physical security key.
-* Set `CRYPTURE_TEST_RENDER_DIR` to an output directory for UI renders.
+* Set `CRYPTURE_TEST_DOMAIN_SIDS` to semicolon-separated SIDs or account names granting the test account access to enable domain authorization tests. Leave it unset to skip these checks; setting it requires domain connectivity and AD key distribution.
+* Set `CRYPTURE_TEST_FOREST_QUERY` to a known domain account name to exercise live Active Directory searches on a domain-connected machine.
+* Set `CRYPTURE_TEST_SQLSERVER` to a Windows-authenticated connection string for an isolated local SQL Server or LocalDB instance. The test account must be able to create and remove temporary databases and provision domain access where applicable. Backup checks require the SQL Server service to write to the test account's temporary directory.
+* Set `CRYPTURE_TEST_FIDO_HARDWARE=1` to run only the interactive physical security-key checks instead of the unattended suite.
+* Set `CRYPTURE_TEST_RENDER_DIR` to an output directory for editor renders, and `CRYPTURE_TEST_POPUP_IMAGES` for dialog renders.
 * ML-KEM round trips use the real Windows provider and are skipped when unsupported.

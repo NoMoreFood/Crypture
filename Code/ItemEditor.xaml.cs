@@ -525,98 +525,98 @@ namespace Crypture
         private async Task LoadItem(bool bRecoveryOnly)
         {
             if (bBusy) return;
-            SetBusy(true, "Checking access and decrypting...");
-            try
+            await RunBusyAsync("Checking access and decrypting...", async () =>
             {
-                await Utilities.TryOperationAsync(this, async () =>
+                if (ThisItem.Cipher == null)
+                    throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
+                byte[] oPlainText = null;
+                long? nModifier = null;
+                bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
+                if (bFido && !bRecoveryOnly)
                 {
-                    if (ThisItem.Cipher == null)
-                        throw new CryptographicException("The encrypted item is damaged or uses an unsupported format.");
-                    byte[] oPlainText = null;
-                    long? nModifier = null;
-                    bool bFido = ThisItem.Cipher.CipherParams == ItemCryptography.FidoFormat;
-                    if (bFido && !bRecoveryOnly)
+                    FidoKeyEnvelope oEnvelope = FidoKeyProtection.Read(ThisItem.Cipher);
+                    IntPtr hOwner = new WindowInteropHelper(this).EnsureHandle();
+                    oItemStatus.Text = "Complete the security key PIN and touch prompts...";
+                    oPlainText = await Task.Run(() =>
                     {
-                        FidoKeyEnvelope oEnvelope = FidoKeyProtection.Read(ThisItem.Cipher);
-                        IntPtr hOwner = new WindowInteropHelper(this).EnsureHandle();
-                        oItemStatus.Text = "Complete the security key PIN and touch prompts...";
-                        oPlainText = await Task.Run(() =>
-                        {
-                            using FidoKeyAccess oAccess = FidoNative.Open(hOwner,
-                                oEnvelope.CredentialId, oEnvelope.Salt);
-                            return ItemCryptography.Decrypt(ThisItem, oFidoKey: oAccess);
-                        });
-                    }
-                    else if (bFido || ThisItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat ||
-                        ThisItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
-                    {
-                        try
-                        {
-                            oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem));
-                        }
-                        catch (CryptographicException) when (ThisItem.Instances.Count != 0)
-                        {
-                            // A recovery certificate remains available when Windows cannot grant access.
-                        }
-                    }
-                    if (oPlainText == null)
-                    {
-                        // Cancellation codes from the smart card, cryptography, and Windows APIs.
-                        const uint SmartCardUserCancelledHResult = 0x8010006E;
-                        const uint CryptographyUserCancelledHResult = 0x80090036;
-                        const uint WindowsUserCancelledHResult = 0x800704C7;
-
-                        // select all the certs associated with this user
-                        using (X509Certificate2 oCert = GetUserKey(UserListSelected))
-                        {
-                            if (oCert == null) return;
-                            Instance oInstance = ThisItem.Instances.FirstOrDefault(
-                                i => i.User.Certificate.SequenceEqual(oCert.RawData));
-                            try
-                            {
-                                oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem, oInstance, oCert));
-                            }
-                            catch (CryptographicException oError) when (
-                                (uint)oError.HResult == SmartCardUserCancelledHResult ||
-                                (uint)oError.HResult == CryptographyUserCancelledHResult ||
-                                (uint)oError.HResult == WindowsUserCancelledHResult)
-                            {
-                                return;
-                            }
-                            nModifier = oInstance.UserId;
-                        }
-                    }
-                    bLoading = true;
+                        using FidoKeyAccess oAccess = FidoNative.Open(hOwner,
+                            oEnvelope.CredentialId, oEnvelope.Salt);
+                        return ItemCryptography.Decrypt(ThisItem, oFidoKey: oAccess);
+                    });
+                }
+                else if (bFido || ThisItem.Cipher.CipherParams == ItemCryptography.PrincipalFormat ||
+                    ThisItem.Cipher.CipherParams == ItemCryptography.RecoveryFormat)
+                {
                     try
                     {
-                        // process text item
-                        if (ThisItem.ItemType == "text") oItemData.Text = Encoding.Unicode.GetString(oPlainText);
-                        else if (ThisItem.ItemType == "richtext")
-                        {
-                            using (MemoryStream oStream = new MemoryStream(oPlainText, false))
-                                new TextRange(oRichItemData.Document.ContentStart, oRichItemData.Document.ContentEnd)
-                                    .Load(oStream, DataFormats.Rtf);
-                            oRichItemData.Document.PagePadding = new Thickness(0);
-                            Utilities.NormalizeRichTextAppearance(oRichItemData);
-                        }
-                        else if (ThisItem.ItemType == "totp")
-                            oTotpPanel.LoadUri(new UTF8Encoding(false, true).GetString(oPlainText));
-                        // text binary item
-                        else BinaryItemData = oPlainText;
-                        ThisItem.ModifiedBy = nModifier;
-                        SetEditingControls(true);
+                        oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem));
                     }
-                    finally
+                    catch (CryptographicException) when (ThisItem.Instances.Count != 0)
                     {
-                        if (!ThisItem.IsFile) Array.Clear(oPlainText, 0, oPlainText.Length);
-                        bLoading = false;
+                        // A recovery certificate remains available when Windows cannot grant access.
                     }
-                });
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+                }
+                if (oPlainText == null)
+                {
+                    // Cancellation codes from the smart card, cryptography, and Windows APIs.
+                    const uint SmartCardUserCancelledHResult = 0x8010006E;
+                    const uint CryptographyUserCancelledHResult = 0x80090036;
+                    const uint WindowsUserCancelledHResult = 0x800704C7;
+
+                    // select all the certs associated with this user
+                    using (X509Certificate2 oCert = GetUserKey(UserListSelected))
+                    {
+                        if (oCert == null) return;
+                        Instance oInstance = ThisItem.Instances.FirstOrDefault(
+                            i => i.User.Certificate.SequenceEqual(oCert.RawData));
+                        try
+                        {
+                            oPlainText = await Task.Run(() => ItemCryptography.Decrypt(ThisItem, oInstance, oCert));
+                        }
+                        catch (CryptographicException oError) when (
+                            (uint)oError.HResult == SmartCardUserCancelledHResult ||
+                            (uint)oError.HResult == CryptographyUserCancelledHResult ||
+                            (uint)oError.HResult == WindowsUserCancelledHResult)
+                        {
+                            return;
+                        }
+                        nModifier = oInstance.UserId;
+                    }
+                }
+                bLoading = true;
+                try
+                {
+                    // process text item
+                    if (ThisItem.ItemType == "text") oItemData.Text = Encoding.Unicode.GetString(oPlainText);
+                    else if (ThisItem.ItemType == "richtext")
+                    {
+                        using (MemoryStream oStream = new MemoryStream(oPlainText, false))
+                            new TextRange(oRichItemData.Document.ContentStart, oRichItemData.Document.ContentEnd)
+                                .Load(oStream, DataFormats.Rtf);
+                        oRichItemData.Document.PagePadding = new Thickness(0);
+                        Utilities.NormalizeRichTextAppearance(oRichItemData);
+                    }
+                    else if (ThisItem.ItemType == "totp")
+                        oTotpPanel.LoadUri(new UTF8Encoding(false, true).GetString(oPlainText));
+                    // text binary item
+                    else BinaryItemData = oPlainText;
+                    ThisItem.ModifiedBy = nModifier;
+                    SetEditingControls(true);
+                }
+                finally
+                {
+                    if (!ThisItem.IsFile) Array.Clear(oPlainText, 0, oPlainText.Length);
+                    bLoading = false;
+                }
+            });
+        }
+
+        private async Task RunBusyAsync(string sStatus, Func<Task> oOperation)
+        {
+            // Restore controls and apply deferred concealment after every outcome.
+            SetBusy(true, sStatus);
+            try { await Utilities.TryOperationAsync(this, oOperation); }
+            finally { SetBusy(false); }
         }
 
         private void SetBusy(bool bEnabled, string sStatus = null)
@@ -829,19 +829,11 @@ namespace Crypture
         {
             if (bBusy) return;
             string sAccount = oPrincipalName.Text;
-            SetBusy(true, "Resolving Windows account...");
-            try
+            await RunBusyAsync("Resolving Windows account...", async () =>
             {
-                await Utilities.TryOperationAsync(this, async () =>
-                {
-                    AddPrincipal(await Task.Run(() => ProtectionPrincipal.Resolve(sAccount)));
-                    oPrincipalName.Clear();
-                });
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+                AddPrincipal(await Task.Run(() => ProtectionPrincipal.Resolve(sAccount)));
+                oPrincipalName.Clear();
+            });
         }
 
         private void AddPrincipal(ProtectionPrincipal oPrincipal)
@@ -868,17 +860,23 @@ namespace Crypture
 
         private void oBrowsePrincipals_Click(object sender, RoutedEventArgs e)
         {
-            Utilities.TryOperation(this, () =>
+            if (bBusy || !bEditing) return;
+            SetBusy(true, "Choosing Windows recipients...");
+            try
             {
-                DirectoryPicker oPicker = new DirectoryPicker { Owner = this };
-                if (oPicker.ShowDialog() != true) return;
-                DirectoryAccount[] oNew = oPicker.SelectedAccounts
-                    .Where(a => !PrincipalList.Any(p => p.Sid == a.Sid)).ToArray();
-                if (PrincipalList.Count + oNew.Length > PrincipalProtection.MaxPrincipals)
-                    throw new InvalidOperationException("An item can include up to 100 users or groups.");
-                foreach (DirectoryAccount oAccount in oNew)
-                    AddPrincipal(new ProtectionPrincipal(oAccount.Sid, oAccount.Account));
-            });
+                Utilities.TryOperation(this, () =>
+                {
+                    DirectoryPicker oPicker = new DirectoryPicker { Owner = this };
+                    if (oPicker.ShowDialog() != true) return;
+                    DirectoryAccount[] oNew = oPicker.SelectedAccounts
+                        .Where(a => !PrincipalList.Any(p => p.Sid == a.Sid)).ToArray();
+                    if (PrincipalList.Count + oNew.Length > PrincipalProtection.MaxPrincipals)
+                        throw new InvalidOperationException("An item can include up to 100 users or groups.");
+                    foreach (DirectoryAccount oAccount in oNew)
+                        AddPrincipal(new ProtectionPrincipal(oAccount.Sid, oAccount.Account));
+                });
+            }
+            finally { SetBusy(false); }
         }
 
         private void MenuItemWithRadioButtons_Click(object sender, RoutedEventArgs e)
@@ -1087,57 +1085,57 @@ namespace Crypture
         private void oGeneratePasswordButton_Click(object sender, RoutedEventArgs e)
         {
             if (bBusy || !bEditing || ThisItem.ItemType is not ("text" or "richtext")) return;
-            Utilities.TryOperation(this, () =>
+
+            // Modal dialogs pump session-lock events; preserve the draft until their results are applied.
+            SetBusy(true, "Generating password...");
+            try
             {
-                PasswordGenerator oGenerator = new PasswordGenerator(true) { Owner = this };
-                if (oGenerator.ShowDialog() != true) return;
-                if (ThisItem.ItemType == "richtext")
+                Utilities.TryOperation(this, () =>
                 {
-                    oRichItemData.Selection.Text = oGenerator.SelectedPassword;
-                    oRichItemData.Focus();
-                }
-                else
-                {
-                    int nStart = oItemData.SelectionStart;
-                    oItemData.SelectedText = oGenerator.SelectedPassword;
-                    oItemData.Select(nStart + oGenerator.SelectedPassword.Length, 0);
-                    oItemData.Focus();
-                }
-            });
+                    PasswordGenerator oGenerator = new PasswordGenerator(true) { Owner = this };
+                    if (oGenerator.ShowDialog() != true) return;
+                    if (ThisItem.ItemType == "richtext")
+                    {
+                        oRichItemData.Selection.Text = oGenerator.SelectedPassword;
+                        oRichItemData.Focus();
+                    }
+                    else
+                    {
+                        int nStart = oItemData.SelectionStart;
+                        oItemData.SelectedText = oGenerator.SelectedPassword;
+                        oItemData.Select(nStart + oGenerator.SelectedPassword.Length, 0);
+                        oItemData.Focus();
+                    }
+                });
+            }
+            finally { SetBusy(false); }
         }
 
         private async void oUploadAFile_Click(object sender, RoutedEventArgs e)
         {
+            if (bBusy || !bEditing) return;
             OpenFileDialog oOpenDialog = new OpenFileDialog { Filter = "All Files (*.*)|*.*", CheckFileExists = true };
-            if (bBusy || oOpenDialog.ShowDialog(this) != true || !ConfirmDiscard()) return;
-            SetBusy(true, "Reading file...");
-            try
+            await RunBusyAsync("Choosing file...", async () =>
             {
-                await Utilities.TryOperationAsync(this, async () =>
-                {
-                    // Reading and compressing a large attachment stays off the dispatcher.
-                    byte[] oCompressed = await Task.Run(() => Utilities.CompressFile(oOpenDialog.FileName));
-                    ClearPlainText();
-                    BinaryItemData = oCompressed;
-                    ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
-                    bHasChanges = true;
-                });
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+                if (oOpenDialog.ShowDialog(this) != true || !ConfirmDiscard()) return;
+                oItemStatus.Text = "Reading file...";
+                // Reading and compressing a large attachment stays off the dispatcher.
+                byte[] oCompressed = await Task.Run(() => Utilities.CompressFile(oOpenDialog.FileName));
+                ClearPlainText();
+                BinaryItemData = oCompressed;
+                ThisItem.ItemType = Path.GetExtension(oOpenDialog.FileName);
+                bHasChanges = true;
+            });
         }
 
         private async void oDownloadPanel_Click(object sender, RoutedEventArgs e)
         {
+            if (bBusy || !bEditing) return;
             if (ThisItem.ItemId == 0 && BinaryItemData == null)
             {
                 oUploadAFile_Click(sender, e);
                 return;
             }
-            if (bBusy) return;
-
             // generate the filter field to use based on the stored item type
             string sFilter = "All Files (*.*)|*.*";
             if (Regex.IsMatch(ThisItem.ItemType, @"^\.[a-zA-Z0-9]{1,16}$"))
@@ -1149,19 +1147,14 @@ namespace Crypture
             {
                 Filter = sFilter, AddExtension = true, ValidateNames = true
             };
-            if (oSaveDialog.ShowDialog(this) != true) return;
             byte[] oCompressed = BinaryItemData;
-            SetBusy(true, "Saving decrypted file...");
-            try
+            await RunBusyAsync("Choosing destination...", async () =>
             {
+                if (oSaveDialog.ShowDialog(this) != true) return;
+                oItemStatus.Text = "Saving decrypted file...";
                 // Expanding and writing a large attachment stays off the dispatcher.
-                await Utilities.TryOperationAsync(this, () => Task.Run(() =>
-                    Utilities.DecompressToFile(oCompressed, oSaveDialog.FileName)));
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+                await Task.Run(() => Utilities.DecompressToFile(oCompressed, oSaveDialog.FileName));
+            });
         }
     }
 }

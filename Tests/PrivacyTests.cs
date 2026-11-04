@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Ribbon;
+using System.Windows.Threading;
 using Crypture;
 using Microsoft.Win32;
 
@@ -99,6 +100,47 @@ internal static partial class RegressionTests
         {
             oGenerator?.Close();
             CryptureEntities.ConnectionString = sConnection;
+        }
+
+        // A modal editor action must finish before concealment can discard its input state.
+        foreach (bool bInsert in new[] { true, false })
+        {
+            oReveal.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            oEditor.SetEditingControls(true);
+            oContent.Text = "Saved prefix: ";
+            oContent.Select(oContent.Text.Length, 0);
+            oEditor.bHasChanges = false;
+            Exception oFailure = null;
+            string sInserted = null;
+            Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                PasswordGenerator oChild = oEditor.OwnedWindows.OfType<PasswordGenerator>().Single();
+                try
+                {
+                    oChild.oGenerateButton_Click(null, null);
+                    sInserted = ((TextBox)oChild.FindName("oGeneratedPassword")).Text;
+                    App.ConcealOpenSecrets();
+                    Check(oContent.Text == "Saved prefix: " && oShield.Visibility == Visibility.Visible,
+                        "Concealment preserves the editor while its password generator is open");
+                    ((Button)oChild.FindName("oRevealButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    if (bInsert)
+                        ((Button)oChild.FindName("oInsertButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+                catch (Exception oError) { oFailure = oError; }
+                finally { if (oChild.IsVisible) oChild.Close(); }
+            }));
+            try
+            {
+                ((RibbonButton)oEditor.FindName("oGeneratePasswordButton"))
+                    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (oFailure != null) throw oFailure;
+                Check(!oEditor.bBusy && oShield.Visibility == Visibility.Visible &&
+                    (bInsert ? oEditor.bHasChanges && oContent.Text == "Saved prefix: " + sInserted
+                        : !oEditor.bHasChanges && oContent.Text.Length == 0),
+                    bInsert ? "A generated password remains an editable draft behind the privacy shield"
+                        : "Cancelling the generator locks a concealed saved item after the dialog closes");
+            }
+            finally { oEditor.bHasChanges = false; }
         }
     }
 }

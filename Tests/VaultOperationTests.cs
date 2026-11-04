@@ -23,6 +23,42 @@ internal static partial class RegressionTests
 {
     private static void TestVaultOperations(string sDirectory)
     {
+        // Closing a busy dialog must abandon both successful and failed directory lookups.
+        foreach (bool bFail in new[] { false, true })
+        {
+            SqlServerVaultDialog oDialog = new SqlServerVaultDialog
+            {
+                Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false,
+                WindowStartupLocation = WindowStartupLocation.Manual
+            };
+            using ManualResetEventSlim oStarted = new ManualResetEventSlim();
+            using ManualResetEventSlim oRelease = new ManualResetEventSlim();
+            oDialog.Show();
+            Action oWork = () =>
+            {
+                oStarted.Set();
+                oRelease.Wait();
+                if (bFail) throw new IOException("Directory server disconnected.");
+            };
+            Task oLookup = (Task)typeof(SqlServerVaultDialog).GetMethod("RunBusyAsync",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .Invoke(oDialog, new object[] { oWork });
+            try
+            {
+                PumpUntil(() => oStarted.IsSet);
+                Check(!oDialog.IsEnabled && !oLookup.IsCompleted,
+                    "Escrow lookup keeps the dialog busy while directory work is pending");
+            }
+            finally
+            {
+                oDialog.Close();
+                oRelease.Set();
+                PumpUntil(() => oLookup.IsCompleted);
+            }
+            Check(oLookup.IsCanceled, bFail ? "Closing escrow selection discards a delayed directory error" :
+                "Closing escrow selection prevents a delayed certificate picker");
+        }
+
         IVaultStorage oPreviousStorage = CryptureEntities.Storage;
         var oSettings = Crypture.Properties.Settings.Default;
         string sLastVault = oSettings.LastVault;
