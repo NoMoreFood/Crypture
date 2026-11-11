@@ -244,8 +244,11 @@ namespace Crypture
     internal static class PortableStartup
     {
         [STAThread]
-        private static void Main()
+        private static int Main(string[] args)
         {
+            // Dispatch scripting requests before creating any desktop windows or loading preferences.
+            if (SecretCommand.IsCommand(args)) return SecretCommand.RunConsole(args);
+
             // Show native startup feedback before Application initialization.
             SplashScreen oScreen = new SplashScreen(typeof(PortableStartup).Assembly, "Images/Save.png");
             oScreen.Show(true);
@@ -257,6 +260,7 @@ namespace Crypture
             {
                 oScreen.Close(TimeSpan.Zero);
             }
+            return 0;
         }
 
         // Defer Application loading and JIT compilation until the splash is visible.

@@ -150,7 +150,7 @@ namespace Crypture
         }
 
         internal static byte[] Decrypt(Item oItem, Instance oInstance = null, X509Certificate2 oCert = null,
-            FidoKeyAccess oFidoKey = null)
+            FidoKeyAccess oFidoKey = null, bool bSilent = false)
         {
             Cipher oCipher = oItem.Cipher;
             int nMaxSize = oItem.IsFile ? Utilities.MaxCompressedItemSize : Utilities.MaxItemSize;
@@ -184,7 +184,7 @@ namespace Crypture
                 else if (bPrincipals) oKeys = PrincipalProtection.Unprotect(oCipher.ProtectedKey);
                 else if (bRecovery && !bCertificate) oKeys = RecoveryProtection.UnwrapWindowsKeys(oCipher);
                 else
-                    oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey);
+                    oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey, bSilent);
 
                 if (oKeys.Length != ContentKeyBytes) throw new CryptographicException("The encrypted item is damaged.");
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);

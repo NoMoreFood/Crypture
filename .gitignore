@@ -3,6 +3,7 @@
 [Oo]bj/
 .vs/
 /Binaries/
+/Build/Temp/
 /Build/PackageStage/
 /Build/.tools/
 /Build/.wix/

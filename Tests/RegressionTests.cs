@@ -136,6 +136,12 @@ internal static partial class RegressionTests
                 Console.WriteLine("Completed " + nChecks + " regression checks.");
                 return 0;
             }
+            TestSecretCommand(sDirectory);
+            if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_SCRIPTING_ONLY") == "1")
+            {
+                Console.WriteLine("Completed " + nChecks + " scripting regression checks.");
+                return 0;
+            }
             using (RSA oKey = new RSACng(2048))
             using (RSA oOtherKey = new RSACng(2048))
             using (X509Certificate2 oCert = Certificate(oKey, "Test", DateTimeOffset.Now.AddDays(-1),

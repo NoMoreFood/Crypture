@@ -910,6 +910,9 @@ internal static partial class RegressionTests
                 ItemCryptography.Decrypt(oItem, oInstance, oCert).SequenceEqual(oPlain), sSuiteName + " round trip");
             Check(ItemCryptography.Decrypt(oItem, oItem.Instances.Last(), oRsaCert).SequenceEqual(oPlain),
                 sSuiteName + " mixed RSA recipient round trip");
+            Check(ItemCryptography.Decrypt(oItem, oInstance, oCert, bSilent: true).SequenceEqual(oPlain) &&
+                ItemCryptography.Decrypt(oItem, oItem.Instances.Last(), oRsaCert, bSilent: true).SequenceEqual(oPlain),
+                sSuiteName + " unattended recipient round trip");
             byte[] oFirstEnvelope = oInstance.CipherKey.ToArray();
             ItemCryptography.Encrypt(oItem, oPlain, oRecipients, nContentSuite: nSuite);
             oInstance = oItem.Instances.First();

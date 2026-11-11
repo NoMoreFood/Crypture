@@ -205,15 +205,17 @@ namespace Crypture
             }
         }
 
-        internal static CngKey GetPrivateKey(X509Certificate2 oCert)
+        internal static CngKey GetPrivateKey(X509Certificate2 oCert, bool bSilent = false)
         {
-            // Acquisition flags require a cached CNG key handle.
+            // Open the CNG key with the caller's interaction policy.
             const uint CacheAcquiredKey = 0x00000001;
             const uint RequireCngKey = 0x00040000;
+            const uint SilentAcquisition = 0x00000040;
             if (!oCert.HasPrivateKey)
                 throw new CryptographicException("The certificate's private key is unavailable in your Windows store.");
             bool bAcquired = NativeMethods.CryptAcquireCertificatePrivateKey(oCert.Handle,
-                CacheAcquiredKey | RequireCngKey, IntPtr.Zero, out SafeNCryptKeyHandle oHandle, out _,
+                CacheAcquiredKey | RequireCngKey | (bSilent ? SilentAcquisition : 0), IntPtr.Zero,
+                out SafeNCryptKeyHandle oHandle, out _,
                 out bool bCallerFrees);
             int nError = Marshal.GetLastWin32Error();
             using (oHandle)
@@ -299,7 +301,7 @@ namespace Crypture
             }
         }
 
-        internal static byte[] Unwrap(X509Certificate2 oCert, byte[] oEnvelope)
+        internal static byte[] Unwrap(X509Certificate2 oCert, byte[] oEnvelope, bool bSilent = false)
         {
             const int MaximumEnvelopeBytes = 4096;
             if (oEnvelope == null || oEnvelope.Length < EnvelopeHeaderBytes ||
@@ -322,6 +324,14 @@ namespace Crypture
                     if (oAlgorithm == RecipientAlgorithm.Rsa)
                     {
                         const int BitsPerByte = 8;
+                        if (bSilent)
+                        {
+                            using RSA oPublic = oCert.GetRSAPublicKey();
+                            if (nLength != oPublic.KeySize / BitsPerByte ||
+                                oEnvelope.Length != nLength + EnvelopeHeaderBytes)
+                                throw new CryptographicException("The RSA recipient envelope is invalid.");
+                            return CertificateSilentAccess.DecryptRsa(oCert, oReader.ReadBytes(nLength));
+                        }
                         using (RSA oPrivate = oCert.GetRSAPrivateKey())
                         {
                             if (oPrivate == null || nLength != oPrivate.KeySize / BitsPerByte ||
@@ -340,9 +350,11 @@ namespace Crypture
                         throw new CryptographicException("The recipient key envelope is damaged.");
                     byte[] oEncapsulation = oReader.ReadBytes(nLength);
                     byte[] oContext = GetContext(oCert, oEnvelope.Take(EnvelopeHeaderBytes + nLength).ToArray());
-                    using (CngKey oPrivate = GetPrivateKey(oCert))
+                    using (CngKey oPrivate = GetPrivateKey(oCert, bSilent))
                     {
-                        if (IsEcdh(oAlgorithm))
+                        if (bSilent && IsEcdh(oAlgorithm))
+                            oSecret = CertificateSilentAccess.DeriveSecret(oPrivate, oEncapsulation);
+                        else if (IsEcdh(oAlgorithm))
                         {
                             if (oPrivate.AlgorithmGroup != CngAlgorithmGroup.ECDiffieHellman)
                                 throw new CryptographicException(
@@ -355,6 +367,11 @@ namespace Crypture
                         }
                         else
                         {
+                            // shortcut: accept unprotected software keys until ML-KEM supports silent decapsulation.
+                            if (bSilent && (oPrivate.Provider != CngProvider.MicrosoftSoftwareKeyStorageProvider ||
+                                oPrivate.UIPolicy.ProtectionLevel != CngUIProtectionLevels.None))
+                                throw new CryptographicException(
+                                    "Unattended ML-KEM access requires a software key without UI protection.");
                             using (MLKem oKem = new MLKemCng(oPrivate))
                                 oSecret = oKem.Decapsulate(oEncapsulation);
                         }
