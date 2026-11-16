@@ -94,15 +94,14 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
         $sequence = 0
         foreach ($option in $options)
         {
+            # Keep the value element's trailing whitespace for the .NET settings reader.
             $actions = if ($option.IsXml) { @('delete', 'create') } else { @('create') }
             foreach ($action in $actions)
             {
                 $writer.WriteStartElement('util', 'XmlConfig', $utilNamespace)
                 $writer.WriteAttributeString('Id', $option.Name + '_' + $action)
                 $writer.WriteAttributeString('File', '[#CryptureConfigurationFile]')
-                $writer.WriteAttributeString('ElementPath', $(if ($option.IsXml) {
-                    $option.Path -replace '/value$', ''
-                } else { $option.Path }))
+                $writer.WriteAttributeString('ElementPath', $option.Path)
                 $writer.WriteAttributeString('Action', $action)
                 $writer.WriteAttributeString('Node', $(if ($option.IsXml -and $action -eq 'create') {
                     'document'
@@ -113,11 +112,9 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
                 if ($option.IsAppSetting) { $writer.WriteAttributeString('Name', 'value') }
                 if ($action -eq 'create')
                 {
-                    $value = '[' + $option.Property + ']'
-                    if ($option.IsXml) { $value = '<value>' + $value + '</value>' }
-                    $writer.WriteAttributeString('Value', $value)
+                    $writer.WriteAttributeString('Value', '[' + $option.Property + ']')
                 }
-                else { $writer.WriteAttributeString('VerifyPath', 'value') }
+                else { $writer.WriteAttributeString('VerifyPath', '*') }
                 $writer.WriteEndElement()
             }
         }

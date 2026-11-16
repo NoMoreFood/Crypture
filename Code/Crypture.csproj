@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>Crypture</RootNamespace>
     <AssemblyName>Crypture</AssemblyName>
-    <Version>2.3.3</Version>
+    <Version>2.3.4</Version>
     <Company>Bryan Berns</Company>
     <Copyright>Copyright © Bryan Berns</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
@@ -23,9 +23,9 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
   <ItemGroup>
