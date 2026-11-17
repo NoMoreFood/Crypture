@@ -41,6 +41,12 @@ namespace Crypture.Properties
                 sSection = XmlConvert.EncodeLocalName(sSection);
                 Configuration oConfig = ConfigurationManager.OpenExeConfiguration(
                     ConfigurationUserLevel.PerUserRoaming);
+                if (!oConfig.HasFile)
+                {
+                    // Import the previous version once, without replacing this version's saved preferences.
+                    base.Upgrade(oContext, oProperties);
+                    oConfig = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+                }
                 ClientSettingsSection oUser = (ClientSettingsSection)oConfig.GetSection("userSettings/" + sSection);
                 ClientSettingsSection oApp =
                     (ClientSettingsSection)oConfig.GetSection("applicationSettings/" + sSection);

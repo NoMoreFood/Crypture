@@ -88,6 +88,8 @@ internal static partial class RegressionTests
         if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_CONCURRENCY_ROLE") is string sRole)
             return RunConcurrencyWorker(sRole);
         AppContext.SetData("APP_CONFIG_FILE", Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config"));
+        if (Environment.GetEnvironmentVariable("CRYPTURE_TEST_PREFERENCE_MIGRATION") is string sPreferencePhase)
+            return RunPreferenceMigration(sPreferencePhase);
         string sDirectory = Path.Combine(Path.GetTempPath(), "Crypture.Tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(sDirectory);
         using UserPreferenceSnapshot oPreferences = new UserPreferenceSnapshot();

@@ -2,12 +2,19 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
     <Package Name="$(var.ProductName)" Manufacturer="Bryan Berns" Version="$(var.Version)" Language="1033"
         UpgradeCode="FCF13ECD-8D17-489D-B242-41791937C022" Scope="perMachine">
-        <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+        <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
             DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+        <!-- Replace rebuilt application files while the configuration component retains its existing file. -->
+        <SetProperty Id="REINSTALLMODE" Value="amus" Before="CostInitialize" Sequence="both"
+            Condition="WIX_UPGRADE_DETECTED" />
         <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
         <Icon Id="Crypture.exe" SourceFile="$(var.IconPath)" />
         <Property Id="ARPPRODUCTICON" Value="Crypture.exe" />
         <Property Id="ARPURLINFOABOUT" Value="$(var.ProductUrl)" />
+        <Property Id="INSTALLFOLDER" Secure="yes">
+            <ComponentSearch Id="InstalledApplicationFolder" Guid="C3CB8F54-6D40-5E0A-BE02-D8E81E7A1C82"
+                Type="file" />
+        </Property>
         <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" Before="InstallValidate" Sequence="execute" />
         <?include $(var.ConfigurationInclude) ?>
 
@@ -26,7 +33,7 @@
         <StandardDirectory Id="ProgramMenuFolder" />
         <Feature Id="CryptureFeature" Title="$(var.ProductName)" Level="1">
             <ComponentRef Id="CryptureApplication" />
-            <ComponentRef Id="CryptureConfiguration" />
+            <ComponentGroupRef Id="CryptureConfigurationComponents" />
             <Files Directory="INSTALLFOLDER" Include="$(var.PublishDirectory)\**">
                 <Exclude Files="$(var.PublishDirectory)\Crypture.exe" />
                 <Exclude Files="$(var.PublishDirectory)\e_sqlite3.dll" />

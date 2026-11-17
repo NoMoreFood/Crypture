@@ -39,13 +39,10 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
         $isAppSetting = $node.Name -eq 'add'
         $name = if ($isAppSetting) { $node.GetAttribute('key') } else { $node.GetAttribute('name') }
         $isXml = !$isAppSetting -and $node.GetAttribute('serializeAs') -eq 'Xml'
-        $value = if ($isAppSetting) { $node.GetAttribute('value') }
-            elseif ($isXml) { $node.SelectSingleNode('value').InnerXml }
-            else { $node.SelectSingleNode('value').InnerText }
         $path = if ($isAppSetting) { "/configuration/appSettings/add[\[]@key='$name'[\]]" }
             else { '/configuration/' + $node.ParentNode.ParentNode.Name + '/' + $node.ParentNode.Name +
                 "/setting[\[]@name='$name'[\]]/value" }
-        [pscustomobject] @{ Name = $name; Property = 'CRYPTURE_' + $name.ToUpperInvariant(); Value = $value;
+        [pscustomobject] @{ Name = $name; Property = 'CRYPTURE_' + $name.ToUpperInvariant();
             Path = $path; IsAppSetting = $isAppSetting; IsXml = $isXml }
     }
 
@@ -66,34 +63,40 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
             $writer.WriteStartElement('Property', $wixNamespace)
             $writer.WriteAttributeString('Id', $option.Property)
             $writer.WriteAttributeString('Secure', 'yes')
-            if ($option.Value.Length -gt 0) { $writer.WriteAttributeString('Value', $option.Value) }
             $writer.WriteEndElement()
-
-            # An explicitly cleared collection still needs a valid serialized empty value.
-            if ($option.IsXml)
-            {
-                $writer.WriteStartElement('SetProperty', $wixNamespace)
-                $writer.WriteAttributeString('Id', $option.Property)
-                $writer.WriteAttributeString('Value', '<ArrayOfString />')
-                $writer.WriteAttributeString('Before', 'CostFinalize')
-                $writer.WriteAttributeString('Sequence', 'execute')
-                $writer.WriteAttributeString('Condition', 'NOT ' + $option.Property)
-                $writer.WriteEndElement()
-            }
         }
 
-        # Use native WiX XML actions so configuration does not require an installed .NET runtime.
+        # Retain installed policy during repair and while the upgrade replaces the application.
+        $writer.WriteStartElement('ComponentGroup', $wixNamespace)
+        $writer.WriteAttributeString('Id', 'CryptureConfigurationComponents')
         $writer.WriteStartElement('Component', $wixNamespace)
         $writer.WriteAttributeString('Id', 'CryptureConfiguration')
         $writer.WriteAttributeString('Directory', 'INSTALLFOLDER')
+        $writer.WriteAttributeString('NeverOverwrite', 'yes')
         $writer.WriteStartElement('File', $wixNamespace)
         $writer.WriteAttributeString('Id', 'CryptureConfigurationFile')
         $writer.WriteAttributeString('Source', '$(var.PublishDirectory)\Crypture.exe.config')
         $writer.WriteAttributeString('KeyPath', 'yes')
         $writer.WriteEndElement()
+        $writer.WriteEndElement()
         $sequence = 0
         foreach ($option in $options)
         {
+            # Reevaluate supplied overrides on repair; the registry marker tracks only the MSI component.
+            $writer.WriteStartElement('Component', $wixNamespace)
+            $writer.WriteAttributeString('Id', 'Configure_' + $option.Name)
+            $writer.WriteAttributeString('Directory', 'INSTALLFOLDER')
+            $writer.WriteAttributeString('Condition', $option.Property)
+            $writer.WriteAttributeString('Transitive', 'yes')
+            $writer.WriteStartElement('RegistryValue', $wixNamespace)
+            $writer.WriteAttributeString('Root', 'HKLM')
+            $writer.WriteAttributeString('Key', 'Software\Bryan Berns\Crypture\InstallerOverrides')
+            $writer.WriteAttributeString('Name', $option.Name)
+            $writer.WriteAttributeString('Type', 'integer')
+            $writer.WriteAttributeString('Value', '1')
+            $writer.WriteAttributeString('KeyPath', 'yes')
+            $writer.WriteEndElement()
+
             # Keep the value element's trailing whitespace for the .NET settings reader.
             $actions = if ($option.IsXml) { @('delete', 'create') } else { @('create') }
             foreach ($action in $actions)
@@ -117,6 +120,7 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
                 else { $writer.WriteAttributeString('VerifyPath', '*') }
                 $writer.WriteEndElement()
             }
+            $writer.WriteEndElement()
         }
         $writer.WriteEndElement()
         $writer.WriteEndElement()

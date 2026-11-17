@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -97,6 +98,8 @@ internal static partial class RegressionTests
                 oAttribute.Manageability == SettingsManageability.Roaming),
                 "Every user preference uses roaming profile storage");
 
+            TestPreferenceMigration(sPath);
+
             // Saving an unrelated preference must preserve the generator selection on disk.
             oSettings.ThemeMode = "Light";
             oSettings.Save();
@@ -107,6 +110,84 @@ internal static partial class RegressionTests
         {
             oSettings.Reset();
             CryptureEntities.ConnectionString = sPreviousConnection;
+        }
+    }
+
+    private static void TestPreferenceMigration(string sCurrentPath)
+    {
+        // Use real versioned profiles and fresh processes so configuration caches cannot hide upgrade failures.
+        string sVersionDirectory = Path.GetDirectoryName(sCurrentPath);
+        Version oVersion = Version.Parse(Path.GetFileName(sVersionDirectory));
+        int[] oParts = [oVersion.Major, oVersion.Minor, oVersion.Build, oVersion.Revision];
+        for (int nPart = oParts.Length - 1; nPart >= 0; nPart--)
+        {
+            if (oParts[nPart] > 0) { oParts[nPart]--; break; }
+            oParts[nPart] = 65535;
+        }
+        string sPreviousPath = Path.Combine(Path.GetDirectoryName(sVersionDirectory),
+            String.Join(".", oParts), "user.config");
+        string sAppConfig = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        byte[] oCurrent = File.ReadAllBytes(sCurrentPath);
+        byte[] oPrevious = File.Exists(sPreviousPath) ? File.ReadAllBytes(sPreviousPath) : null;
+        byte[] oAppConfig = File.ReadAllBytes(sAppConfig);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(sPreviousPath));
+            foreach (bool bPortable in new[] { false, true })
+            {
+                File.WriteAllBytes(sPreviousPath, oCurrent);
+                File.Delete(sCurrentPath);
+                if (bPortable) File.Delete(sAppConfig);
+                foreach (string sPhase in new[] { "import", "retain" })
+                {
+                    ProcessStartInfo oStart = new ProcessStartInfo(Environment.ProcessPath)
+                    {
+                        UseShellExecute = false, CreateNoWindow = true,
+                        RedirectStandardOutput = true, RedirectStandardError = true
+                    };
+                    oStart.Environment["CRYPTURE_TEST_PREFERENCE_MIGRATION"] = sPhase;
+                    using Process oProcess = Process.Start(oStart);
+                    if (!oProcess.WaitForExit(30000))
+                    {
+                        oProcess.Kill(true);
+                        throw new TimeoutException("Preference migration did not finish.");
+                    }
+                    string sOutput = oProcess.StandardOutput.ReadToEnd() + oProcess.StandardError.ReadToEnd();
+                    Check(oProcess.ExitCode == 0, (bPortable ? "Portable" : "Installed") +
+                        " preferences " + sPhase + " across versions: " + sOutput.Trim());
+                }
+            }
+        }
+        finally
+        {
+            File.WriteAllBytes(sAppConfig, oAppConfig);
+            File.WriteAllBytes(sCurrentPath, oCurrent);
+            if (oPrevious == null) File.Delete(sPreviousPath);
+            else File.WriteAllBytes(sPreviousPath, oPrevious);
+            Crypture.Properties.Settings.Default.Reload();
+        }
+    }
+
+    private static int RunPreferenceMigration(string sPhase)
+    {
+        try
+        {
+            var oSettings = Crypture.Properties.Settings.Default;
+            Check(oSettings.ThemeMode == (sPhase == "import" ? "Dark" : "Light") &&
+                oSettings.SecretFontFamily == "Cascadia Mono" && oSettings.LastVault == "C:\\Private Vault.cryptdb" &&
+                oSettings.RecentVaults.Cast<string>().SequenceEqual(new[] { oSettings.LastVault }) &&
+                oSettings.AllowSelfSignedCertificates && !oSettings.PerformCertificateRevocationCheck &&
+                oSettings.PasswordGeneratorOptions.MaximumLength == 35 &&
+                oSettings.PasswordGeneratorOptions.ExcludedCharacters == "\"'&<>",
+                "Saved scalar, collection, and generator preferences survive the version change");
+            oSettings.ThemeMode = "Light";
+            oSettings.Save();
+            return 0;
+        }
+        catch (Exception oError)
+        {
+            Console.Error.WriteLine(oError);
+            return 1;
         }
     }
 }
