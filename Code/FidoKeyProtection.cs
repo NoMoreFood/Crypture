@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -37,7 +38,7 @@ namespace Crypture
         internal byte[] Nonce { get; init; }
         internal byte[] WrappedKey { get; init; }
         internal byte[] Tag { get; init; }
-        internal byte[] RecoveryKey { get; init; }
+        internal List<KeyValuePair<string, byte[]>> WindowsKeys { get; init; }
     }
 
     internal static class FidoKeyProtection
@@ -108,20 +109,15 @@ namespace Crypture
                     oStream.Length - oStream.Position < nLength + SaltBytes + NonceBytes +
                         ItemCryptography.ContentKeyBytes + TagBytes + sizeof(int))
                     throw new CryptographicException("The FIDO2 key envelope is damaged.");
-                FidoKeyEnvelope oEnvelope = new FidoKeyEnvelope
+                return new FidoKeyEnvelope
                 {
                     CredentialId = oReader.ReadBytes(nLength),
                     Salt = oReader.ReadBytes(SaltBytes),
                     Nonce = oReader.ReadBytes(NonceBytes),
                     WrappedKey = oReader.ReadBytes(ItemCryptography.ContentKeyBytes),
                     Tag = oReader.ReadBytes(TagBytes),
-                    RecoveryKey = ReadRecoveryKey(oReader)
+                    WindowsKeys = ReadRecoveryKeys(oReader)
                 };
-                if (oStream.Position != oStream.Length)
-                    throw new CryptographicException("The FIDO2 key envelope has trailing data.");
-                if (oEnvelope.RecoveryKey != null)
-                    RecoveryProtection.ReadWindowsKeys(new Cipher { ProtectedKey = oEnvelope.RecoveryKey });
-                return oEnvelope;
             }
             catch (EndOfStreamException oError)
             {
@@ -129,23 +125,25 @@ namespace Crypture
             }
         }
 
-        private static byte[] ReadRecoveryKey(BinaryReader oReader)
+        private static List<KeyValuePair<string, byte[]>> ReadRecoveryKeys(BinaryReader oReader)
         {
             int nLength = oReader.ReadInt32();
             if (nLength < 0 || nLength > MaxRecoveryBytes ||
                 nLength != oReader.BaseStream.Length - oReader.BaseStream.Position)
                 throw new CryptographicException("The FIDO2 recovery key envelope is damaged.");
-            return nLength == 0 ? null : oReader.ReadBytes(nLength);
+            return nLength == 0 ? [] : RecoveryProtection.ReadWindowsKeys(new Cipher
+            {
+                ProtectedKey = oReader.ReadBytes(nLength)
+            });
         }
 
-        internal static byte[] Unwrap(Cipher oCipher, FidoKeyAccess oAccess)
+        internal static byte[] Unwrap(Cipher oCipher, FidoKeyEnvelope oEnvelope, FidoKeyAccess oAccess)
         {
-            FidoKeyEnvelope oEnvelope = Read(oCipher);
             if (oAccess == null)
             {
-                if (oEnvelope.RecoveryKey == null)
+                if (oEnvelope.WindowsKeys.Count == 0)
                     throw new CryptographicException("Use the FIDO2 security key that protected this item.");
-                return RecoveryProtection.UnwrapWindowsKeys(new Cipher { ProtectedKey = oEnvelope.RecoveryKey });
+                return RecoveryProtection.UnwrapWindowsKeys(oEnvelope.WindowsKeys);
             }
             if (oAccess.IsDisposed || !oAccess.CredentialId.SequenceEqual(oEnvelope.CredentialId) ||
                 !oAccess.Salt.SequenceEqual(oEnvelope.Salt))

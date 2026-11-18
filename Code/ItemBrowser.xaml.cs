@@ -406,7 +406,8 @@ namespace Crypture
                         .ToListAsync(oCancellation).ConfigureAwait(false)).ToLookup(r => r.ItemId);
                     var oProtection = await oContent.Ciphers.Select(c => new
                     {
-                        c.ItemId, c.CipherParams, c.ProtectionDescriptor, c.EscrowLabel
+                        c.ItemId, c.CipherParams, c.ProtectionDescriptor,
+                        EscrowLabel = oStorage.IsSqlServer ? c.EscrowLabel : null
                     }).ToDictionaryAsync(c => c.ItemId, oCancellation).ConfigureAwait(false);
                     foreach (Item oItem in oItems)
                     {
@@ -612,9 +613,11 @@ namespace Crypture
 
         private void oSqlServerButton_Click(object sender, RoutedEventArgs e)
         {
-            SqlServerVaultDialog oDialog = new SqlServerVaultDialog { Owner = this };
-            if (oDialog.ShowDialog() != true) return;
-            OpenSqlVault(oDialog.Storage, oDialog.CreateDatabase);
+            Utilities.TryOperation(this, () =>
+            {
+                SqlServerVaultDialog oDialog = new SqlServerVaultDialog { Owner = this };
+                if (oDialog.ShowDialog() == true) OpenSqlVault(oDialog.Storage, oDialog.CreateDatabase);
+            });
         }
 
         private async void OpenSqlVault(SqlServerVaultStorage oStorage, bool bCreate)

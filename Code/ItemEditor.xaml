@@ -75,7 +75,7 @@
                         <ComboBoxItem Content="Text Secret" />
                         <ComboBoxItem Content="Rich Text Secret" />
                         <ComboBoxItem Content="TOTP Authenticator" />
-                        <ComboBoxItem Content="File Attachment" />
+                        <ComboBoxItem x:Name="oFileAttachmentType" Content="File Attachment" />
                     </ComboBox>
                     <Grid Margin="0,8,0,10">
                         <Grid.ColumnDefinitions>

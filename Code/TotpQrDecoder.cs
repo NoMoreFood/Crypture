@@ -637,7 +637,7 @@ namespace Crypture
                     int nCountBits = nMode == 4 ? (nVersion <= 9 ? 8 : 16) :
                         (nMode == 1 ? 10 : 9) + (nVersion <= 9 ? 0 : nVersion <= 26 ? 2 : 4);
                     int nCount = Read(nCountBits);
-                    if (nCount > 4096 - oText.Length) return null;
+                    if (nCount > TotpSecret.MaximumSetupLinkCharacters - oText.Length) return null;
                     if (nMode == 4)
                     {
                         if (nCount > (oData.Length * 8 - nPosition) / 8) return null;

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
+using SQLitePCL;
 using System.IO;
+using System.Threading;
 using System.Linq;
 using System.Security.Principal;
 using System.Security.Cryptography.X509Certificates;
@@ -47,7 +49,7 @@ namespace Crypture
             RecoveryPolicy oRecovery = RecoveryPolicy.ReadForStorage(oStorage, true);
             List<User> oUsers = sProtectionDescriptor == null
                 ? (oRecipients ?? Enumerable.Empty<User>()).ToList() : new List<User>();
-            User oRecoveryUser = null;
+            User oRecoveryUser = null, oRecoveryOnly = null;
 
             // Prepare all recipient and recovery envelopes before taking the Vault's write lock.
             if (oRecovery.Certificate != null)
@@ -65,12 +67,13 @@ namespace Crypture
                         "enrolled by the Vault owner and designated as escrow for its verified " +
                         "Active Directory identity before saving.");
                 oRecoveryUser ??= new User { Certificate = oRecovery.Certificate };
-                oUsers.RemoveAll(u => u.Certificate.SequenceEqual(oRecovery.Certificate));
+                if (oUsers.RemoveAll(u => u.Certificate.SequenceEqual(oRecovery.Certificate)) == 0)
+                    oRecoveryOnly = oRecoveryUser;
                 oUsers.Add(oRecoveryUser);
             }
             Item oEncrypted = new Item { Label = oItem.Label, ItemType = oItem.ItemType };
             ItemCryptography.Encrypt(oEncrypted, oPlainText, oUsers,
-                sProtectionDescriptor, oRecovery.Descriptor, nContentSuite, oFidoKey);
+                sProtectionDescriptor, oRecovery.Descriptor, nContentSuite, oFidoKey, oRecoveryOnly);
             if (oStorage is SqlServerVaultStorage oSqlServer)
             {
                 // SQL Server saves encrypted rows through a recipient-checked procedure.
@@ -201,8 +204,10 @@ namespace Crypture
             }
         }
 
-        internal static void BackupDatabase(string sSource, string sDestination)
+        internal static void BackupDatabase(string sSource, string sDestination,
+            CancellationToken oCancellation = default)
         {
+            oCancellation.ThrowIfCancellationRequested();
             if (File.Exists(sDestination))
                 throw new IOException("Choose a new backup filename so an existing Vault is not overwritten.");
 
@@ -221,16 +226,38 @@ namespace Crypture
                     oSource.Open();
                     oDestination.Open();
 
-                    // Acquire the read snapshot through a command so normal lock waiting applies to the backup.
-                    using (SqliteTransaction oTransaction = oSource.BeginTransaction(deferred: true))
-                    using (SqliteCommand oCommand = new SqliteCommand(
-                        "SELECT COUNT(*) FROM sqlite_schema", oSource, oTransaction))
+                    // Pin a single read snapshot while allowing cancellation during lock waits and copying.
+                    using SqliteTransaction oSnapshot = oSource.BeginTransaction(deferred: true);
+                    const int LockRetryMilliseconds = 100;
+                    const int PagesPerBatch = 256;
+                    long nStarted = Environment.TickCount64;
+                    int nResult;
+                    while (true)
                     {
-                        oCommand.ExecuteScalar();
-                        oSource.BackupDatabase(oDestination);
-                        oTransaction.Commit();
+                        oCancellation.ThrowIfCancellationRequested();
+                        nResult = raw.sqlite3_exec(oSource.Handle, "SELECT 1 FROM sqlite_schema LIMIT 1");
+                        if (nResult is not (raw.SQLITE_BUSY or raw.SQLITE_LOCKED) ||
+                            Environment.TickCount64 - nStarted >= oSource.DefaultTimeout * 1000L) break;
+                        oCancellation.WaitHandle.WaitOne(LockRetryMilliseconds);
                     }
+                    oCancellation.ThrowIfCancellationRequested();
+                    SqliteException.ThrowExceptionForRC(nResult, oSource.Handle);
+
+                    using (var oBackup = raw.sqlite3_backup_init(oDestination.Handle, "main", oSource.Handle, "main"))
+                    {
+                        if (oBackup.IsInvalid)
+                            SqliteException.ThrowExceptionForRC(raw.sqlite3_errcode(oDestination.Handle),
+                                oDestination.Handle);
+                        do
+                        {
+                            oCancellation.ThrowIfCancellationRequested();
+                            nResult = raw.sqlite3_backup_step(oBackup, PagesPerBatch);
+                        } while (nResult == raw.SQLITE_OK);
+                        SqliteException.ThrowExceptionForRC(nResult, oDestination.Handle);
+                    }
+                    oSnapshot.Commit();
                 }
+                oCancellation.ThrowIfCancellationRequested();
                 File.Move(sTemporary, sDestination);
             }
             finally

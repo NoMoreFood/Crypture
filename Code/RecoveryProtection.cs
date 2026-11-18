@@ -147,14 +147,13 @@ namespace Crypture
         {
             // FIDO2 items carry their optional Windows recovery recipients inside the security key envelope.
             if (oCipher.CipherParams != ItemCryptography.FidoFormat) return ReadWindowsKeys(oCipher);
-            byte[] oRecoveryKey = FidoKeyProtection.Read(oCipher).RecoveryKey;
-            return oRecoveryKey == null ? [] : ReadWindowsKeys(new Cipher { ProtectedKey = oRecoveryKey });
+            return FidoKeyProtection.Read(oCipher).WindowsKeys;
         }
 
-        internal static byte[] UnwrapWindowsKeys(Cipher oCipher)
+        internal static byte[] UnwrapWindowsKeys(List<KeyValuePair<string, byte[]>> oEntries)
         {
             CryptographicException oLastError = null;
-            foreach (var oEntry in ReadWindowsKeys(oCipher))
+            foreach (var oEntry in oEntries)
             {
                 try
                 {

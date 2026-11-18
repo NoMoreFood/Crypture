@@ -37,7 +37,6 @@ internal static partial class RegressionTests
         try
         {
             Crypture.Properties.Settings.Default.AllowSelfSignedCertificates = true;
-            TestSqlServerCertificateCreation(sServerConnection, oOtherCert, oCert);
             string sCurrentSid = WindowsIdentity.GetCurrent().User.Value;
             SqlConnectionStringBuilder oLogin = new SqlConnectionStringBuilder(oBuilder.ConnectionString)
             {
@@ -52,6 +51,7 @@ internal static partial class RegressionTests
                 "Windows: " + sCurrentSid);
             CreateVault(oStorage);
             ValidateVault(oStorage);
+            TestSqlServerCertificateCreation(oStorage.ConnectionString, oOtherCert, oCert);
             using (SqlConnection oConnection = new SqlConnection(oStorage.ConnectionString))
             {
                 oConnection.Open();
@@ -183,6 +183,7 @@ internal static partial class RegressionTests
         {
             CreateVault(oStorage);
             ValidateVault(oStorage);
+            TestConcurrentGroupProvisioning(sServerConnection, oStorage.ConnectionString);
             CryptureEntities.Storage = oStorage;
             Check(oStorage.Escrow.CertificateUserId.HasValue && oStorage.Escrow.Descriptor == null,
                 "SQL Server creation enrolls and designates the selected escrow certificate");
@@ -219,6 +220,40 @@ internal static partial class RegressionTests
             oCommand.Parameters.AddWithValue("@name", sDatabase);
             oCommand.ExecuteNonQuery();
         }
+    }
+
+    private static void TestConcurrentGroupProvisioning(string sFirstVault, string sSecondVault)
+    {
+        // Independent Vault transactions share a Windows login. Roll both back to leave server logins untouched.
+        string sGroup = new SecurityIdentifier(WellKnownSidType.BuiltinPerformanceLoggingUsersSid, null)
+            .Translate(typeof(NTAccount)).Value;
+        using SqlConnection oFirst = new SqlConnection(sFirstVault);
+        using SqlConnection oSecond = new SqlConnection(sSecondVault);
+        oFirst.Open();
+        oSecond.Open();
+        using SqlTransaction oCreating = oFirst.BeginTransaction();
+        using SqlTransaction oWaiting = oSecond.BeginTransaction();
+        SqlServerVaultStorage.GrantGroupAccessAsync(oFirst, oCreating, sGroup, default).GetAwaiter().GetResult();
+        using SqlCommand oLock = new SqlCommand("""
+            EXEC master.sys.sp_executesql N'SELECT APPLOCK_MODE(''public'', @resource, ''Transaction'')',
+                N'@resource nvarchar(255)', @resource
+            """, oFirst, oCreating);
+        oLock.Parameters.AddWithValue("@resource", "Crypture group: " + sGroup);
+        Check((string)oLock.ExecuteScalar() == "Exclusive", "Vault provisioning holds its group lock in master");
+
+        Task oGrant = SqlServerVaultStorage.GrantGroupAccessAsync(oSecond, oWaiting, sGroup, default);
+        oCreating.Rollback();
+        oGrant.GetAwaiter().GetResult();
+        using SqlCommand oMembership = new SqlCommand("""
+            SELECT COUNT(*) FROM sys.database_role_members m
+            JOIN sys.database_principals u ON u.principal_id = m.member_principal_id
+            JOIN sys.server_principals l ON l.sid = u.sid
+            WHERE m.role_principal_id = DATABASE_PRINCIPAL_ID('crypture_domain') AND l.name = @name
+            """, oSecond, oWaiting);
+        oMembership.Parameters.AddWithValue("@name", sGroup);
+        Check((int)oMembership.ExecuteScalar() == 1,
+            "A concurrent Vault keeps a working group login after the first creation rolls back");
+        oWaiting.Rollback();
     }
 
     private static void TestSqlServerEditorSave(User oPrimary, X509Certificate2 oCertificate)

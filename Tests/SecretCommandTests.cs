@@ -81,6 +81,38 @@ internal static partial class RegressionTests
                 oContent.SaveChanges();
             }
 
+            // Simulate an unavailable provider before a working key, independent of the host's supported algorithms.
+            using (X509Certificate2 oSecond = Certificate(oRsa, "Second Scripting Recipient",
+                DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1)))
+            {
+                oStore.Add(oSecond);
+                try
+                {
+                    Item oMixed = new Item { Label = "Mixed provider secret", ItemType = "text" };
+                    ItemCryptography.Encrypt(oMixed, oPlain, [oUser, new User { UserId = oUser.UserId + 1,
+                        Certificate = oSecond.RawData }]);
+                    int nAttempts = 0;
+                    byte[] oRecovered = SecretCommand.Decrypt(oMixed, null, (oInstance, oCandidate) =>
+                    {
+                        if (++nAttempts == 1) throw new PlatformNotSupportedException("Provider unavailable.");
+                        return ItemCryptography.Decrypt(oMixed, oInstance, oCandidate, bSilent: true);
+                    });
+                    Check(nAttempts == 2 && oRecovered.SequenceEqual(oPlain),
+                        "Unattended selection continues to a working key after an unavailable provider");
+                    try
+                    {
+                        SecretCommand.Decrypt(oMixed, oSecond.Thumbprint, (_, _) =>
+                            throw new PlatformNotSupportedException("Selected provider unavailable."));
+                        throw new Exception("An unavailable explicitly selected provider was accepted.");
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                        Check(true, "An explicitly selected unavailable provider reports its own error");
+                    }
+                }
+                finally { oStore.Remove(oSecond); }
+            }
+
             // JSON must preserve whitespace, Unicode, quotes, and newlines exactly for script consumers.
             var oResult = ReadSecret("--vault", sPath, "--label", oCertificateItem.Label);
             using (JsonDocument oJson = JsonDocument.Parse(oResult.Output))

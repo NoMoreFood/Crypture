@@ -358,6 +358,128 @@ internal static partial class RegressionTests
         }
     }
 
+    private static void TestEditorRecoveryRotation(string sDirectory)
+    {
+        string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");
+        byte[] oOriginal = File.ReadAllBytes(sConfigPath);
+        IVaultStorage oPrevious = CryptureEntities.Storage;
+        var oSettings = Crypture.Properties.Settings.Default;
+        bool bSelfSigned = oSettings.AllowSelfSignedCertificates;
+        bool bRevocation = oSettings.PerformCertificateRevocationCheck;
+        using RSA oOwnerKey = RSA.Create(2048), oRetiredKey = RSA.Create(2048), oReplacementKey = RSA.Create(2048);
+        DateTimeOffset oNow = DateTimeOffset.Now;
+        using X509Certificate2 oOwner = Certificate(oOwnerKey, "Owner", oNow.AddDays(-1), oNow.AddDays(1));
+        using X509Certificate2 oRetired = Certificate(oRetiredKey, "Recovery A", oNow.AddDays(-1), oNow.AddDays(1));
+        using X509Certificate2 oReplacement = Certificate(oReplacementKey, "Recovery B",
+            oNow.AddDays(-1), oNow.AddDays(1));
+        try
+        {
+            oSettings.AllowSelfSignedCertificates = true;
+            oSettings.PerformCertificateRevocationCheck = false;
+            var oStorage = new SqliteVaultStorage(Path.Combine(sDirectory, "editor-rotation.cryptdb"));
+            oStorage.Create();
+            CryptureEntities.Storage = oStorage;
+            User oUser = new User { Certificate = oOwner.RawData };
+            User oOther = new User { Certificate = oRetired.RawData };
+            using (var oDb = new CryptureEntities())
+            {
+                oDb.Users.AddRange(oUser, oOther);
+                oDb.SaveChanges();
+            }
+
+            foreach (var (bShared, bUnmarked) in new[] { (false, false), (true, false), (false, true) })
+            {
+                string sLabel = $"Rotated {bShared} {bUnmarked}";
+                SetRecoveryConfig(null, Convert.ToBase64String(oRetired.RawData));
+                DatabaseOperations.SaveItem(new Item { Label = sLabel, ItemType = "text" }, [],
+                    bShared ? [oUser, oOther] : [oUser]);
+                using var oDb = new CryptureEntities();
+                long nId = oDb.Items.Single(i => i.Label == sLabel).ItemId;
+                if (bUnmarked)
+                {
+                    // Write authenticated recipient envelopes without a recorded role, as found in existing Vaults.
+                    Item oLegacy = LoadItem(nId);
+                    byte[] oKeys = CertificateKeyProtection.Unwrap(oOwner,
+                        oLegacy.Instances.Single(i => i.UserId == oUser.UserId).CipherKey);
+                    byte[] oAuth = oKeys[ItemCryptography.AesKeyBytes..];
+                    try
+                    {
+                        foreach (Instance oRecipient in oLegacy.Instances)
+                        {
+                            Instance oRow = oDb.Instances.Find(oRecipient.InstanceId);
+                            using X509Certificate2 oCert =
+                                X509CertificateLoader.LoadCertificate(oRecipient.User.Certificate);
+                            oRecipient.CipherKey = CertificateKeyProtection.Wrap(oCert, oKeys,
+                                CertificateRecipientRole.Unspecified);
+                            oRow.CipherKey = oRecipient.CipherKey;
+                            oRow.Signature = SignFixture(oLegacy, oAuth, oRecipient);
+                        }
+                        oDb.SaveChanges();
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(oKeys);
+                        CryptographicOperations.ZeroMemory(oAuth);
+                    }
+                    oLegacy = LoadItem(nId);
+                    Check(ItemCryptography.Decrypt(oLegacy,
+                        oLegacy.Instances.Single(i => i.UserId == oOther.UserId), oRetired).Length == 0,
+                        "An unmarked saved recovery recipient can still decrypt its existing revision");
+                }
+                SetRecoveryConfig(null, Convert.ToBase64String(oReplacement.RawData));
+                ItemEditor oEditor = CreateEditor(LoadItem(nId));
+                try
+                {
+                    PumpUntil(() => oEditor.CertificateLoading.IsCompleted);
+                    oEditor.SetEditingControls(true);
+                    oEditor.oLockItemButton_Click(null, null);
+                    Check(oEditor.UserListSelected.Any(u => u.UserId == oOther.UserId) == (bShared || bUnmarked),
+                        "Reopening and relocking preserve the saved distinction between sharing and policy recovery");
+                    oEditor.SetEditingControls(true);
+                    ((TextBox)oEditor.FindName("oItemData")).Text = "Updated content";
+                    if (bUnmarked)
+                    {
+                        void Review(MessageBoxResult oChoice) => oEditor.Dispatcher.BeginInvoke(
+                            DispatcherPriority.ApplicationIdle, new Action(() =>
+                        {
+                            Popup oPopup = Application.Current.Windows.OfType<Popup>().Single();
+                            PopupButtons(oPopup).Single(b => (MessageBoxResult)b.Tag == oChoice)
+                                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        }));
+                        Review(MessageBoxResult.No);
+                        oEditor.oSaveItemButton_Click(null, null);
+                        Check(!oEditor.bCompleted && LoadItem(nId).ModifiedDate == oEditor.ThisItem.ModifiedDate,
+                            "Declining recipient review preserves the existing item and its draft");
+                        User oRemoved = oEditor.UserListSelected.Single(u => u.UserId == oOther.UserId);
+                        oEditor.UserListSelected.Remove(oRemoved);
+                        Review(MessageBoxResult.Yes);
+                    }
+                    oEditor.Dispatcher.InvokeAsync(() => oEditor.oSaveItemButton_Click(null, null));
+                    PumpUntil(() => oEditor.bCompleted);
+                    Item oUpdated = LoadItem(nId);
+                    Instance oNew = oUpdated.Instances.Single(i =>
+                        i.User.Certificate.SequenceEqual(oReplacement.RawData));
+                    Check(oUpdated.Instances.Any(i => i.UserId == oOther.UserId) == bShared &&
+                        oUpdated.Instances.Any(i => i.UserId == oUser.UserId) && Encoding.Unicode.GetString(
+                        ItemCryptography.Decrypt(oUpdated, oNew, oReplacement)) == "Updated content",
+                        "Resaving rotates recovery and retains the retired certificate only when explicitly shared");
+                }
+                finally
+                {
+                    oEditor.bHasChanges = false;
+                    oEditor.Close();
+                }
+            }
+        }
+        finally
+        {
+            CryptureEntities.Storage = oPrevious;
+            oSettings.AllowSelfSignedCertificates = bSelfSigned;
+            oSettings.PerformCertificateRevocationCheck = bRevocation;
+            File.WriteAllBytes(sConfigPath, oOriginal);
+        }
+    }
+
     private static void TestRecoveryNotice(string sDirectory)
     {
         string sConfigPath = Path.Combine(AppContext.BaseDirectory, "Crypture.exe.config");

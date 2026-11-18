@@ -1,5 +1,5 @@
 ﻿<UserControl x:Class="Crypture.TotpPanel" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Crypture">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="0,2,0,8">
             <TextBlock x:Name="oAccountTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -48,7 +48,8 @@
                         <Button DockPanel.Dock="Right" Content="_Import" Padding="10,3" Margin="6,0,0,0"
                             IsDefault="{Binding IsKeyboardFocusWithin, ElementName=oImportInput}"
                             Click="oImport_Click" />
-                        <TextBox x:Name="oImportInput" MinHeight="28" MaxLength="4096" Padding="5,3"
+                        <TextBox x:Name="oImportInput" MinHeight="28" Padding="5,3"
+                            MaxLength="{x:Static local:TotpSecret.MaximumSetupLinkCharacters}"
                             IsUndoEnabled="False" AutomationProperties.Name="TOTP Setup Link or Base32 Secret"
                             ToolTip="Paste an otpauth://totp/ setup link or the service's Base32 secret." />
                     </DockPanel>

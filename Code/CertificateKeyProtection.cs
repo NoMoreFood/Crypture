@@ -1,5 +1,6 @@
 using Microsoft.Win32.SafeHandles;
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Formats.Asn1;
 using System.Linq;
@@ -21,6 +22,8 @@ namespace Crypture
         MlKem1024 = 7
     }
 
+    internal enum CertificateRecipientRole { Unspecified, Shared, RecoveryOnly }
+
     internal static class CertificateKeyProtection
     {
         // Minimum RSA certificate strength.
@@ -31,6 +34,7 @@ namespace Crypture
 
         // Recipient envelope framing and authenticated wrapping sizes.
         private const int EnvelopeHeaderBytes = sizeof(int) * 2;
+        private const int RecipientRoleShift = 8;
         private const int WrappingKeyBytes = 32;
         private const int GcmNonceBytes = 12;
         private const int GcmTagBytes = 16;
@@ -159,37 +163,6 @@ namespace Crypture
             return MLKem.ImportEncapsulationKey(oParameters, oCert.GetPublicKey());
         }
 
-        internal static ECDiffieHellmanCng GetEcdhPublicKey(X509Certificate2 oCert)
-        {
-            const int UncompressedPointPrefixBytes = 1;
-            const byte UncompressedPointMarker = 4;
-            RecipientAlgorithm oAlgorithm = GetAlgorithm(oCert);
-            int nSize = GetEcdhCoordinateBytes(oAlgorithm);
-            byte[] oPoint = oCert.GetPublicKey();
-            if (oPoint.Length != UncompressedPointPrefixBytes + EccCoordinateCount * nSize ||
-                oPoint[0] != UncompressedPointMarker)
-                throw new CryptographicException("The ECC certificate has an invalid public key.");
-            ECDiffieHellmanCng oKey = new ECDiffieHellmanCng();
-            try
-            {
-                oKey.ImportParameters(new ECParameters
-                {
-                    Curve = ECCurve.CreateFromValue(GetCurveOid(oCert)),
-                    Q = new ECPoint
-                    {
-                        X = oPoint.Skip(UncompressedPointPrefixBytes).Take(nSize).ToArray(),
-                        Y = oPoint.Skip(UncompressedPointPrefixBytes + nSize).ToArray()
-                    }
-                });
-                return oKey;
-            }
-            catch
-            {
-                oKey.Dispose();
-                throw;
-            }
-        }
-
         private static string GetCurveOid(X509Certificate2 oCert)
         {
             try
@@ -240,7 +213,13 @@ namespace Crypture
             }
         }
 
-        internal static byte[] Wrap(X509Certificate2 oCert, byte[] oKeys)
+        // The authenticated header stores the algorithm in the low byte and the recipient role above it.
+        internal static CertificateRecipientRole ReadRole(byte[] oEnvelope) => oEnvelope?.Length >= EnvelopeHeaderBytes
+            ? (CertificateRecipientRole)(BinaryPrimitives.ReadUInt32LittleEndian(oEnvelope) >> RecipientRoleShift)
+            : CertificateRecipientRole.Unspecified;
+
+        internal static byte[] Wrap(X509Certificate2 oCert, byte[] oKeys,
+            CertificateRecipientRole nRole = CertificateRecipientRole.Shared)
         {
             RecipientAlgorithm oAlgorithm = ValidateForEncryption(oCert);
             byte[] oSecret = null;
@@ -250,7 +229,7 @@ namespace Crypture
                 using (MemoryStream oStream = new MemoryStream())
                 using (BinaryWriter oWriter = new BinaryWriter(oStream))
                 {
-                    oWriter.Write((int)oAlgorithm);
+                    oWriter.Write((int)oAlgorithm | (int)nRole << RecipientRoleShift);
                     if (oAlgorithm == RecipientAlgorithm.Rsa)
                     {
                         using (RSA oPublic = oCert.GetRSAPublicKey())
@@ -265,7 +244,8 @@ namespace Crypture
                     byte[] oEncapsulation;
                     if (IsEcdh(oAlgorithm))
                     {
-                        using (ECDiffieHellmanCng oPublic = GetEcdhPublicKey(oCert))
+                        using (ECDiffieHellman oPublic = oCert.GetECDiffieHellmanPublicKey() ??
+                            throw new CryptographicException("The ECC certificate has an invalid public key."))
                         using (ECDiffieHellmanCng oEphemeral = new ECDiffieHellmanCng(oPublic.KeySize))
                         using (ECDiffieHellmanPublicKey oRecipientPublic = oPublic.PublicKey)
                         {
@@ -316,9 +296,11 @@ namespace Crypture
                 using (MemoryStream oStream = new MemoryStream(oEnvelope, false))
                 using (BinaryReader oReader = new BinaryReader(oStream))
                 {
-                    RecipientAlgorithm oAlgorithm = (RecipientAlgorithm)oReader.ReadInt32();
+                    int nHeader = oReader.ReadInt32();
+                    RecipientAlgorithm oAlgorithm = (RecipientAlgorithm)(nHeader & Byte.MaxValue);
                     int nLength = oReader.ReadInt32();
-                    if (oAlgorithm != GetAlgorithm(oCert) || nLength <= 0 ||
+                    if ((uint)nHeader >> RecipientRoleShift > (uint)CertificateRecipientRole.RecoveryOnly ||
+                        oAlgorithm != GetAlgorithm(oCert) || nLength <= 0 ||
                         nLength > oEnvelope.Length - EnvelopeHeaderBytes)
                         throw new CryptographicException("The recipient algorithm or key envelope is invalid.");
                     if (oAlgorithm == RecipientAlgorithm.Rsa)

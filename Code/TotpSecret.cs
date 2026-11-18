@@ -14,6 +14,7 @@ namespace Crypture
         internal const int EightDigitCount = 8;
         internal const int MaximumPeriodSeconds = 3600;
         internal const int MaximumLabelCharacters = 256;
+        public const int MaximumSetupLinkCharacters = 8192;
 
         // Base32 alphabet and bit widths shared by encoding and decoding.
         private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -49,13 +50,13 @@ namespace Crypture
 
         internal static TotpSecret Parse(string sInput)
         {
-            const int MaximumSetupLinkCharacters = 4096;
+            const string TotpPrefix = "otpauth://totp/";
             if (String.IsNullOrWhiteSpace(sInput) || sInput.Length > MaximumSetupLinkCharacters)
                 throw new InvalidOperationException("Enter a Base32 secret or a TOTP setup link.");
             sInput = sInput.Trim();
             if (!sInput.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase)) return new TotpSecret(sInput);
-            if (!Uri.TryCreate(sInput, UriKind.Absolute, out Uri oUri) || oUri.Scheme != "otpauth" ||
-                oUri.Host != "totp" || oUri.UserInfo.Length != 0 || oUri.Port != -1 || oUri.Fragment.Length != 0)
+            if (!sInput.StartsWith(TotpPrefix, StringComparison.OrdinalIgnoreCase) ||
+                !Uri.TryCreate(sInput, UriKind.Absolute, out Uri oUri) || oUri.Fragment.Length != 0)
                 throw new InvalidOperationException("Use an otpauth://totp/ setup link. " +
                     "Counter-based HOTP is not supported.");
 
@@ -69,7 +70,9 @@ namespace Crypture
                 if (!oParameters.TryAdd(sName, sValue))
                     throw new InvalidOperationException("The TOTP setup link contains duplicate parameters.");
             }
-            string sLabel = Uri.UnescapeDataString(oUri.AbsolutePath.TrimStart('/')).Trim();
+            // Account names such as '.' and '..' are labels, so read the path before URI normalization.
+            int nQuery = sInput.IndexOf('?', TotpPrefix.Length);
+            string sLabel = Uri.UnescapeDataString(sInput[TotpPrefix.Length..(nQuery < 0 ? sInput.Length : nQuery)]);
             string[] oLabel = sLabel.Split(':', 2);
             string sLabelIssuer = oLabel.Length == 2 ? oLabel[0].Trim() : "";
             string sAccount = oLabel[^1].Trim();

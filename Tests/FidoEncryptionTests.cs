@@ -155,7 +155,7 @@ internal static partial class RegressionTests
                 "FIDO2 save rejects stale edits across protection conversion");
             DatabaseOperations.SaveItem(oStored, oPlain, null, oFidoKey: oAccess);
             oStored = LoadItem(nId);
-            Check(FidoKeyProtection.Read(oStored.Cipher).RecoveryKey == null && oStored.Instances.Count == 0 &&
+            Check(FidoKeyProtection.Read(oStored.Cipher).WindowsKeys.Count == 0 && oStored.Instances.Count == 0 &&
                 ItemCryptography.Decrypt(oStored, oFidoKey: oAccess).SequenceEqual(oPlain),
                 "Converting Windows protection to FIDO2 removes unconfigured Windows access");
             using FidoKeyAccess oExpiredAccess = new FidoKeyAccess(oId, oSalt,

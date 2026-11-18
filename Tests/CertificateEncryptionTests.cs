@@ -678,13 +678,13 @@ internal static partial class RegressionTests
     }
 
     private static X509Certificate2 EccCertificate(CngKey oKey,
-        X509KeyUsageFlags oUsage = X509KeyUsageFlags.KeyAgreement)
+        X509KeyUsageFlags? oUsage = X509KeyUsageFlags.KeyAgreement)
     {
         using (ECDsaCng oSigner = new ECDsaCng(oKey))
         {
             CertificateRequest oRequest = new CertificateRequest("CN=ECC Encryption Test", oSigner,
                 HashAlgorithmName.SHA256);
-            oRequest.CertificateExtensions.Add(new X509KeyUsageExtension(oUsage, true));
+            if (oUsage.HasValue) oRequest.CertificateExtensions.Add(new X509KeyUsageExtension(oUsage.Value, true));
             X509Certificate2 oCert = oRequest.Create(oRequest.SubjectName,
                 X509SignatureGenerator.CreateForECDsa(oSigner), DateTimeOffset.Now.AddDays(-1),
                 DateTimeOffset.Now.AddDays(1), new byte[] { 2, 3, 4 });
@@ -729,6 +729,11 @@ internal static partial class RegressionTests
                 Reject(() => SqlServerCertificateEnrollment.VerifyPrivateKey(oCert, oRsaCert),
                     "SQL enrollment rejects a mismatched " + oAlgorithm + " private key");
                 TestRecipientEnvelope(oCert, oRsaCert, oAlgorithm.Algorithm);
+                using X509Certificate2 oUnrestricted = EccCertificate(oKey, null);
+                byte[] oKeys = RandomNumberGenerator.GetBytes(ItemCryptography.ContentKeyBytes);
+                Check(CertificateKeyProtection.Unwrap(oUnrestricted,
+                    CertificateKeyProtection.Wrap(oUnrestricted, oKeys)).SequenceEqual(oKeys),
+                    oAlgorithm + " wraps and unwraps with an unrestricted certificate");
                 TestAlgorithmVault(sDirectory, oCert, oAlgorithm.Algorithm);
             }
         }

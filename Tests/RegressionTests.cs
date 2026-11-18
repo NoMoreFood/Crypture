@@ -832,6 +832,7 @@ internal static partial class RegressionTests
         {
             TestPopups();
             TestRecoveryNotice(sDirectory);
+            TestEditorRecoveryRotation(sDirectory);
 
             // Locking must clear secrets even when the Vault cannot be opened.
             oEditor = CreateEditor(oItem);

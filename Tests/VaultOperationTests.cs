@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Data.Common;
@@ -18,6 +19,7 @@ using Crypture;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 internal static partial class RegressionTests
 {
@@ -105,6 +107,54 @@ internal static partial class RegressionTests
             }
             Check(oActiveBeforeCompact.SequenceEqual(File.ReadAllBytes(oStorageB.DisplayName)),
                 "Compacting another storage instance leaves the active Vault unchanged");
+
+            // Capture the actual list query so attachments cannot accidentally be materialized during a refresh.
+            List<string> oCommands = [];
+            var oLoggedStorage = new FaultingVaultStorage(oStorageA, false) { CommandLog = oCommands.Add };
+            var oListed = ItemBrowser.ReadVaultDataAsync(oLoggedStorage, default).GetAwaiter().GetResult();
+            string sCipherQuery = oCommands.Single(s => s.Contains("FROM \"Cipher\""));
+            Check(oListed.Items.Count == 1 && !sCipherQuery.Contains("CipherText") &&
+                !sCipherQuery.Contains("ProtectedKey"),
+                "The SQLite browser reads protection metadata without fetching any encrypted attachment");
+
+            // Cancel a backup after its worker opens the temporary file and before releasing the source lock.
+            string sCancelledBackup = Path.Combine(sDirectory, "cancelled-backup.cryptdb");
+            using (SqliteConnection oLock = new SqliteConnection(oStorageA.ConnectionString))
+            using (CancellationTokenSource oCancelBackup = new CancellationTokenSource())
+            {
+                oLock.Open();
+                using SqliteCommand oCommand = oLock.CreateCommand();
+                oCommand.CommandText = "CREATE TABLE BackupSample AS SELECT randomblob(2097152) AS Payload";
+                oCommand.ExecuteNonQuery();
+                oCommand.CommandText = "BEGIN EXCLUSIVE";
+                oCommand.ExecuteNonQuery();
+                Task oBackup = oStorageA.BackupAsync(sCancelledBackup, oCancelBackup.Token);
+                try
+                {
+                    PumpUntil(() => Directory.GetFiles(sDirectory, "cancelled-backup.cryptdb.*.tmp").Length != 0);
+                    oCancelBackup.Cancel();
+                    PumpUntil(() => oBackup.IsCompleted);
+                }
+                finally
+                {
+                    oCommand.CommandText = "ROLLBACK";
+                    oCommand.ExecuteNonQuery();
+                }
+                Check(oBackup.IsCanceled && !File.Exists(sCancelledBackup) &&
+                    Directory.GetFiles(sDirectory, "cancelled-backup.cryptdb.*.tmp").Length == 0,
+                    "Canceling a running file backup discards the temporary copy without publishing it");
+
+                // A retry copies every page of a payload larger than a single backup batch.
+                oStorageA.BackupAsync(sCancelledBackup, default).GetAwaiter().GetResult();
+                using var oCopy = new SqliteConnection(new SqliteVaultStorage(sCancelledBackup).ConnectionString);
+                oCopy.Open();
+                oCommand.CommandText = "SELECT Payload FROM BackupSample";
+                using var oReadCopy = new SqliteCommand(oCommand.CommandText, oCopy);
+                Check(((byte[])oReadCopy.ExecuteScalar()).SequenceEqual((byte[])oCommand.ExecuteScalar()),
+                    "Retrying a canceled backup preserves a multi-page attachment-sized payload");
+                oCommand.CommandText = "DROP TABLE BackupSample";
+                oCommand.ExecuteNonQuery();
+            }
 
             // A failure after reading the candidate's rows must retain the original data and write target.
             oBrowser = new ItemBrowser
@@ -433,7 +483,13 @@ internal static partial class RegressionTests
         public string DisplayName => oInner.DisplayName;
         public bool IsSqlServer => oInner.IsSqlServer;
         public bool SupportsCompact => oInner.SupportsCompact;
-        public void Configure(DbContextOptionsBuilder oOptions) => oInner.Configure(oOptions);
+        internal Action<string> CommandLog { get; init; }
+        public void Configure(DbContextOptionsBuilder oOptions)
+        {
+            oInner.Configure(oOptions);
+            if (CommandLog != null)
+                oOptions.LogTo(CommandLog, [RelationalEventId.CommandExecuted]);
+        }
         public async Task CreateAsync(CancellationToken oCancellation)
         {
             if (oCreateGate != null)

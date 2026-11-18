@@ -153,10 +153,11 @@ namespace Crypture
             return oItem;
         }
 
-        private static byte[] Decrypt(Item oItem, string sThumbprint)
+        internal static byte[] Decrypt(Item oItem, string sThumbprint,
+            Func<Instance, X509Certificate2, byte[]> oDecryptCertificate = null)
         {
             // Windows and saved recovery access need no UI and use the existing authenticated decrypt path.
-            CryptographicException oLastError = null;
+            Exception oLastError = null;
             if (sThumbprint == null && oItem.Cipher.CipherParams is ItemCryptography.PrincipalFormat or
                 ItemCryptography.RecoveryFormat or ItemCryptography.FidoFormat)
             {
@@ -165,6 +166,8 @@ namespace Crypture
             }
 
             // Match public certificate bytes before opening a private key, and suppress provider prompts.
+            oDecryptCertificate ??= (oInstance, oCert) =>
+                ItemCryptography.Decrypt(oItem, oInstance, oCert, bSilent: true);
             X509Certificate2Collection oCertificates = CertificateOperations.GetPersonalCertificates();
             try
             {
@@ -175,8 +178,9 @@ namespace Crypture
                     Instance oInstance = oItem.Instances.FirstOrDefault(i => i.User?.Certificate != null &&
                         i.User.Certificate.SequenceEqual(oCertificate.RawData));
                     if (oInstance == null) continue;
-                    try { return ItemCryptography.Decrypt(oItem, oInstance, oCertificate, bSilent: true); }
-                    catch (CryptographicException oError) { oLastError = oError; }
+                    try { return oDecryptCertificate(oInstance, oCertificate); }
+                    catch (Exception oError) when (oError is CryptographicException ||
+                        sThumbprint == null && oError is PlatformNotSupportedException) { oLastError = oError; }
                 }
             }
             finally

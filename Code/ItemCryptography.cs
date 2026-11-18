@@ -53,7 +53,8 @@ namespace Crypture
 
         internal static void Encrypt(Item oItem, byte[] oPlainText, IEnumerable<User> oRecipients,
             string sProtectionDescriptor = null, string sRecoveryDescriptor = null,
-            ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm, FidoKeyAccess oFidoKey = null)
+            ContentEncryptionSuite nContentSuite = ContentEncryptionSuite.Aes256Gcm, FidoKeyAccess oFidoKey = null,
+            User oRecoveryOnly = null)
         {
             int nMaxSize = oItem.IsFile ? Utilities.MaxCompressedItemSize : Utilities.MaxItemSize;
             if (oPlainText == null || oPlainText.Length > nMaxSize)
@@ -132,7 +133,8 @@ namespace Crypture
                             UserId = oUser.UserId,
                             User = oUser,
                             CipherParams = nFormat,
-                            CipherKey = CertificateKeyProtection.Wrap(oCert, oKeys)
+                            CipherKey = CertificateKeyProtection.Wrap(oCert, oKeys, oUser == oRecoveryOnly
+                                ? CertificateRecipientRole.RecoveryOnly : CertificateRecipientRole.Shared)
                         };
                         oInstance.Signature = ComputeSignature(oItem, oAuthenticationKey, oInstance);
                         oItem.Instances.Add(oInstance);
@@ -178,13 +180,18 @@ namespace Crypture
             byte[] oAuthenticationKey = new byte[AuthenticationKeyBytes];
             try
             {
-                if (bRecovery) RecoveryProtection.ReadWindowsKeys(oCipher);
-                if (bFido) FidoKeyProtection.Read(oCipher);
-                if (bFido && !bCertificate) oKeys = FidoKeyProtection.Unwrap(oCipher, oFidoKey);
+                if (bFido)
+                {
+                    FidoKeyEnvelope oEnvelope = FidoKeyProtection.Read(oCipher);
+                    if (!bCertificate) oKeys = FidoKeyProtection.Unwrap(oCipher, oEnvelope, oFidoKey);
+                }
+                else if (bRecovery)
+                {
+                    var oEntries = RecoveryProtection.ReadWindowsKeys(oCipher);
+                    if (!bCertificate) oKeys = RecoveryProtection.UnwrapWindowsKeys(oEntries);
+                }
                 else if (bPrincipals) oKeys = PrincipalProtection.Unprotect(oCipher.ProtectedKey);
-                else if (bRecovery && !bCertificate) oKeys = RecoveryProtection.UnwrapWindowsKeys(oCipher);
-                else
-                    oKeys = CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey, bSilent);
+                oKeys ??= CertificateKeyProtection.Unwrap(oCert, oInstance.CipherKey, bSilent);
 
                 if (oKeys.Length != ContentKeyBytes) throw new CryptographicException("The encrypted item is damaged.");
                 Buffer.BlockCopy(oKeys, 0, oEncryptionKey, 0, AesKeyBytes);

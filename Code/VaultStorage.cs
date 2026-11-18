@@ -65,7 +65,7 @@ namespace Crypture
         public Task ReadSnapshotAsync(CryptureEntities oContent, Func<Task> oRead, CancellationToken oCancellation) =>
             Task.Run(() => ReadSnapshot(oContent, () => oRead().GetAwaiter().GetResult()), oCancellation);
         public Task BackupAsync(string sDestination, CancellationToken oCancellation) =>
-            Task.Run(() => Backup(sDestination), oCancellation);
+            Task.Run(() => DatabaseOperations.BackupDatabase(sPath, sDestination, oCancellation), oCancellation);
 
         internal void Create()
         {
@@ -114,8 +114,6 @@ namespace Crypture
 
         public DbTransaction BeginHealthSnapshot(DbConnection oConnection) =>
             ((SqliteConnection)oConnection).BeginTransaction(deferred: true);
-
-        internal void Backup(string sDestination) => DatabaseOperations.BackupDatabase(sPath, sDestination);
 
         public void Compact()
         {
@@ -173,8 +171,6 @@ namespace Crypture
                     throw new IOException("The SQL Server database already exists. Choose a new database name.");
             }
             string sQuotedName = "[" + DatabaseName.Replace("]", "]]", StringComparison.Ordinal) + "]";
-            string sQuotedLogin = null;
-            bool bLoginCreated = false;
             oCancellation.ThrowIfCancellationRequested();
 
             // Confirm creation before cancellation can clean up the newly owned database.
@@ -182,23 +178,6 @@ namespace Crypture
                 await oCreate.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
             try
             {
-                // Provision the domain's Users group with the limited Vault role when the creator chose to.
-                string sDomainUsers = GrantDomainUsers
-                    ? await Task.Run(GetDomainUsersName, oCancellation).ConfigureAwait(false) : null;
-                if (sDomainUsers != null)
-                {
-                    sQuotedLogin = "[" + sDomainUsers.Replace("]", "]]", StringComparison.Ordinal) + "]";
-                    using SqlCommand oExists = new SqlCommand(
-                        "SELECT 1 FROM sys.server_principals WHERE [name] = @name", oConnection);
-                    oExists.Parameters.AddWithValue("@name", sDomainUsers);
-                    if (await oExists.ExecuteScalarAsync(oCancellation).ConfigureAwait(false) == null)
-                    {
-                        using SqlCommand oLogin = new SqlCommand(
-                            "CREATE LOGIN " + sQuotedLogin + " FROM WINDOWS", oConnection);
-                        await oLogin.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
-                        bLoginCreated = true;
-                    }
-                }
                 // Provision without pooling so failed creation can drop the newly owned database.
                 using SqlConnection oVault = new SqlConnection(new SqlConnectionStringBuilder(ConnectionString)
                     { Pooling = false }.ConnectionString);
@@ -229,21 +208,41 @@ namespace Crypture
                     oEscrow.Parameters.Add("@label", SqlDbType.NVarChar, 450).Value = EscrowChoice.Label;
                     await oEscrow.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
                 }
-                if (sQuotedLogin != null)
-                    using (SqlCommand oGrant = new SqlCommand("CREATE USER " + sQuotedLogin + " FOR LOGIN " +
-                        sQuotedLogin + "; ALTER ROLE [crypture_domain] ADD MEMBER " + sQuotedLogin, oVault,
-                        oTransaction)) await oGrant.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
-                await oTransaction.CommitAsync(oCancellation).ConfigureAwait(false);
-                await RefreshEscrowAsync(oCancellation, oVault).ConfigureAwait(false);
+                // Commit the shared login and its database membership together.
+                string sGroup = GrantDomainUsers
+                    ? await Task.Run(GetDomainUsersName, oCancellation).ConfigureAwait(false) : null;
+                if (sGroup != null)
+                    await GrantGroupAccessAsync(oVault, oTransaction, sGroup, oCancellation).ConfigureAwait(false);
+                await RefreshEscrowAsync(oCancellation, oVault, oTransaction).ConfigureAwait(false);
+                oCancellation.ThrowIfCancellationRequested();
+                await oTransaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch
             {
-                // Remove only what this attempt created, leaving a login that already existed in place.
-                using SqlCommand oDrop = new SqlCommand("DROP DATABASE " + sQuotedName +
-                    (bLoginCreated ? "; DROP LOGIN " + sQuotedLogin : ""), oConnection);
+                Escrow = null;
+                using SqlCommand oDrop = new SqlCommand("DROP DATABASE " + sQuotedName, oConnection);
                 await oDrop.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
+        }
+
+        internal static async Task GrantGroupAccessAsync(SqlConnection oVault, SqlTransaction oTransaction,
+            string sGroup, CancellationToken oCancellation)
+        {
+            // Coordinate all Vaults in master until the owning transaction commits or rolls back.
+            string sQuoted = "[" + sGroup.Replace("]", "]]", StringComparison.Ordinal) + "]";
+            using SqlCommand oGrant = new SqlCommand($"""
+                DECLARE @lock nvarchar(255) = N'Crypture group: ' + @name, @result int;
+                EXEC @result = master.sys.sp_getapplock @Resource = @lock, @LockMode = 'Exclusive',
+                    @LockOwner = 'Transaction', @DbPrincipal = 'public';
+                IF @result < 0 THROW 50030, 'Could not acquire the Vault group login lock.', 1;
+                IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE [name] = @name)
+                    CREATE LOGIN {sQuoted} FROM WINDOWS;
+                CREATE USER {sQuoted} FOR LOGIN {sQuoted};
+                ALTER ROLE [crypture_domain] ADD MEMBER {sQuoted};
+                """, oVault, oTransaction);
+            oGrant.Parameters.Add("@name", SqlDbType.NVarChar, 128).Value = sGroup;
+            await oGrant.ExecuteNonQueryAsync(oCancellation).ConfigureAwait(false);
         }
 
         public async Task ValidateAsync(CancellationToken oCancellation)
@@ -266,7 +265,7 @@ namespace Crypture
             RefreshEscrowAsync(CancellationToken.None).GetAwaiter().GetResult();
 
         internal async Task<SqlServerEscrowPolicy> RefreshEscrowAsync(CancellationToken oCancellation,
-            SqlConnection oOpenConnection = null)
+            SqlConnection oOpenConnection = null, SqlTransaction oTransaction = null)
         {
             // Reuse the caller's open connection when one is available to avoid another login.
             using SqlConnection oOwned = oOpenConnection == null ? new SqlConnection(ConnectionString) : null;
@@ -274,7 +273,8 @@ namespace Crypture
             using SqlCommand oCommand = new SqlCommand(
                 "SELECT v.[EscrowCertificateUserId], u.[Certificate], v.[EscrowDescriptor], " +
                 "v.[EscrowLabel] FROM [dbo].[CryptureVault] AS v LEFT JOIN [dbo].[User] AS u " +
-                "ON u.[UserId] = v.[EscrowCertificateUserId] WHERE v.[Id] = @id", oOpenConnection ?? oOwned);
+                "ON u.[UserId] = v.[EscrowCertificateUserId] WHERE v.[Id] = @id",
+                oOpenConnection ?? oOwned, oTransaction);
             oCommand.Parameters.AddWithValue("@id", VaultMarkerId);
             using SqlDataReader oReader = await oCommand.ExecuteReaderAsync(oCancellation).ConfigureAwait(false);
             if (!await oReader.ReadAsync(oCancellation).ConfigureAwait(false))

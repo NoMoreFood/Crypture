@@ -202,6 +202,10 @@ internal static partial class RegressionTests
         }
     }
 
+    private static readonly Func<Item, byte[], Instance, byte[]> SignFixture = typeof(ItemCryptography)
+        .GetMethod("ComputeSignature", BindingFlags.NonPublic | BindingFlags.Static)
+        .CreateDelegate<Func<Item, byte[], Instance, byte[]>>();
+
     private static void TestAuthenticationFormat()
     {
         // Fixed vectors cover the serialized authentication format, including long UTF-8 labels and every access path.
@@ -221,8 +225,6 @@ internal static partial class RegressionTests
             "5B1BFCB9C86A6FA6B9C3AF1F3B406076777D5EF0C9E719396DC4884A3AAF731B"
         ];
         byte[] oKey = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
-        MethodInfo oSign = typeof(ItemCryptography).GetMethod("ComputeSignature",
-            BindingFlags.NonPublic | BindingFlags.Static);
         int nVector = 0;
         foreach (long nSuite in new long[] { 1, 2 })
         foreach (long nFormat in new long[] { 2, 3, 4, 5 })
@@ -247,7 +249,7 @@ internal static partial class RegressionTests
                 User = new User { Certificate = [1, 2, 3, 4, 5] },
                 CipherKey = Enumerable.Range(64, 33).Select(i => (byte)i).ToArray()
             } : null;
-            byte[] oSignature = (byte[])oSign.Invoke(null, [oItem, oKey, oRecipient]);
+            byte[] oSignature = SignFixture(oItem, oKey, oRecipient);
             Check(Convert.ToHexString(oSignature) == sExpected[nVector++],
                 "Authentication bytes match the stored format: suite=" + nSuite + ", format=" + nFormat +
                     ", recipient=" + bRecipient);

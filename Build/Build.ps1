@@ -2,7 +2,7 @@
 param(
     [string] $BinaryDirectory = "$PSScriptRoot\..\Code\bin\Release\Portable",
     [string] $OutputDirectory = "$PSScriptRoot\..\Binaries",
-    [string] $StageDirectory = "$PSScriptRoot\PackageStage",
+    [string] $StageDirectory = "$PSScriptRoot\Temp\PackageStage",
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
     [string] $ProductName = 'Crypture',
     [string] $ProductUrl = 'https://github.com/NoMoreFood/Crypture',
@@ -26,6 +26,48 @@ function Sign-File([string] $Path)
     if ($SkipSigning) { return }
     Invoke-Tool $signTool ($signOptions + $Path)
     Invoke-Tool $signTool @('verify', '/pa', '/tw', $Path)
+}
+
+function Publish-ReleaseFiles([System.Collections.IDictionary] $Files)
+{
+    # Replace each file on its destination volume and retain the prior release until publication succeeds.
+    $suffix = '.' + [Guid]::NewGuid().ToString('N')
+    $published = [Collections.Generic.List[string]]::new()
+    try
+    {
+        foreach ($target in $Files.Keys)
+        {
+            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
+            [IO.File]::Copy($Files[$target], "$target$suffix.tmp")
+            if ([IO.File]::Exists($target))
+            {
+                [IO.File]::Replace("$target$suffix.tmp", $target, "$target$suffix.bak")
+            }
+            else { [IO.File]::Move("$target$suffix.tmp", $target) }
+            $published.Add($target)
+        }
+    }
+    catch
+    {
+        $published.Reverse()
+        foreach ($target in $published)
+        {
+            if ([IO.File]::Exists("$target$suffix.bak"))
+            {
+                [IO.File]::Replace("$target$suffix.bak", $target, [Management.Automation.Language.NullString]::Value)
+            }
+            else { [IO.File]::Delete($target) }
+        }
+        throw
+    }
+    finally
+    {
+        foreach ($target in $Files.Keys)
+        {
+            if ([IO.File]::Exists("$target$suffix.tmp")) { [IO.File]::Delete("$target$suffix.tmp") }
+        }
+    }
+    foreach ($target in $published) { [IO.File]::Delete("$target$suffix.bak") }
 }
 
 function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath)
@@ -131,6 +173,7 @@ function Write-InstallerConfiguration([string] $ConfigPath, [string] $OutputPath
     }
 }
 
+$stage = $null
 try
 {
     $project = [IO.Path]::GetFullPath("$PSScriptRoot\..\Code\Crypture.csproj")
@@ -238,6 +281,7 @@ try
 
 
     $licenseTexts = @{}
+    $releaseFiles = [ordered]@{}
     foreach ($runtimeId in $runtimes)
     {
         $architecture = $runtimeId.Substring($runtimePrefix.Length)
@@ -322,7 +366,8 @@ try
 
         # Build and validate an MSI containing the unpacked application.
         $installerDirectory = Join-Path (Join-Path $stage 'Installers') $architecture
-        $installer = Join-Path $OutputDirectory "Crypture-$architecture-$version-installer.msi"
+        $installerName = "Crypture-$architecture-$version-installer.msi"
+        $installer = Join-Path $stage $installerName
         Invoke-Tool $wix @('build', (Join-Path $PSScriptRoot 'Crypture.wxs'), '-arch', $architecture,
             '-ext', $uiExtension, '-ext', $utilExtension, '-culture', 'en-us', '-pdbtype', 'none',
             '-intermediatefolder', $installerDirectory, '-out', $installer,
@@ -336,12 +381,12 @@ try
         Invoke-Tool $wix @('msi', 'validate', $installer, '-sice', 'ICE61',
             '-intermediateFolder', (Join-Path $installerDirectory 'Validation'))
         Sign-File $installer
-        Write-Host "MSI ready: $installer"
+        $releaseFiles[(Join-Path $OutputDirectory $installerName)] = $installer
 
         $binaryOutput = Join-Path $BinaryDirectory $runtimeId
         $packageOutput = Join-Path $portableDirectory $architecture
-        New-Item -ItemType Directory -Path $binaryOutput, $packageOutput -Force | Out-Null
-        Copy-Item -LiteralPath $executable -Destination (Join-Path $binaryOutput 'Crypture.exe') -Force
+        New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
+        $releaseFiles[(Join-Path $binaryOutput 'Crypture.exe')] = $executable
         Copy-Item -LiteralPath $executable -Destination (Join-Path $packageOutput 'Crypture.exe')
     }
 
@@ -351,19 +396,37 @@ try
     $stagedArchive = Join-Path $stage $packageName
     [IO.Compression.ZipFile]::CreateFromDirectory($portableDirectory, $stagedArchive,
         [IO.Compression.CompressionLevel]::Optimal, $false)
-    Move-Item -LiteralPath $stagedArchive -Destination $destination -Force
-    Write-Host "Portable ZIP ready: $destination"
+    $releaseFiles[$destination] = $stagedArchive
 
     # Package the unpacked application and its dependencies in architecture folders.
     $unpackedDirectory = Join-Path $stage 'Installed'
     $stagedArchive = Join-Path $stage $unpackedPackageName
     [IO.Compression.ZipFile]::CreateFromDirectory($unpackedDirectory, $stagedArchive,
         [IO.Compression.CompressionLevel]::Optimal, $false)
-    Move-Item -LiteralPath $stagedArchive -Destination $unpackedDestination -Force
-    Write-Host "Unpacked ZIP ready: $unpackedDestination"
+    $releaseFiles[$unpackedDestination] = $stagedArchive
+
+    # Publish the complete, validated set under an exclusive lock shared by builds to this directory.
+    $lock = [IO.FileStream]::new((Join-Path $OutputDirectory '.Crypture-publish.lock'), 'OpenOrCreate',
+        'ReadWrite', 'None', 4096, [IO.FileOptions]::DeleteOnClose)
+    try { Publish-ReleaseFiles $releaseFiles }
+    finally { $lock.Dispose() }
+    foreach ($target in $releaseFiles.Keys) { Write-Host "Published $target" }
 }
 catch
 {
     Write-Error "Packaging failed: $($_.Exception.Message)" -ErrorAction Continue
     exit 1
+}
+finally
+{
+    if ($stage -and (Test-Path -LiteralPath $stage -PathType Container))
+    {
+        $run = Get-Item -LiteralPath $stage -Force
+        if ($run.Parent.FullName.TrimEnd('\') -ne $StageDirectory.TrimEnd('\') -or
+            $run.Name -notmatch '^[0-9a-f]{32}$' -or ($run.Attributes -band [IO.FileAttributes]::ReparsePoint))
+        {
+            throw "Unexpected build staging directory: $stage"
+        }
+        Remove-Item -LiteralPath $run.FullName -Recurse -Force
+    }
 }

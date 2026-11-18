@@ -153,6 +153,24 @@ internal static partial class RegressionTests
                 Check(oValue.Algorithm == "SHA1" && oValue.Digits == 6 && oValue.Period == 30 &&
                     oValue.Issuer == "" && oValue.Account == "Imported",
                     "Imported links retain protocol defaults even when application defaults differ");
+            // Import stored setup links through the same panel that saved the user's labels.
+            foreach ((string sIssuer, string sAccount) in new[]
+            {
+                (new string('\u754c', 256), new string('\u754c', 256)), ("", "."), ("", "..")
+            })
+            {
+                ((TextBox)oPanel.FindName("oIssuer")).Text = sIssuer;
+                ((TextBox)oPanel.FindName("oAccount")).Text = sAccount;
+                string sLink = oPanel.ReadUri();
+                Check(sLink.Length <= ((TextBox)oPanel.FindName("oImportInput")).MaxLength,
+                    "The import field accepts the editor's complete saved TOTP link");
+                oPanel.Clear();
+                oPanel.LoadUri(sLink);
+                using TotpSecret oReopened = TotpSecret.Parse(oPanel.ReadUri());
+                Check(oReopened.Issuer == sIssuer && oReopened.Account == sAccount &&
+                    oReopened.GetCode(DateTimeOffset.FromUnixTimeSeconds(59)) == "287082",
+                    "Reopening a saved TOTP preserves its label and reference code");
+            }
             oPanel.Clear();
             Configure(("TotpPeriodSeconds", "90"));
             oPanel.SetActive(true);
@@ -261,6 +279,27 @@ internal static partial class RegressionTests
             oSettings["ShowItemFileUpload"] = false;
             ItemEditor oNoUpload = Keep(CreateEditor());
             Check(oNoUpload.ThisItem.ItemType == "text", "Disabled file uploads override the file-item default");
+            ComboBox oTypes = (ComboBox)oNoUpload.FindName("oItemTypeSelector");
+            Check(((ComboBoxItem)oTypes.Items[3]).Visibility == Visibility.Collapsed &&
+                ((RibbonButton)oNoUpload.FindName("oUploadAFile")).Visibility == Visibility.Collapsed,
+                "Disabling file uploads hides both ways to attach a new file");
+            oTypes.SelectedIndex = 3;
+            Check(oNoUpload.ThisItem.ItemType == "text" && oTypes.SelectedIndex == 0 && !oNoUpload.bBusy,
+                "A disabled attachment action keeps the draft without opening a file picker");
+            byte[] oAttachment = Utilities.Compress(Encoding.UTF8.GetBytes("Saved attachment"));
+            DatabaseOperations.SaveItem(new Item { ItemType = ".bin", Label = "Downloadable file" },
+                oAttachment, [], PrincipalProtection.LocalUserDescriptor);
+            using (var oDb = new CryptureEntities())
+            {
+                ItemEditor oDownload = Keep(CreateEditor(oDb.Items.Single(i => i.Label == "Downloadable file")));
+                oDownload.Dispatcher.InvokeAsync(() => oDownload.oLoadItemButton_Click(null, null));
+                PumpUntil(() => oDownload.BinaryItemData != null);
+                Check(oDownload.BinaryItemData.SequenceEqual(oAttachment) &&
+                    ((Button)oDownload.FindName("oDownloadPanel")).Visibility == Visibility.Visible &&
+                    ((ComboBoxItem)oDownload.FindName("oFileAttachmentType")).Visibility == Visibility.Visible &&
+                    !((ComboBox)oDownload.FindName("oItemTypeSelector")).IsEnabled,
+                    "Saved attachments retain their file type and download action when uploads are disabled");
+            }
             oSettings["ShowItemFileUpload"] = bFileUpload;
             Configure(("NewItemType", "RichText"));
             ItemEditor oRichDefault = Keep(CreateEditor());
@@ -377,6 +416,20 @@ internal static partial class RegressionTests
                 "The browser ribbon initializes from configuration");
             Check(((RibbonButton)oBrowser.FindName("oSqlServerButton")).Visibility == Visibility.Collapsed,
                 "Configuration hides the SQL Server ribbon option");
+            byte[] oBrowserDefaults = File.ReadAllBytes(sPath);
+            Configure(("SqlServerTrustServerCertificate", "mistyped"));
+            string sSqlError = null;
+            var oDismissError = oBrowser.Dispatcher.InvokeAsync(() =>
+            {
+                Popup oError = Application.Current.Windows.OfType<Popup>().Single();
+                sSqlError = ((TextBox)oError.FindName("oMessage")).Text;
+                oError.Close();
+            }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            ((RibbonButton)oBrowser.FindName("oSqlServerButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            oDismissError.Task.GetAwaiter().GetResult();
+            Check(oBrowser.IsVisible && sSqlError.Contains("SqlServerTrustServerCertificate"),
+                "Invalid SQL dialog configuration reports the setting and keeps the browser open");
+            File.WriteAllBytes(sPath, oBrowserDefaults);
             SqlServerVaultDialog oSqlDialog = Keep(new SqlServerVaultDialog());
             CheckBox oCreateSql = (CheckBox)oSqlDialog.FindName("oCreateDatabase");
             Border oEscrowPanel = (Border)oSqlDialog.FindName("oEscrowPanel");
